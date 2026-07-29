@@ -60,6 +60,43 @@ _MAX_LENGTH_RECOVERIES = 3
 _MAX_INJECTIONS_PER_TURN = 3
 _MAX_INJECTION_CYCLES = 5
 
+# ponytail: marker strings whose presence suggests the tool result is a
+# transient / retryable failure rather than a definitive validation
+# rejection. Goal-conflict, policy-violation, and other "you can't do that"
+# messages are intentionally absent — re-prompting after those would push
+# the model to retry something it shouldn't. Upgrade to a structured
+# tool-exit-code field when the tool contract grows one.
+_RETRYABLE_TOOL_ERROR_MARKERS = (
+    "concurrency limit reached",
+    "spawn subagent",
+    "timeout",
+    "timed out",
+    "connection refused",
+    "connection reset",
+    "temporarily unavailable",
+    "rate limit",
+    "429",
+    "503",
+    "502",
+    "deadline exceeded",
+    "exit code 124",
+    "exit code 137",
+    "killed",
+    "no available slot",
+)
+
+
+def _looks_like_retryable_tool_error(content: Any) -> bool:
+    """Cheap substring check: does this tool result look like a transient
+    failure worth re-prompting over? Avoids the false positive where a
+    tool returned a legitimate validation rejection (e.g. goal already
+    completed) and the model correctly stopped retrying.
+    """
+    if not isinstance(content, str):
+        return False
+    head = content.strip().lower()[:500]
+    return any(marker in head for marker in _RETRYABLE_TOOL_ERROR_MARKERS)
+
 @dataclass(slots=True)
 class AgentRunSpec:
     """Configuration for a single agent execution."""
@@ -381,6 +418,9 @@ class AgentRunner:
         workspace_violation_counts: dict[str, int] = {}
         empty_content_retries = 0
         length_recovery_count = 0
+        # ponytail: bound the post-tool-error nudge to one per turn so a wedged
+        # model can't burn the whole iteration budget in a nudge loop.
+        tool_error_nudge_done = False
         had_injections = False
         injection_cycles = 0
         compacted_tool_call_ids: set[str] = set()
@@ -535,6 +575,43 @@ class AgentRunner:
                     response.finish_reason,
                     spec.session_key or "default",
                 )
+
+            # ponytail: nudge-after-tool-error — if the previous turn was a
+            # tool-error result and this turn produced only text (no tool_call),
+            # the model is "narrating intent" instead of re-emitting the call.
+            # Observed with gemma4:31b on ollama.com after spawn() concurrency
+            # errors. One re-prompt per session, bounded so a wedged model
+            # can't loop us out of `max_iterations`.
+            if (
+                not response.has_tool_calls
+                and response.finish_reason != "error"
+                and not tool_error_nudge_done
+                and messages
+                and messages[-1].get("role") == "tool"
+                and _looks_like_retryable_tool_error(messages[-1].get("content"))
+                and spec.tools.get_definitions()
+            ):
+                logger.warning(
+                    "Tool result was an error and model responded with text "
+                    "instead of a tool_call for {}; injecting re-prompt nudge",
+                    spec.session_key or "default",
+                )
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Tu última tool devolvió un error. NO narres en texto "
+                        "lo que ibas a hacer: el texto no ejecuta nada. Re-emite "
+                        "el tool_call inmediatamente con argumentos ajustados, "
+                        "o llama otra tool equivalente. Si tras 2 reintentos "
+                        "la tool sigue fallando, ahí sí explica al operador y "
+                        "pide guía."
+                    ),
+                })
+                tool_error_nudge_done = True
+                if hook.wants_streaming():
+                    await hook.on_stream_end(context, resuming=False)
+                await hook.after_iteration(context)
+                continue
 
             clean = hook.finalize_content(context, response.content)
             if response.finish_reason != "error" and is_blank_text(clean):
