@@ -77,6 +77,21 @@ _KIMI_SERVER_MANAGED_TEMPERATURE_MODELS: frozenset[str] = frozenset({
     "kimi-k2.6",
 })
 _TEXT_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
+# Gemma 4 native wire format: <|tool_call>call:NAME{key:value,...}<tool_call|>
+# and thinking is wrapped in <|channel>...<channel|> with an optional
+# channel-name prefix such as "thought\n".
+_GEMMA4_TOOL_CALL_OPEN_TAG = "<|tool_call>"
+_GEMMA4_TOOL_CALL_CLOSE_TAG = "<tool_call|>"
+_GEMMA4_CHANNEL_OPEN_TAG = "<|channel>"
+_GEMMA4_CHANNEL_CLOSE_TAG = "<channel|>"
+_GEMMA4_TOOL_CALL_RE = re.compile(
+    rf"{re.escape(_GEMMA4_TOOL_CALL_OPEN_TAG)}\s*(.*?)\s*{re.escape(_GEMMA4_TOOL_CALL_CLOSE_TAG)}",
+    re.DOTALL,
+)
+_GEMMA4_CHANNEL_RE = re.compile(
+    rf"{re.escape(_GEMMA4_CHANNEL_OPEN_TAG)}\s*(?:thought\s*\n)?(.*?)\s*{re.escape(_GEMMA4_CHANNEL_CLOSE_TAG)}",
+    re.DOTALL,
+)
 # Thinking-capable MiMo models per Xiaomi docs (see
 # tests/providers/test_xiaomi_mimo_thinking.py). mimo-v2-flash is omitted
 # because it does not support thinking.
@@ -193,9 +208,166 @@ def _strip_json_fence(text: str) -> str:
     return "\n".join(lines[1:-1]).strip()
 
 
+def _gemma4_args_to_json(s: str) -> str:
+    """Convert Gemma 4's native `call:NAME{key:value,...}` arg form to JSON.
+
+    Gemma 4 emits unquoted keys and the custom escape token `<|"|>` for quotes.
+    We coerce keys to quoted strings, escape control chars, and keep everything
+    else as-is so the result is valid JSON.
+    """
+    s = s.replace('<|"|>', '"')
+    # Gemma 4 occasionally omits the closing quote before `}`. Normalize `value"}`.
+    s = re.sub(r'"([^",{}\n]+)}', r'"\1"}', s)
+
+    hex_digits = "0123456789abcdef"
+    buf: list[str] = []
+    in_string = False
+    i = 0
+    n = len(s)
+    while i < n:
+        ch = s[i]
+
+        if ch == '"':
+            in_string = not in_string
+            buf.append('"')
+            i += 1
+            continue
+
+        if in_string:
+            if ch == '\\':
+                buf.append("\\\\")
+            elif ch == '\n':
+                buf.append("\\n")
+            elif ch == '\r':
+                buf.append("\\r")
+            elif ch == '\t':
+                buf.append("\\t")
+            elif ch == '\b':
+                buf.append("\\b")
+            elif ch == '\f':
+                buf.append("\\f")
+            elif ord(ch) < 0x20:
+                buf.append("\\u00")
+                buf.append(hex_digits[ord(ch) >> 4])
+                buf.append(hex_digits[ord(ch) & 0x0F])
+            else:
+                buf.append(ch)
+            i += 1
+            continue
+
+        # Outside strings, unquoted identifiers that precede ':' become keys.
+        if ch.isidentifier() or ch == '_':
+            j = i + 1
+            while j < n and (s[j].isalnum() or s[j] == '_'):
+                j += 1
+            word = s[i:j]
+            if j < n and s[j] == ':' and word not in {"true", "false", "null"}:
+                buf.append('"')
+                buf.append(word)
+                buf.append('"')
+            else:
+                buf.append(word)
+            i = j
+            continue
+
+        # Outside strings, values that are not numbers or literals need quoting.
+        # A bare '.' used as a value (e.g. {path:.}) is the common Gemma 4 case.
+        if ch == '.' and (i + 1 == n or not s[i + 1].isdigit()):
+            buf.append('"')
+            buf.append('.')
+            buf.append('"')
+            i += 1
+            continue
+
+        buf.append(ch)
+        i += 1
+
+    return "".join(buf)
+
+
+def _parse_gemma4_tool_call(text: str) -> ToolCallRequest | None:
+    """Parse a Gemma 4 native tool call into a ToolCallRequest."""
+    text = text.strip()
+    if not text.startswith("call:"):
+        return None
+    text = text[len("call:"):]
+    brace = text.find("{")
+    if brace == -1:
+        return None
+    name = text[:brace].strip()
+    args_str = text[brace:]
+    json_str = _gemma4_args_to_json(args_str)
+    try:
+        arguments = json.loads(json_str)
+    except Exception:
+        logger.debug("Failed to parse Gemma 4 tool call arguments: {!r}", args_str)
+        return None
+    if not isinstance(arguments, dict):
+        arguments = {}
+    return ToolCallRequest(
+        id=_short_tool_id(),
+        name=name,
+        arguments=parse_tool_arguments(arguments),
+    )
+
+
+def _extract_gemma4_reasoning(text: str | None) -> tuple[str | None, str | None]:
+    """Extract Gemma 4 native thinking channel blocks from raw model output."""
+    if not text or _GEMMA4_CHANNEL_OPEN_TAG not in text:
+        return text, None
+
+    reasoning_parts: list[str] = []
+    visible_parts: list[str] = []
+    last = 0
+    for match in _GEMMA4_CHANNEL_RE.finditer(text):
+        visible_parts.append(text[last:match.start()])
+        reasoning_parts.append(match.group(1).strip())
+        last = match.end()
+    visible_parts.append(text[last:])
+
+    visible_content = "".join(visible_parts).strip() or None
+    reasoning_content = "\n\n".join(r for r in reasoning_parts if r) or None
+    return visible_content, reasoning_content
+
+
+def _extract_gemma4_tool_calls(content: str | None) -> tuple[str | None, list[ToolCallRequest]]:
+    """Extract Gemma 4 native tool call blocks from raw model output."""
+    if not content or _GEMMA4_TOOL_CALL_OPEN_TAG not in content:
+        return content, []
+
+    tool_calls: list[ToolCallRequest] = []
+    spans: list[tuple[int, int]] = []
+    for match in _GEMMA4_TOOL_CALL_RE.finditer(content):
+        tc = _parse_gemma4_tool_call(match.group(1))
+        if tc is None:
+            continue
+        tool_calls.append(tc)
+        spans.append(match.span())
+
+    if not tool_calls:
+        return content, []
+
+    visible_parts: list[str] = []
+    last = 0
+    for start, end in spans:
+        visible_parts.append(content[last:start])
+        last = end
+    visible_parts.append(content[last:])
+    visible_content = "".join(visible_parts).strip() or None
+    return visible_content, tool_calls
+
+
 def _extract_text_tool_calls(content: str | None) -> tuple[str | None, list[ToolCallRequest]]:
     """Normalize common text-format tool call blocks into structured calls."""
-    if not content or "<tool_call>" not in content:
+    if not content:
+        return content, []
+
+    # Gemma 4 uses a different tag shape; try it first/together with the
+    # generic <tool_call> fallback so native call:NAME{...} blocks are recovered.
+    if _GEMMA4_TOOL_CALL_OPEN_TAG in content:
+        return _extract_gemma4_tool_calls(content)
+
+    if "<tool_call>" not in content:
         return content, []
 
     tool_calls: list[ToolCallRequest] = []
@@ -1261,6 +1433,12 @@ class OpenAICompatProvider(LLMProvider):
             if not parsed_tool_calls:
                 content, parsed_tool_calls = _extract_text_tool_calls(content)
 
+            # Gemma 4 may emit thinking inside <|channel>...</channel|> in content.
+            if content and _GEMMA4_CHANNEL_OPEN_TAG in content:
+                content, gemma4_reasoning = _extract_gemma4_reasoning(content)
+                if gemma4_reasoning and not reasoning_content:
+                    reasoning_content = gemma4_reasoning
+
             return LLMResponse(
                 content=content,
                 tool_calls=parsed_tool_calls,
@@ -1311,6 +1489,12 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_content = getattr(msg, "reasoning_content", None)
         if reasoning_content is None and getattr(msg, "reasoning", None):
             reasoning_content = msg.reasoning
+
+        # Gemma 4 may emit thinking inside <|channel>...<channel|> in content.
+        if content and _GEMMA4_CHANNEL_OPEN_TAG in content:
+            content, gemma4_reasoning = _extract_gemma4_reasoning(content)
+            if gemma4_reasoning and not reasoning_content:
+                reasoning_content = gemma4_reasoning
 
         return LLMResponse(
             content=content,
@@ -1458,6 +1642,12 @@ class OpenAICompatProvider(LLMProvider):
         ]
         if not tool_calls:
             content, tool_calls = _extract_text_tool_calls(content)
+
+        # Gemma 4 may interleave thinking channels inside the content stream.
+        if content and _GEMMA4_CHANNEL_OPEN_TAG in content:
+            content, gemma4_reasoning = _extract_gemma4_reasoning(content)
+            if gemma4_reasoning:
+                reasoning_parts.append(gemma4_reasoning)
 
         return LLMResponse(
             content=content,

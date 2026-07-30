@@ -117,6 +117,86 @@ def test_custom_provider_parse_chunks_normalizes_split_text_tool_call() -> None:
     assert result.tool_calls[0].arguments == {"path": "."}
 
 
+def test_custom_provider_parse_normalizes_gemma4_tool_call() -> None:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    result = provider._parse({
+        "choices": [{
+            "message": {
+                "content": (
+                    "I'll run the check.\n"
+                    '<|tool_call>call:web_search{query:<|"|>claude status<|"|>,top_n:3}<tool_call|>'
+                ),
+            },
+            "finish_reason": "stop",
+        }],
+    })
+
+    assert result.content == "I'll run the check."
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0].name == "web_search"
+    assert result.tool_calls[0].arguments == {"query": "claude status", "top_n": 3}
+
+
+def test_custom_provider_parse_normalizes_gemma4_tool_call_with_quoted_args() -> None:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    result = provider._parse({
+        "choices": [{
+            "message": {
+                "content": (
+                    "<|tool_call>call:read_file{path:<|\"|>/tmp/foo.txt<|\"|>}<tool_call|>"
+                ),
+            },
+            "finish_reason": "stop",
+        }],
+    })
+
+    assert result.content is None
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0].name == "read_file"
+    assert result.tool_calls[0].arguments == {"path": "/tmp/foo.txt"}
+
+
+def test_custom_provider_parse_extracts_gemma4_channel_reasoning() -> None:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    result = provider._parse({
+        "choices": [{
+            "message": {
+                "content": (
+                    "Answer is 42."
+                    "<|channel>thought\nI need to double-check the docs."
+                    "<channel|>Let me verify first."
+                ),
+            },
+            "finish_reason": "stop",
+        }],
+    })
+
+    assert result.content == "Answer is 42.Let me verify first."
+    assert result.reasoning_content == "I need to double-check the docs."
+
+
+def test_custom_provider_parse_chunks_normalizes_gemma4_tool_call() -> None:
+    chunks = [
+        {"choices": [{"delta": {"content": "Sure. "}}]},
+        {"choices": [{"delta": {"content": '<|tool_call>call:list_dir{path:<|"|>'}}]},
+        {"choices": [{"delta": {"content": '.}<tool_call|>'}}]},
+        {"choices": [{"finish_reason": "stop", "delta": {}}]},
+    ]
+
+    result = OpenAICompatProvider._parse_chunks(chunks)
+
+    assert result.content == "Sure."
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0].name == "list_dir"
+    assert result.tool_calls[0].arguments == {"path": "."}
+
+
 def test_custom_provider_parse_chunks_deduplicates_parallel_tool_call_ids() -> None:
     chunks = [{
         "choices": [{
