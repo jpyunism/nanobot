@@ -448,7 +448,8 @@ class WhatsAppChannel(BaseChannel):
             raise RuntimeError("WhatsApp channel is not connected")
 
         to = self._resolve_send_target(msg.chat_id)
-        await self._stop_typing(to)
+        typing_jid = self._build_typing_jid(msg.chat_id)
+        await self._stop_typing(typing_jid)
         content = msg.content
         mention = (msg.metadata or {}).get("whatsapp_mention")
         if mention and self._is_group_chat(msg.chat_id):
@@ -497,17 +498,26 @@ class WhatsAppChannel(BaseChannel):
 
         async def _loop() -> None:
             try:
+                # Send the first presence immediately so the indicator appears
+                # without waiting for the first sleep interval.
+                try:
+                    await client.send_chat_presence(
+                        jid, ChatPresence.CHAT_PRESENCE_COMPOSING, ChatPresenceMedia.CHAT_PRESENCE_MEDIA_TEXT
+                    )
+                    self.logger.debug("typing started for {}", key)
+                except Exception as exc:  # noqa: BLE001 - presence is best-effort
+                    self.logger.debug("typing presence failed for {}: {}", key, exc)
                 while True:
+                    try:
+                        await asyncio.sleep(5)
+                    except asyncio.CancelledError:
+                        return
                     try:
                         await client.send_chat_presence(
                             jid, ChatPresence.CHAT_PRESENCE_COMPOSING, ChatPresenceMedia.CHAT_PRESENCE_MEDIA_TEXT
                         )
                     except Exception as exc:  # noqa: BLE001 - presence is best-effort
                         self.logger.debug("typing presence failed for {}: {}", key, exc)
-                    try:
-                        await asyncio.sleep(5)
-                    except asyncio.CancelledError:
-                        return
             finally:
                 self._typing_tasks.pop(key, None)
 
@@ -694,6 +704,16 @@ class WhatsAppChannel(BaseChannel):
         except Exception as exc:  # noqa: BLE001 - read receipt is best-effort
             self.logger.debug("Failed to send WhatsApp read receipt: {}", exc)
 
+    def _build_typing_jid(self, chat_jid: str) -> Any:
+        """Return a JID suitable for typing presence on this chat.
+
+        For LID-based DMs we must send presence to the LID JID (the same
+        `chat_jid` we received). Sending typing to the resolved phone-number
+        JID does not render on the sender's screen. Sending messages still uses
+        `_resolve_send_target` for delivery.
+        """
+        return self._build_jid(chat_jid)
+
     async def _handle_neonize_message(self, client: Any, event: Any) -> None:
         info = _safe_attr(event, "Info")
         message = _safe_attr(event, "Message")
@@ -762,7 +782,10 @@ class WhatsAppChannel(BaseChannel):
         group_allow_id = self._group_allow_id(chat_jid) if is_group else None
         authorization_id = sender_id if sender_allowed else group_allow_id
 
-        target_jid = self._build_jid(chat_jid)
+        # The typing indicator must be sent to the *chat* JID we received
+        # (this is what the sender's WhatsApp client watches). For delivery we
+        # still use `_resolve_send_target` so LID-based DMs reach a phone JID.
+        typing_jid = self._build_typing_jid(chat_jid)
         session_key = self._whatsapp_session_key(chat_jid, sender_id, is_group)
 
         async def _process(mention_tag: str | None) -> None:
@@ -775,7 +798,7 @@ class WhatsAppChannel(BaseChannel):
                     lid_id or "",
                     chat_jid,
                 )
-                await self._start_typing(target_jid)
+                await self._start_typing(typing_jid)
                 try:
                     await self._handle_message(
                         sender_id=sender_id,
@@ -787,7 +810,7 @@ class WhatsAppChannel(BaseChannel):
                         session_key=session_key,
                     )
                 finally:
-                    await self._stop_typing(target_jid)
+                    await self._stop_typing(typing_jid)
                 return
 
             text = _message_text(message)
@@ -809,7 +832,7 @@ class WhatsAppChannel(BaseChannel):
             if not text and not media_paths:
                 return
 
-            await self._start_typing(target_jid)
+            await self._start_typing(typing_jid)
             try:
                 await self._handle_message(
                     sender_id=sender_id,
@@ -822,7 +845,7 @@ class WhatsAppChannel(BaseChannel):
                     session_key=session_key,
                 )
             finally:
-                await self._stop_typing(target_jid)
+                await self._stop_typing(typing_jid)
 
         if is_group:
             await self._enqueue_group_turn(chat_jid, _process, mention)
