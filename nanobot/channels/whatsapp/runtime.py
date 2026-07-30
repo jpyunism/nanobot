@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import mimetypes
+import os
 import re
 import secrets
 import time
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
@@ -51,6 +53,8 @@ class _MediaInfo(NamedTuple):
 _NEONIZE_API: _NeonizeAPI | None = None
 _JID_RE = re.compile(r"^(?P<user>[^@]+)@(?P<server>[^@]+)$")
 _LEGACY_BRIDGE_CONFIG_FIELDS = ("bridgeUrl", "bridgeToken", "bridge_url", "bridge_token")
+# Names that look like generated WhatsApp IDs rather than human push names.
+_NAME_LIKE_ID_RE = re.compile(r"^[0-9a-f]{16,}$", re.IGNORECASE)
 
 
 def _default_database_path() -> Path:
@@ -75,6 +79,8 @@ def _load_neonize() -> _NeonizeAPI:
             "WhatsApp dependencies not installed. Run: nanobot plugins enable whatsapp"
         ) from exc
 
+    _ensure_ffmpeg_in_path()
+
     _NEONIZE_API = _NeonizeAPI(
         NewAClient=NewAClient,
         ConnectedEv=ConnectedEv,
@@ -84,6 +90,34 @@ def _load_neonize() -> _NeonizeAPI:
         build_jid=build_jid,
     )
     return _NEONIZE_API
+
+
+def _ensure_ffmpeg_in_path() -> None:
+    """Make sure ``ffmpeg``/``ffprobe`` are resolvable on PATH.
+
+    neonize shells out to ``ffprobe`` when sending audio (to read the
+    duration). Without these binaries every audio send fails with
+    ``ffprobe: not found``. We prefer the host install when present; otherwise
+    we fall back to the bundled binaries shipped by ``static-ffmpeg`` (downloaded
+    once on first use, then cached in the venv).
+    """
+    import shutil
+
+    path = os.environ.get("PATH", "")
+    for binary in ("ffprobe", "ffmpeg"):
+        if shutil.which(binary):
+            continue
+        try:
+            from static_ffmpeg import run as static_ffmpeg_run  # type: ignore[import-not-found]
+        except ImportError:
+            return
+        try:
+            ffmpeg_path, ffprobe_path = static_ffmpeg_run.get_or_fetch_platform_executables_else_raise()
+        except Exception:  # noqa: BLE001 - offline / locked / partial download, fall through
+            return
+        bin_dir = str(Path(ffmpeg_path).parent)
+        if bin_dir not in path.split(os.pathsep):
+            os.environ["PATH"] = bin_dir + os.pathsep + path
 
 
 def _has_field(message: Any, name: str) -> bool:
@@ -134,6 +168,20 @@ def _jid_to_string(jid: Any) -> str:
     if user and server:
         return f"{user}@{server}"
     return server or user
+
+
+def _typing_task_key(jid: Any) -> str:
+    """Stable key for the per-chat typing task.
+
+    Falls back to ``(user, server)`` tuples and finally to ``id(jid)`` so the
+    helper works for both real neonize JID protos and test doubles.
+    """
+    as_string = _jid_to_string(jid)
+    if as_string:
+        return as_string
+    if isinstance(jid, tuple) and len(jid) >= 2:
+        return f"{jid[0]}@{jid[1]}"
+    return f"jid:{id(jid)}"
 
 
 def _normalize_jid(raw: Any) -> str:
@@ -293,6 +341,12 @@ class WhatsAppChannel(BaseChannel):
         self._lid_to_phone = self._load_lid_mappings()
         self._self_jids: set[str] = set()
         self._started_at = 0.0
+        self._typing_tasks: dict[str, asyncio.Task[None]] = {}
+        # Per-group turn queue: one worker per group chat processes messages
+        # sequentially so multiple users do not trigger a flood of concurrent
+        # responses.
+        self._group_queues: dict[str, asyncio.Queue[tuple[Any, str | None]]] = {}
+        self._group_queue_tasks: dict[str, asyncio.Task[None]] = {}
 
     def _database_path(self) -> Path:
         configured = self.config.database_path.strip()
@@ -393,12 +447,93 @@ class WhatsAppChannel(BaseChannel):
         if client is None or not self._connected:
             raise RuntimeError("WhatsApp channel is not connected")
 
-        to = self._build_jid(msg.chat_id)
-        if msg.content:
-            await client.send_message(to, msg.content)
+        to = self._resolve_send_target(msg.chat_id)
+        await self._stop_typing(to)
+        content = msg.content
+        mention = (msg.metadata or {}).get("whatsapp_mention")
+        if mention and self._is_group_chat(msg.chat_id):
+            content = f"{mention} {content}"
+        if content:
+            await client.send_message(to, content)
 
+        ptt_override = (msg.metadata or {}).get("ptt")
         for media_path in msg.media or []:
-            await self._send_media(client, to, media_path)
+            ptt = self._resolve_ptt(media_path, ptt_override)
+            await self._send_media(client, to, media_path, ptt=ptt)
+
+    @staticmethod
+    def _resolve_ptt(media_path: str, ptt_override: Any) -> bool:
+        """Decide whether a media attachment should be sent as a WhatsApp voice note.
+
+        ``ptt_override`` wins when explicitly set to a bool. Otherwise, audio
+        attachments that WhatsApp treats as voice notes (audio/ogg Opus or
+        audio/mpeg from tts) are auto-marked so callers don't need to know
+        about the WhatsApp-specific flag.
+        """
+        if isinstance(ptt_override, bool):
+            return ptt_override
+        mime, _ = mimetypes.guess_type(str(Path(media_path).expanduser()))
+        # Only native OGG Opus files are safe to auto-mark as PTT. MP3 must be
+        # sent as regular audio or WhatsApp mobile clients often refuse it.
+        return (mime or "").lower() in {"audio/ogg", "audio/opus"}
+
+    async def _start_typing(self, jid: Any) -> None:
+        """Start periodic 'composing' presence updates for a chat.
+
+        WhatsApp requires the bot to refresh the presence every ~5s; otherwise
+        the client shows nothing. The task is cancelled automatically when
+        :meth:`send` (or :meth:`_stop_typing`) runs.
+        """
+        key = _typing_task_key(jid)
+        await self._stop_typing(jid)
+        client = self._client
+        if client is None or not self._connected:
+            return
+
+        try:
+            from neonize.utils.enum import ChatPresence, ChatPresenceMedia
+        except ImportError:
+            return
+
+        async def _loop() -> None:
+            try:
+                while True:
+                    try:
+                        await client.send_chat_presence(
+                            jid, ChatPresence.CHAT_PRESENCE_COMPOSING, ChatPresenceMedia.CHAT_PRESENCE_MEDIA_TEXT
+                        )
+                    except Exception as exc:  # noqa: BLE001 - presence is best-effort
+                        self.logger.debug("typing presence failed for {}: {}", key, exc)
+                    try:
+                        await asyncio.sleep(5)
+                    except asyncio.CancelledError:
+                        return
+            finally:
+                self._typing_tasks.pop(key, None)
+
+        self._typing_tasks[key] = asyncio.create_task(_loop())
+
+    async def _stop_typing(self, jid: Any) -> None:
+        """Stop typing for a chat and notify the client we paused."""
+        key = _typing_task_key(jid)
+        task = self._typing_tasks.pop(key, None)
+        if task and not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        client = self._client
+        if client is None or not self._connected:
+            return
+        try:
+            from neonize.utils.enum import ChatPresence, ChatPresenceMedia
+        except ImportError:
+            return
+        try:
+            await client.send_chat_presence(
+                jid, ChatPresence.CHAT_PRESENCE_PAUSED, ChatPresenceMedia.CHAT_PRESENCE_MEDIA_TEXT
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.logger.debug("typing pause failed for {}: {}", key, exc)
 
     def _build_jid(self, raw: str) -> Any:
         api = _load_neonize()
@@ -411,16 +546,52 @@ class WhatsAppChannel(BaseChannel):
         server = match.group("server")
         return api.build_jid(user, server)
 
-    async def _send_media(self, client: Any, to: Any, media_path: str) -> None:
+    def _resolve_send_target(self, chat_id: str) -> Any:
+        """Pick a routable JID for sending.
+
+        WhatsApp now exposes inbound messages with a ``@lid`` chat_jid even when
+        the user is a regular DM. Sending to that LID JID is silently dropped
+        by the server for some sessions. We translate it to the verified phone
+        number when we have a mapping (filled by ``_classify_sender_ids`` on
+        inbound), and fall back to the LID otherwise.
+        """
+        normalized = _normalize_jid(chat_id)
+        if "@lid" in normalized:
+            bare = normalized.split("@", 1)[0]
+            phone = self._lid_to_phone.get(bare)
+            if phone:
+                return self._build_jid(f"{phone}@s.whatsapp.net")
+        return self._build_jid(chat_id)
+
+    def _whatsapp_session_key(self, chat_id: str, sender_id: str, is_group: bool) -> str:
+        """Return an isolated session key per sender inside group chats.
+
+        In DMs the default ``whatsapp:<chat_id>`` is fine. In groups, every
+        sender gets ``whatsapp:<chat_id>:<sender_id>`` so that parallel
+        conversations about unrelated topics do not contaminate each other.
+        """
+        base = f"{self.name}:{chat_id}"
+        if is_group and sender_id:
+            return f"{base}:{sender_id}"
+        return base
+
+    async def _send_media(self, client: Any, to: Any, media_path: str, *, ptt: bool = False) -> None:
         path = str(Path(media_path).expanduser())
         mime, _ = mimetypes.guess_type(path)
         mimetype = mime or "application/octet-stream"
+        self.logger.info(
+            "whatsapp _send_media to={} path={} mimetype={} ptt={}",
+            _jid_to_string(to),
+            path,
+            mimetype,
+            ptt,
+        )
         if mimetype.startswith("image/"):
             await client.send_image(to, path)
         elif mimetype.startswith("video/"):
             await client.send_video(to, path)
         elif mimetype.startswith("audio/"):
-            await client.send_audio(to, path)
+            await client.send_audio(to, path, ptt=ptt)
         else:
             await client.send_document(
                 to,
@@ -572,6 +743,9 @@ class WhatsAppChannel(BaseChannel):
         sender_id = phone_id or self._lid_to_phone.get(lid_id, "") or lid_id
         if not sender_id:
             raise ValueError("WhatsApp message has no resolvable sender ID")
+
+        push_name = str(_safe_attr(info, "Pushname", "") or "").strip()
+        mention = self._resolve_mention(sender_id, push_name) if is_group else None
         metadata = {
             "message_id": message_id or None,
             "timestamp": int(timestamp) if timestamp else None,
@@ -582,57 +756,78 @@ class WhatsAppChannel(BaseChannel):
             "lid": lid_id or None,
             "phone": phone_id or None,
             "is_reply_to_bot": self._is_reply_to_bot(message),
+            "whatsapp_mention": mention,
         }
         sender_allowed = self.is_allowed(sender_id)
         group_allow_id = self._group_allow_id(chat_jid) if is_group else None
         authorization_id = sender_id if sender_allowed else group_allow_id
-        if authorization_id is None:
-            self.logger.info(
-                "Passing unauthorized WhatsApp sender {} to pairing flow "
-                "(phone={}, lid={}, chat={})",
-                sender_id,
-                phone_id or "",
-                lid_id or "",
-                chat_jid,
-            )
-            await self._handle_message(
-                sender_id=sender_id,
-                chat_id=chat_jid,
-                content=_message_text(message),
-                media=[],
-                metadata=metadata,
-                is_dm=not is_group,
-            )
-            return
 
-        text = _message_text(message)
-        media_paths: list[str] = []
-        media = _media_message(message)
-        if media is not None:
-            path = await self._download_media(client, event, media)
-            if media.kind == "audio" and media.is_voice:
-                transcription = await self.transcribe_audio(path)
-                if transcription:
-                    text = transcription
+        target_jid = self._build_jid(chat_jid)
+        session_key = self._whatsapp_session_key(chat_jid, sender_id, is_group)
+
+        async def _process(mention_tag: str | None) -> None:
+            if authorization_id is None:
+                self.logger.info(
+                    "Passing unauthorized WhatsApp sender {} to pairing flow "
+                    "(phone={}, lid={}, chat={})",
+                    sender_id,
+                    phone_id or "",
+                    lid_id or "",
+                    chat_jid,
+                )
+                await self._start_typing(target_jid)
+                try:
+                    await self._handle_message(
+                        sender_id=sender_id,
+                        chat_id=chat_jid,
+                        content=_message_text(message),
+                        media=[],
+                        metadata={**metadata, "whatsapp_mention": mention_tag},
+                        is_dm=not is_group,
+                        session_key=session_key,
+                    )
+                finally:
+                    await self._stop_typing(target_jid)
+                return
+
+            text = _message_text(message)
+            media_paths: list[str] = []
+            media = _media_message(message)
+            if media is not None:
+                path = await self._download_media(client, event, media)
+                if media.kind == "audio" and media.is_voice:
+                    transcription = await self.transcribe_audio(path)
+                    if transcription:
+                        text = transcription
+                    else:
+                        media_paths.append(path)
+                        text = self._append_media_tag(text, "audio", path)
                 else:
                     media_paths.append(path)
-                    text = self._append_media_tag(text, "audio", path)
-            else:
-                media_paths.append(path)
-                text = self._append_media_tag(text, media.kind, path)
+                    text = self._append_media_tag(text, media.kind, path)
 
-        if not text and not media_paths:
-            return
+            if not text and not media_paths:
+                return
 
-        await self._handle_message(
-            sender_id=sender_id,
-            chat_id=chat_jid,
-            content=text,
-            media=media_paths,
-            metadata=metadata,
-            is_dm=not is_group,
-            authorization_id=authorization_id,
-        )
+            await self._start_typing(target_jid)
+            try:
+                await self._handle_message(
+                    sender_id=sender_id,
+                    chat_id=chat_jid,
+                    content=text,
+                    media=media_paths,
+                    metadata={**metadata, "whatsapp_mention": mention_tag},
+                    is_dm=not is_group,
+                    authorization_id=authorization_id,
+                    session_key=session_key,
+                )
+            finally:
+                await self._stop_typing(target_jid)
+
+        if is_group:
+            await self._enqueue_group_turn(chat_jid, _process, mention)
+        else:
+            await _process(mention)
 
     def _group_allow_id(self, chat_jid: str) -> str | None:
         if self.is_allowed(chat_jid):
@@ -641,6 +836,86 @@ class WhatsAppChannel(BaseChannel):
         if bare_chat_id and bare_chat_id != chat_jid and self.is_allowed(bare_chat_id):
             return bare_chat_id
         return None
+
+    def _resolve_mention(self, sender_id: str, push_name: str) -> str | None:
+        """Return a safe WhatsApp mention tag for a group reply.
+
+        Prefer the sender's push name when it looks like a real display name.
+        Fall back to an E.164-style phone number derived from a phone JID.
+        Otherwise omit the mention entirely.
+        """
+        if push_name and not _NAME_LIKE_ID_RE.match(push_name) and self._looks_like_name(push_name):
+            return f"@{push_name}"
+
+        phone_candidate = _bare_jid(sender_id)
+        if phone_candidate and phone_candidate.isdigit() and 7 <= len(phone_candidate) <= 15:
+            return f"@+{phone_candidate}"
+        return None
+
+    @staticmethod
+    def _looks_like_name(value: str) -> bool:
+        """A display name should contain at least one letter and not be only digits/hex IDs."""
+        value = value.strip()
+        if not value or len(value) > 50:
+            return False
+        if value.isdigit():
+            return False
+        if not any(c.isalpha() for c in value):
+            return False
+        # Reject single repeated punctuation or strings like "..." or "++++".
+        if not any(c.isalnum() for c in value):
+            return False
+        return True
+
+    def _is_group_chat(self, chat_id: str) -> bool:
+        return str(chat_id).endswith("@g.us")
+
+    async def _enqueue_group_turn(
+        self,
+        chat_jid: str,
+        handler: Callable[[str | None], Awaitable[None]],
+        mention: str | None,
+    ) -> None:
+        """Queue a turn for a group chat so responses go out one by one."""
+        queue = self._group_queues.setdefault(chat_jid, asyncio.Queue())
+        await queue.put((handler, mention))
+        if chat_jid not in self._group_queue_tasks or self._group_queue_tasks[chat_jid].done():
+            self._group_queue_tasks[chat_jid] = asyncio.create_task(
+                self._process_group_queue(chat_jid)
+            )
+
+    async def _process_group_queue(self, chat_jid: str) -> None:
+        """Consume turns for one group sequentially."""
+        queue = self._group_queues.get(chat_jid)
+        if queue is None:
+            return
+        try:
+            while True:
+                try:
+                    handler, mention = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                try:
+                    await handler(mention)
+                except Exception:
+                    self.logger.exception("Unhandled error processing WhatsApp group turn")
+                # Small pause so multiple rapid messages feel like separate turns.
+                await asyncio.sleep(0.6)
+        finally:
+            self._group_queue_tasks.pop(chat_jid, None)
+            if queue.empty():
+                self._group_queues.pop(chat_jid, None)
+
+    async def _drain_group_queue(self, chat_jid: str) -> None:
+        """Wait until the group queue has been fully processed. (Tests only.)"""
+        while True:
+            task = self._group_queue_tasks.get(chat_jid)
+            if task is None and (chat_jid not in self._group_queues or self._group_queues[chat_jid].empty()):
+                return
+            if task is not None and not task.done():
+                await task
+            else:
+                await asyncio.sleep(0.005)
 
     def _is_addressed_to_bot(self, message: Any) -> bool:
         return self._was_mentioned(message) or self._is_reply_to_bot(message)

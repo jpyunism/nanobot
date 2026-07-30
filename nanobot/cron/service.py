@@ -384,7 +384,10 @@ class CronService:
             ]
         }
 
-        self._atomic_write(self.store_path, json.dumps(data, indent=2, ensure_ascii=False))
+        self._atomic_write(
+            self.store_path,
+            json.dumps(data, indent=2, ensure_ascii=False, default=str),
+        )
 
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:
@@ -581,7 +584,14 @@ class CronService:
         self.store_path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:
             with open(self._action_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"action": action, "params": params}, ensure_ascii=False) + "\n")
+                f.write(
+                    json.dumps(
+                        {"action": action, "params": params},
+                        ensure_ascii=False,
+                        default=str,
+                    )
+                    + "\n"
+                )
 
 
     # ========== Public API ==========

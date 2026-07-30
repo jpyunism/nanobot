@@ -372,6 +372,36 @@ def test_add_job_preserves_origin_delivery_context(tmp_path) -> None:
     assert reloaded.payload.origin_metadata == metadata
 
 
+def test_add_job_serializes_non_json_metadata(tmp_path) -> None:
+    """Metadata containing objects like datetime must not crash the store."""
+    from datetime import datetime
+
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    metadata = {"created_at": datetime(2025, 1, 1, 12, 0, 0), "thread_id": 42}
+
+    job = service.add_job(
+        name="bad-meta",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        session_key="websocket:chat-1",
+        origin_channel="websocket",
+        origin_chat_id="chat-1",
+        origin_metadata=metadata,
+    )
+
+    assert job.payload.origin_metadata == metadata
+
+    # The on-disk form coerces non-JSON values to strings.
+    raw = json.loads((tmp_path / "cron" / "action.jsonl").read_text(encoding="utf-8"))
+    assert raw["params"]["payload"]["origin_metadata"]["created_at"] == "2025-01-01 12:00:00"
+    assert raw["params"]["payload"]["origin_metadata"]["thread_id"] == 42
+
+    reloaded = service.get_job(job.id)
+    assert reloaded is not None
+    assert reloaded.payload.origin_metadata["created_at"] == "2025-01-01 12:00:00"
+    assert reloaded.payload.origin_metadata["thread_id"] == 42
+
+
 @pytest.mark.asyncio
 async def test_channel_meta_and_session_key_survive_store_reload(tmp_path) -> None:
     store_path = tmp_path / "cron" / "jobs.json"

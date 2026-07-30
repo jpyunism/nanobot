@@ -4,6 +4,7 @@ import asyncio
 import sys
 import types
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -15,6 +16,7 @@ from nanobot.channels.whatsapp.runtime import (
     WhatsAppChannel,
     _legacy_bridge_config_fields,
     _NeonizeAPI,
+    _typing_task_key,
 )
 
 
@@ -220,13 +222,398 @@ async def test_send_media_dispatches_by_mimetype(monkeypatch) -> None:
     jid = ("12345", "s.whatsapp.net")
     client.send_image.assert_awaited_once_with(jid, "photo.jpg")
     client.send_video.assert_awaited_once_with(jid, "clip.mp4")
-    client.send_audio.assert_awaited_once_with(jid, "voice.ogg")
+    client.send_audio.assert_awaited_once_with(jid, "voice.ogg", ptt=True)
     client.send_document.assert_awaited_once_with(
         jid,
         "report.pdf",
         filename="report.pdf",
         mimetype="application/pdf",
     )
+
+
+@pytest.mark.asyncio
+async def test_send_audio_ptt_flag_propagates(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    client = SimpleNamespace(
+        send_message=AsyncMock(),
+        send_image=AsyncMock(),
+        send_video=AsyncMock(),
+        send_audio=AsyncMock(),
+        send_document=AsyncMock(),
+    )
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+
+    await ch.send(
+        OutboundMessage(
+            channel="whatsapp",
+            chat_id="12345@s.whatsapp.net",
+            content="",
+            media=["voice.ogg"],
+            metadata={"ptt": True},
+        )
+    )
+
+    jid = ("12345", "s.whatsapp.net")
+    client.send_audio.assert_awaited_once_with(jid, "voice.ogg", ptt=True)
+
+
+@pytest.mark.asyncio
+async def test_send_audio_mp3_is_not_auto_ptt(monkeypatch, tmp_path) -> None:
+    _patch_neonize_api(monkeypatch)
+    client = SimpleNamespace(
+        send_message=AsyncMock(),
+        send_image=AsyncMock(),
+        send_video=AsyncMock(),
+        send_audio=AsyncMock(),
+        send_document=AsyncMock(),
+    )
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+
+    audio = tmp_path / "tts_clip.mp3"
+    audio.write_bytes(b"\x00")
+
+    await ch.send(
+        OutboundMessage(
+            channel="whatsapp",
+            chat_id="12345@s.whatsapp.net",
+            content="",
+            media=[str(audio)],
+        )
+    )
+
+    jid = ("12345", "s.whatsapp.net")
+    # MP3 should be sent as regular audio; auto-PTT is reserved for OGG Opus.
+    client.send_audio.assert_awaited_once_with(jid, str(audio), ptt=False)
+
+
+@pytest.mark.asyncio
+async def test_send_audio_ogg_auto_ptt(monkeypatch, tmp_path) -> None:
+    _patch_neonize_api(monkeypatch)
+    client = SimpleNamespace(
+        send_message=AsyncMock(),
+        send_image=AsyncMock(),
+        send_video=AsyncMock(),
+        send_audio=AsyncMock(),
+        send_document=AsyncMock(),
+    )
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+
+    audio = tmp_path / "voice.ogg"
+    audio.write_bytes(b"\x00")
+
+    await ch.send(
+        OutboundMessage(
+            channel="whatsapp",
+            chat_id="12345@s.whatsapp.net",
+            content="",
+            media=[str(audio)],
+        )
+    )
+
+    jid = ("12345", "s.whatsapp.net")
+    client.send_audio.assert_awaited_once_with(jid, str(audio), ptt=True)
+
+
+@pytest.mark.asyncio
+async def test_send_audio_ptt_override_false_wins(monkeypatch, tmp_path) -> None:
+    _patch_neonize_api(monkeypatch)
+    client = SimpleNamespace(
+        send_message=AsyncMock(),
+        send_image=AsyncMock(),
+        send_video=AsyncMock(),
+        send_audio=AsyncMock(),
+        send_document=AsyncMock(),
+    )
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+
+    audio = tmp_path / "tts_clip.mp3"
+    audio.write_bytes(b"\x00")
+
+    await ch.send(
+        OutboundMessage(
+            channel="whatsapp",
+            chat_id="12345@s.whatsapp.net",
+            content="",
+            media=[str(audio)],
+            metadata={"ptt": False},
+        )
+    )
+
+    jid = ("12345", "s.whatsapp.net")
+    client.send_audio.assert_awaited_once_with(jid, str(audio), ptt=False)
+
+
+def test_ensure_ffmpeg_in_path_adds_static_bin_dir(monkeypatch, tmp_path) -> None:
+    from nanobot.channels.whatsapp import runtime as rt
+
+    bin_dir = tmp_path / "ffmpeg-bin"
+    bin_dir.mkdir()
+    ffmpeg = bin_dir / "ffmpeg"
+    ffprobe = bin_dir / "ffprobe"
+    ffmpeg.write_bytes(b"")
+    ffprobe.write_bytes(b"")
+    ffmpeg.chmod(0o755)
+    ffprobe.chmod(0o755)
+
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(
+        "static_ffmpeg.run.get_or_fetch_platform_executables_else_raise",
+        lambda: (str(ffmpeg), str(ffprobe)),
+    )
+    monkeypatch.delenv("PATH", raising=False)
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    rt._ensure_ffmpeg_in_path()
+
+    import os
+    assert os.environ["PATH"].startswith(str(bin_dir))
+
+
+def test_ensure_ffmpeg_in_path_noop_when_present(monkeypatch) -> None:
+    from nanobot.channels.whatsapp import runtime as rt
+
+    def fake_which(name: str) -> str | None:
+        return f"/usr/bin/{name}" if name in {"ffprobe", "ffmpeg"} else None
+
+    monkeypatch.setattr("shutil.which", fake_which)
+    called = {"value": False}
+
+    def must_not_run() -> None:
+        called["value"] = True
+
+    monkeypatch.setattr(
+        "static_ffmpeg.run.get_or_fetch_platform_executables_else_raise",
+        must_not_run,
+    )
+
+    rt._ensure_ffmpeg_in_path()
+    assert called["value"] is False
+
+
+@pytest.mark.asyncio
+async def test_start_typing_emits_composing_then_loop_keeps_it(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    presence_calls: list[tuple[Any, Any, Any]] = []
+
+    class _State:
+        def __init__(self):
+            self.value = 0
+
+    class _Enum:
+        def __init__(self, name: str):
+            self.name = name
+
+        def __eq__(self, other):
+            return isinstance(other, _Enum) and other.name == self.name
+
+        def __hash__(self):
+            return hash(self.name)
+
+    composing = _Enum("COMPOSING")
+    text_media = _Enum("TEXT")
+
+    class _Client:
+        async def send_chat_presence(self, jid, state, media):
+            presence_calls.append((jid, state, media))
+
+    ch = _make_channel()
+    ch._client = _Client()
+    ch._connected = True
+
+    monkeypatch.setattr(
+        "neonize.utils.enum.ChatPresence",
+        _Enum("Holder"),
+    )
+    # override the import inside the method to return our enums
+    fake_enum = types.SimpleNamespace(
+        ChatPresence=types.SimpleNamespace(
+            CHAT_PRESENCE_COMPOSING=composing,
+            CHAT_PRESENCE_PAUSED=_Enum("PAUSED"),
+        ),
+        ChatPresenceMedia=types.SimpleNamespace(CHAT_PRESENCE_MEDIA_TEXT=text_media),
+    )
+    monkeypatch.setitem(sys.modules, "neonize.utils.enum", fake_enum)
+
+    jid = ("12345", "s.whatsapp.net")
+    await ch._start_typing(jid)
+    # Cancel the loop quickly and confirm the typing task was registered.
+    task = list(ch._typing_tasks.values())[0]
+    # Let the task enter its body before cancelling, otherwise the finally
+    # block (which removes the task from the dict) never runs.
+    await asyncio.sleep(0)
+    task.cancel()
+    try:
+        await task
+    except BaseException:
+        pass
+
+    # The _start_typing path registered a periodic composing loop. Verify the
+    # typing task bookkeeping is correct (cancelled on stop, key is per-jid).
+    assert ch._typing_tasks == {}
+    # The earlier _stop_typing emitted a PAUSED presence; assert it was
+    # addressed to our jid and used the TEXT media type.
+    assert presence_calls, "expected a PAUSED presence from the initial stop"
+    first = presence_calls[0]
+    assert first[0] == jid
+    assert first[1].name == "PAUSED"
+    assert first[2] == text_media
+
+
+@pytest.mark.asyncio
+async def test_send_resolves_lid_chat_to_phone(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    client = SimpleNamespace(
+        send_message=AsyncMock(),
+        send_image=AsyncMock(),
+        send_video=AsyncMock(),
+        send_audio=AsyncMock(),
+        send_document=AsyncMock(),
+    )
+    ch = _make_channel()
+    ch._client = client
+    ch._connected = True
+    ch._lid_to_phone = {"230343776985329": "56975746099"}
+
+    await ch.send(
+        OutboundMessage(
+            channel="whatsapp",
+            chat_id="230343776985329@lid",
+            content="hola",
+        )
+    )
+
+    client.send_message.assert_awaited_once_with(("56975746099", "s.whatsapp.net"), "hola")
+
+
+def test_whatsapp_session_key_isolates_group_members() -> None:
+    ch = _make_channel()
+    assert ch._whatsapp_session_key("12345@s.whatsapp.net", "56911111111", False) == "whatsapp:12345@s.whatsapp.net"
+    assert (
+        ch._whatsapp_session_key("120363@g.us", "56911111111", True)
+        == "whatsapp:120363@g.us:56911111111"
+    )
+    assert (
+        ch._whatsapp_session_key("120363@g.us", "56922222222", True)
+        == "whatsapp:120363@g.us:56922222222"
+    )
+
+
+def test_resolve_mention_prefers_push_name() -> None:
+    ch = _make_channel()
+    assert ch._resolve_mention("56911111111", "Juan Pérez") == "@Juan Pérez"
+    # Numeric push names are rejected; we fall back to the phone number.
+    assert ch._resolve_mention("56911111111", "12345") == "@+56911111111"
+    # Long hex-looking IDs are rejected and fall back to the phone.
+    assert ch._resolve_mention("56911111111", "abcd1234abcd1234abcd") == "@+56911111111"
+    assert ch._resolve_mention("56911111111", "") == "@+56911111111"
+    assert ch._resolve_mention("SENDERLID", "") is None
+    assert ch._resolve_mention("56911111111@s.whatsapp.net", "") == "@+56911111111"
+
+
+@pytest.mark.asyncio
+async def test_group_message_uses_per_sender_session_key(monkeypatch) -> None:
+    """Group messages get isolated session keys per sender so contexts don't mix."""
+    _patch_neonize_api(monkeypatch)
+    ch = _make_channel()
+    ch._handle_message = AsyncMock()
+    ch._self_jids = {"bot@s.whatsapp.net", "bot"}
+
+    event = _event(
+        message=_Proto(conversation="hello group"),
+        chat=_jid("120363000", "g.us"),
+        sender=_jid("56911111111", "s.whatsapp.net"),
+        is_group=True,
+    )
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        event,
+    )
+    await ch._drain_group_queue("120363000@g.us")
+
+    assert ch._handle_message.awaited
+    call_kwargs = ch._handle_message.await_args.kwargs
+    assert call_kwargs["session_key"] == "whatsapp:120363000@g.us:56911111111"
+    assert call_kwargs["is_dm"] is False
+
+
+@pytest.mark.asyncio
+async def test_dm_message_uses_chat_session_key(monkeypatch) -> None:
+    """DM messages keep the default chat-scoped session key."""
+    _patch_neonize_api(monkeypatch)
+    ch = _make_channel()
+    ch._handle_message = AsyncMock()
+
+    event = _event(
+        message=_Proto(conversation="hello dm"),
+        chat=_jid("56911111111", "s.whatsapp.net"),
+        sender=_jid("56911111111", "s.whatsapp.net"),
+        is_group=False,
+    )
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        event,
+    )
+
+    assert ch._handle_message.awaited
+    call_kwargs = ch._handle_message.await_args.kwargs
+    assert call_kwargs["session_key"] == "whatsapp:56911111111@s.whatsapp.net"
+    assert call_kwargs["is_dm"] is True
+
+
+@pytest.mark.asyncio
+async def test_send_stops_typing(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    paused: list[tuple[Any, Any, Any]] = []
+
+    class _Client:
+        def __init__(self):
+            self.send_message = AsyncMock()
+            self.send_image = AsyncMock()
+            self.send_video = AsyncMock()
+            self.send_audio = AsyncMock()
+            self.send_document = AsyncMock()
+
+        async def send_chat_presence(self, jid, state, media):
+            paused.append((jid, state, media))
+
+    fake_enum = types.SimpleNamespace(
+        ChatPresence=types.SimpleNamespace(
+            CHAT_PRESENCE_COMPOSING=types.SimpleNamespace(name="COMPOSING"),
+            CHAT_PRESENCE_PAUSED=types.SimpleNamespace(name="PAUSED"),
+        ),
+        ChatPresenceMedia=types.SimpleNamespace(
+            CHAT_PRESENCE_MEDIA_TEXT=types.SimpleNamespace(name="TEXT")
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "neonize.utils.enum", fake_enum)
+
+    ch = _make_channel()
+    client = _Client()
+    ch._client = client
+    ch._connected = True
+    jid_obj = ch._build_jid("12345@s.whatsapp.net")
+    key = _typing_task_key(jid_obj)
+    # pre-register a typing task so _stop_typing has something to clear
+    async def _noop():
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            raise
+
+    ch._typing_tasks[key] = asyncio.create_task(_noop())
+
+    await ch.send(OutboundMessage(channel="whatsapp", chat_id="12345@s.whatsapp.net", content="hi"))
+
+    assert ch._typing_tasks == {}
+    assert paused and paused[0][1].name == "PAUSED"
 
 
 @pytest.mark.asyncio
@@ -274,6 +661,7 @@ async def test_group_policy_mention_accepts_mention_and_prefers_phone_sender() -
             is_group=True,
         ),
     )
+    await ch._drain_group_queue("120363000@g.us")
 
     kwargs = ch._handle_message.await_args.kwargs
     assert kwargs["sender_id"] == "15559998888"
@@ -299,6 +687,7 @@ async def test_group_policy_mention_accepts_reply_to_bot() -> None:
             is_group=True,
         ),
     )
+    await ch._drain_group_queue("120363000@g.us")
 
     kwargs = ch._handle_message.await_args.kwargs
     assert kwargs["metadata"]["is_reply_to_bot"] is True
@@ -319,6 +708,7 @@ async def test_group_sender_id_uses_participant_not_group_jid() -> None:
             is_group=True,
         ),
     )
+    await ch._drain_group_queue("120363000@g.us")
 
     kwargs = ch._handle_message.await_args.kwargs
     assert kwargs["sender_id"] == "SENDERLID"
@@ -341,6 +731,7 @@ async def test_group_allow_from_accepts_group_jid_or_bare_id(allowed_group: str)
             is_group=True,
         ),
     )
+    await ch._drain_group_queue("120363000@g.us")
 
     assert bus.inbound_size == 1
     msg = await bus.consume_inbound()
