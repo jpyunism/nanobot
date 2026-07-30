@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import mimetypes
 import os
 import re
@@ -343,15 +344,61 @@ class WhatsAppChannel(BaseChannel):
         self._self_jids: set[str] = set()
         self._started_at = 0.0
         self._typing_tasks: dict[str, asyncio.Task[None]] = {}
-        # Per-group turn queue: one worker per group chat processes messages
-        # sequentially so multiple users do not trigger a flood of concurrent
-        # responses.
+        # Per-group turn queue: one worker per chat processes messages sequentially.
         self._group_queues: dict[str, asyncio.Queue[tuple[Any, str | None]]] = {}
         self._group_queue_tasks: dict[str, asyncio.Task[None]] = {}
+        # Persisted display-name mappings per chat (phone/sender_id -> push_name).
+        self._display_names: dict[str, dict[str, str]] = {}
+        self._display_names_path = get_runtime_subdir("whatsapp-auth") / "display_names.json"
 
     def _database_path(self) -> Path:
         configured = self.config.database_path.strip()
         return Path(configured).expanduser() if configured else _default_database_path()
+
+    def _load_display_names(self) -> dict[str, dict[str, str]]:
+        """Load persisted {chat_id: {sender_key: push_name}} map."""
+        if not self._display_names_path.exists():
+            return {}
+        try:
+            data = json.loads(self._display_names_path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return {
+                    str(k): {str(sk): str(sv) for sk, sv in v.items() if sv}
+                    for k, v in data.items()
+                    if isinstance(v, dict)
+                }
+        except Exception:
+            self.logger.exception("Failed to load WhatsApp display names")
+        return {}
+
+    def _save_display_names(self) -> None:
+        """Persist the display-name map atomically."""
+        self._display_names_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._display_names_path.with_suffix(".tmp")
+        try:
+            tmp.write_text(
+                json.dumps(self._display_names, indent=2, ensure_ascii=False, sort_keys=True),
+                encoding="utf-8",
+            )
+            tmp.replace(self._display_names_path)
+        except Exception:
+            self.logger.exception("Failed to save WhatsApp display names")
+
+    def _remember_display_name(
+        self, chat_id: str, sender_key: str, push_name: str | None
+    ) -> str | None:
+        """Store a display name for a sender in a chat and return it if usable."""
+        if not push_name or not self._looks_like_name(push_name):
+            return None
+        chat_map = self._display_names.setdefault(chat_id, {})
+        if chat_map.get(sender_key) != push_name:
+            chat_map[sender_key] = push_name
+            self._save_display_names()
+        return push_name
+
+    def _display_name_for(self, chat_id: str, sender_key: str) -> str | None:
+        """Return a previously seen display name for a sender, if any."""
+        return self._display_names.get(chat_id, {}).get(sender_key)
 
     def _load_lid_mappings(self) -> dict[str, str]:
         mapping: dict[str, str] = {}
@@ -393,6 +440,7 @@ class WhatsAppChannel(BaseChannel):
     async def start(self) -> None:
         self._running = True
         self._started_at = time.time()
+        self._display_names = self._load_display_names()
         client = self._new_client()
         self._client = client
         self._register_handlers(client, handle_messages=True)
@@ -766,7 +814,16 @@ class WhatsAppChannel(BaseChannel):
             raise ValueError("WhatsApp message has no resolvable sender ID")
 
         push_name = str(_safe_attr(info, "Pushname", "") or "").strip()
-        mention = self._resolve_mention(sender_id, push_name) if is_group else None
+        self._remember_display_name(chat_jid, sender_id, push_name)
+        display_name = push_name or self._display_name_for(chat_jid, sender_id)
+        mention = self._resolve_mention(sender_id, display_name) if is_group else None
+        identity_block = self._sender_identity_block(
+            sender_id, display_name, self._is_reply_to_bot(message), phone_id
+        )
+        contact_block = self._known_contacts_block(chat_jid, sender_id)
+        runtime_blocks: list[RuntimeContextBlock] = [identity_block]
+        if contact_block is not None:
+            runtime_blocks.append(contact_block)
         metadata = {
             "message_id": message_id or None,
             "timestamp": int(timestamp) if timestamp else None,
@@ -778,11 +835,7 @@ class WhatsAppChannel(BaseChannel):
             "phone": phone_id or None,
             "is_reply_to_bot": self._is_reply_to_bot(message),
             "whatsapp_mention": mention,
-            RUNTIME_CONTEXT_INPUT_META: [
-                self._sender_identity_block(
-                    sender_id, push_name, self._is_reply_to_bot(message), phone_id
-                )
-            ],
+            RUNTIME_CONTEXT_INPUT_META: runtime_blocks,
         }
         sender_allowed = self.is_allowed(sender_id)
         group_allow_id = self._group_allow_id(chat_jid) if is_group else None
@@ -898,12 +951,12 @@ class WhatsAppChannel(BaseChannel):
 
     @staticmethod
     def _sender_identity_block(
-        sender_id: str, push_name: str, is_reply_to_bot: bool, phone_id: str | None = None
+        sender_id: str, display_name: str | None, is_reply_to_bot: bool, phone_id: str | None = None
     ) -> RuntimeContextBlock:
         """Return a runtime-context block telling the agent who sent this message."""
         lines = [
             f"phone: +{phone_id}" if phone_id else None,
-            f"push_name: {push_name}" if push_name else None,
+            f"display_name: {display_name}" if display_name else None,
             f"sender_id: {sender_id}",
             f"reply_to_bot: {'yes' if is_reply_to_bot else 'no'}",
         ]
@@ -915,6 +968,25 @@ class WhatsAppChannel(BaseChannel):
                 f"{identity}\n\n"
                 "This is the human who sent the current message. "
                 "Do not assume it is the operator unless these values match."
+            ),
+        )
+
+    def _known_contacts_block(self, chat_id: str, current_sender_id: str) -> RuntimeContextBlock | None:
+        """Return a block listing known contacts in this chat, minus the current sender."""
+        chat_map = self._display_names.get(chat_id, {})
+        entries = [
+            f"- {name} (sender_id: {sid})"
+            for sid, name in sorted(chat_map.items(), key=lambda kv: kv[1].lower())
+            if sid != current_sender_id and name
+        ]
+        if not entries:
+            return None
+        return RuntimeContextBlock(
+            source="whatsapp_known_contacts",
+            content=(
+                "[WhatsApp contacts seen in this chat]\n"
+                + "\n".join(entries)
+                + "\n\nUse these names when referring to other people in the group."
             ),
         )
 

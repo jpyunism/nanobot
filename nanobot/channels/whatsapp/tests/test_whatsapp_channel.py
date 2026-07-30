@@ -527,6 +527,30 @@ def test_group_metadata_includes_sender_identity_runtime_context() -> None:
     assert "reply_to_bot: yes" in block.content
 
 
+def test_display_names_are_remembered_and_used() -> None:
+    ch = _make_channel()
+    assert ch._remember_display_name("120363@g.us", "56911111111", "Juan") == "Juan"
+    # Falls back to stored name when push_name is empty.
+    assert ch._display_name_for("120363@g.us", "56911111111") == "Juan"
+    assert ch._resolve_mention("56911111111", "") == "@+56911111111"
+
+    ch2 = WhatsAppChannel({"enabled": True}, MagicMock())
+    ch2._display_names = ch._display_names
+    ch2._display_names_path = ch._display_names_path
+    # Unknown sender still falls back to phone.
+    assert ch2._display_name_for("120363@g.us", "56999999999") is None
+
+
+def test_known_contacts_block_excludes_current_sender() -> None:
+    ch = _make_channel()
+    ch._remember_display_name("120363@g.us", "56911111111", "Juan")
+    ch._remember_display_name("120363@g.us", "56922222222", "María")
+    block = ch._known_contacts_block("120363@g.us", "56911111111")
+    assert block is not None
+    assert "Juan" not in block.content
+    assert "María" in block.content
+
+
 @pytest.mark.asyncio
 async def test_group_message_uses_per_sender_session_key(monkeypatch) -> None:
     """Group messages get isolated session keys per sender so contexts don't mix."""
