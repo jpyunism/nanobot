@@ -518,6 +518,15 @@ def test_resolve_mention_prefers_push_name() -> None:
     assert ch._resolve_mention("56911111111@s.whatsapp.net", "") == "@+56911111111"
 
 
+def test_group_metadata_includes_sender_identity_runtime_context() -> None:
+    ch = _make_channel()
+    block = ch._sender_identity_block("56911111111", "Juan", True, phone_id="56911111111")
+    assert block.source == "whatsapp_sender_identity"
+    assert "+56911111111" in block.content
+    assert "Juan" in block.content
+    assert "reply_to_bot: yes" in block.content
+
+
 @pytest.mark.asyncio
 async def test_group_message_uses_per_sender_session_key(monkeypatch) -> None:
     """Group messages get isolated session keys per sender so contexts don't mix."""

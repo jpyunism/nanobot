@@ -21,6 +21,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir, get_runtime_subdir
 from nanobot.config.schema import Base
+from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, RuntimeContextBlock
 
 
 class WhatsAppConfig(Base):
@@ -777,6 +778,11 @@ class WhatsAppChannel(BaseChannel):
             "phone": phone_id or None,
             "is_reply_to_bot": self._is_reply_to_bot(message),
             "whatsapp_mention": mention,
+            RUNTIME_CONTEXT_INPUT_META: [
+                self._sender_identity_block(
+                    sender_id, push_name, self._is_reply_to_bot(message), phone_id
+                )
+            ],
         }
         sender_allowed = self.is_allowed(sender_id)
         group_allow_id = self._group_allow_id(chat_jid) if is_group else None
@@ -889,6 +895,28 @@ class WhatsAppChannel(BaseChannel):
         if not any(c.isalnum() for c in value):
             return False
         return True
+
+    @staticmethod
+    def _sender_identity_block(
+        sender_id: str, push_name: str, is_reply_to_bot: bool, phone_id: str | None = None
+    ) -> RuntimeContextBlock:
+        """Return a runtime-context block telling the agent who sent this message."""
+        lines = [
+            f"phone: +{phone_id}" if phone_id else None,
+            f"push_name: {push_name}" if push_name else None,
+            f"sender_id: {sender_id}",
+            f"reply_to_bot: {'yes' if is_reply_to_bot else 'no'}",
+        ]
+        identity = "\n".join(line for line in lines if line)
+        return RuntimeContextBlock(
+            source="whatsapp_sender_identity",
+            content=(
+                "[WhatsApp sender identity for this turn]\n"
+                f"{identity}\n\n"
+                "This is the human who sent the current message. "
+                "Do not assume it is the operator unless these values match."
+            ),
+        )
 
     def _is_group_chat(self, chat_id: str) -> bool:
         return str(chat_id).endswith("@g.us")
