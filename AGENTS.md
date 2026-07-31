@@ -4,6 +4,24 @@ This file provides guidance to AI coding agents working with this repository.
 
 nanobot is a lightweight, open-source AI agent framework written in Python with a React/TypeScript WebUI. It centers around a small agent loop that receives messages from chat channels, invokes an LLM provider, executes tools, and manages session memory.
 
+## Workspace Setup
+
+This repository lives at `/home/madkoding/repos/nanobot`. The companion agent workspace (sessions, logs, runtime state) lives at `~/.nanobot/workspace/` and is configured at `~/.nanobot/config.json`.
+
+```
+/home/madkoding/repos/nanobot/      # <- this repo (source of truth for code + WebUI)
+/home/madkoding/.nanobot/            # <- runtime workspace (config, sessions, venv)
+  ├── config.json                    # gateway configuration
+  ├── workspace/                     # session memory + logs
+  └── venv/                          # Python venv with nanobot-ai installed editable
+```
+
+The gateway runs as a user systemd service (`nanobot-gateway.service`, see `~/.config/systemd/user/`). The venv has `nanobot-ai` installed in **editable** mode (`pip install -e .`) so the gateway reads `.py` files directly from this repo. The WebUI bundle ships in `nanobot/web/dist/` (gitignored) and is served from the same path the gateway finds via `import nanobot.web`.
+
+```
+~/.local/bin/bun                   # bun runtime for webui build/dev (fallback: npm)
+```
+
 ## Development Commands
 
 ```bash
@@ -11,15 +29,104 @@ nanobot is a lightweight, open-source AI agent framework written in Python with 
 pytest tests/test_openai_api.py::test_function -v
 ruff check nanobot/
 
-# WebUI: dev server (proxies API/WS to gateway :8765), build, test
-# Build outputs to ../nanobot/web/dist (bundled into the Python wheel)
-cd webui && bun run dev      # or NANOBOT_API_URL=... bun run dev
-cd webui && bun run build
-cd webui && bun run test
+# WebUI: dev server, build, test (bun; npm also works)
+cd webui && bun run dev             # Vite dev server with HMR
+cd webui && bun run build           # outputs to ../nanobot/web/dist
+cd webui && bun run test            # vitest
 
-# Gateway
-nanobot gateway
+# Gateway: managed by systemd, but can be run manually for debugging
+~/.nanobot/venv/bin/python -m nanobot gateway --foreground \
+  --port 18790 \
+  --workspace /home/madkoding/.nanobot/workspace \
+  --config /home/madkoding/.nanobot/config.json
+
+# Service control
+systemctl --user status nanobot-gateway
+systemctl --user restart nanobot-gateway
+journalctl --user -u nanobot-gateway -n 50 --no-pager
 ```
+
+## Updating the Gateway
+
+The gateway runs from the venv as `nanobot-gateway.service` (user systemd). Because `nanobot-ai` is installed editable, **Python changes in this repo are picked up on the next process restart** — no `pip install` needed. WebUI bundle changes require a rebuild.
+
+1. **Python changes** (`nanobot/*.py`):
+   ```bash
+   # Just edit, then restart the service
+   systemctl --user restart nanobot-gateway
+   tail -f /home/madkoding/.nanobot/logs/gateway.log
+   ```
+
+2. **WebUI changes** (`webui/src/*`):
+   ```bash
+   cd /home/madkoding/repos/nanobot/webui
+   bun run build
+   # Vite writes to ../nanobot/web/dist. Since the venv is editable, the
+   # gateway will pick up the new dist on the next request — but you still
+   # need to restart the gateway because it caches the path at startup.
+   systemctl --user restart nanobot-gateway
+   # User then hard-refreshes the browser (Ctrl+Shift+R / Cmd+Shift+R).
+   ```
+
+3. **Verify the running version** matches the source: open the WebUI at `http://localhost:8765/` and check the version badge in the Sidebar footer (e.g. `v0.1.0+4f21e13e`). The SHA is injected at build time from `git rev-parse` of this repo.
+
+> If the user reports the gateway is "stale" (old code still running), the cause is almost always missing service restart or missing browser hard-refresh.
+
+> If `pip install -e .` ever gets out of sync (e.g. after moving the repo), re-run:
+> ```bash
+> ~/.nanobot/venv/bin/pip install -e /home/madkoding/repos/nanobot --no-deps --quiet
+> ```
+
+## WebUI Architecture
+
+The WebUI is a Vite + React 18 + TypeScript SPA. As of the `refactor(webui): extract hooks, dialogs, and shell components` commit, the structure is:
+
+```
+webui/src/
+  App.tsx                          # 467 lines — bootstrap + Provider + shell render
+  components/
+    shell/                         # shell-level composites
+      MainView.tsx                 # ThreadShell + SettingsView
+      SidebarLayout.tsx            # 3 Sidebar renders (host, host-preview, mobile sheet)
+      Overlays.tsx                 # 4 dialogs + restart toast + pairing popup
+      ShellNativeHeader.tsx        # native chrome (HostChrome + theme toggle)
+    HostChrome.tsx                 # native host wrapper
+    PairingCodePopup.tsx           # pairing code UI
+    Sidebar.tsx, ChatList.tsx, ... # feature components
+    WebuiVersionBadge.tsx          # v0.1.0+<sha> in Sidebar footer
+  hooks/                           # one hook per concern (see below)
+  lib/                             # pure modules (no React)
+    routing.ts                     # hash routing + pushState race fix
+    dialogs.ts                     # useDialogsState reducer
+    bootstrap.ts                   # auth + token refresh
+    sidebar-state-keys.ts          # localStorage helpers
+  tests/                           # vitest, App layout etc.
+```
+
+### Key hooks
+
+| Hook | Responsibility |
+| --- | --- |
+| `useBootstrap` | auth/loading/error views + token refresh |
+| `useShellRoute` | routing state (activeKey, view, settingsSection) + pushState navigation |
+| `useHostSidebarLayout` | host sidebar open/preview/mobile state |
+| `useChatActions` | 22 callbacks for chat + utility actions |
+| `useRunTracker` | running + updated chat ids (active session tracking) |
+| `useEngineRestart` | restart state, toast, command |
+| `useWorkspaceScope` | workspaces/draft/overrides + error |
+| `usePairing` | pairing code UI state + polling |
+| `useSettingsSnapshot` | fetchSettings + cache |
+| `useUtilityActions` | openApps/Automations/Skills/Settings (consolidated) |
+| `useShellShortcuts` | keyboard shortcuts (Cmd+K, Cmd+Shift+O) |
+| `useDocumentTitle` | `document.title` effect per view |
+| `useThreadSessionSync` | active chat ref + thread session updates |
+| `useRuntimeModelSync` | model name sync from gateway |
+| `useMissingSessionRedirect` | redirect when activeKey disappears |
+| `useNativeHostClass` | toggles `native-host` body class |
+
+### Routing race condition
+
+`lib/routing.ts#writeShellRoute` uses `history.pushState` (not `window.location.hash =`) to update the URL, so the `hashchange` listener is not re-triggered. The listener is only fired on user-driven back/forward.
 
 ## High-Level Architecture
 
@@ -78,4 +185,5 @@ See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for contribution flow and PR guidelin
 - Channel base / new channel template: `nanobot/channels/base.py`
 - Tool registry: `nanobot/agent/tools/registry.py`
 - WebUI dev proxy config: `webui/vite.config.ts`
+- WebUI version badge source: `webui/src/components/WebuiVersionBadge.tsx`
 - Tests mirror the `nanobot/` package structure.
