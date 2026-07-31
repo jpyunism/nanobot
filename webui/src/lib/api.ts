@@ -29,6 +29,7 @@ import type {
   SkillsPayload,
   SlashCommand,
   SlashCommandLifecycle,
+  SubagentStatusPayload,
   TranscriptionSettingsUpdate,
   WebSearchSettingsUpdate,
   WorkspacesPayload,
@@ -207,6 +208,23 @@ export async function fetchFilePreview(
     undefined,
     API_READ_TIMEOUT_MS,
   );
+}
+
+export async function fetchSubagentStatus(
+  token: string,
+  sessionKey: string,
+  taskId: string,
+  base: string = "",
+): Promise<SubagentStatusPayload | null> {
+  const url = `${base}/api/sessions/${encodeURIComponent(sessionKey)}/subagents/${encodeURIComponent(taskId)}`;
+  try {
+    return await request<SubagentStatusPayload>(url, token, undefined, API_READ_TIMEOUT_MS);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 export async function fetchFilePreviewAvailability(

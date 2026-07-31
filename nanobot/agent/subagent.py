@@ -5,6 +5,7 @@ import json
 import time
 import uuid
 import warnings
+from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -52,6 +53,33 @@ class SubagentStatus:
     usage: dict = field(default_factory=dict)          # token usage
     stop_reason: str | None = None
     error: str | None = None
+    result: str | None = None
+    finished_at: float | None = None
+    chat_id: str | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        """Serialize for WS / HTTP transport."""
+        return {
+            "task_id": self.task_id,
+            "label": self.label,
+            "task_description": self.task_description,
+            "phase": self.phase,
+            "iteration": self.iteration,
+            "tool_events": list(self.tool_events),
+            "usage": dict(self.usage),
+            "stop_reason": self.stop_reason,
+            "error": self.error,
+            "result": self.result,
+            "chat_id": self.chat_id,
+        }
+
+
+#: How long a finished subagent keeps its status snapshot for HTTP fetch.
+#: ponytail: 60s window — covers panel open time without leaking forever.
+SUBAGENT_STATUS_TTL_S = 60.0
+
+
+SubagentEventCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 class _SubagentHook(AgentHook):
@@ -150,6 +178,27 @@ class SubagentManager:
         self._running_tasks: dict[str, asyncio.Task[str]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+        self._event_callback: SubagentEventCallback | None = None
+
+    def set_event_callback(self, callback: SubagentEventCallback | None) -> None:
+        """Register an async callback invoked with each status update."""
+        self._event_callback = callback
+
+    def get_status(self, task_id: str) -> SubagentStatus | None:
+        """Return the current status snapshot for ``task_id``.
+
+        Evicts finished snapshots older than ``SUBAGENT_STATUS_TTL_S`` so the
+        HTTP fetch endpoint doesn't leak stale state forever.
+        """
+        status = self._task_statuses.get(task_id)
+        if status is None:
+            return None
+        if status.phase in ("done", "error") and status.finished_at is not None:
+            age = time.monotonic() - status.finished_at
+            if age > SUBAGENT_STATUS_TTL_S:
+                self._task_statuses.pop(task_id, None)
+                return None
+        return status
 
     def set_provider(self, provider: LLMProvider, model: str) -> None:
         """Update the deprecated runtime source used by legacy ``spawn`` calls."""
@@ -265,7 +314,9 @@ class SubagentManager:
 
         def _cleanup(_: asyncio.Task) -> None:
             self._running_tasks.pop(task_id, None)
-            self._task_statuses.pop(task_id, None)
+            # Keep finished statuses around for ``get_status`` until the TTL
+            # window expires — callers may still want to fetch the snapshot
+            # after the task completes (panel open race, etc.).
             if session_key and (ids := self._session_tasks.get(session_key)):
                 ids.discard(task_id)
                 if not ids:
@@ -421,6 +472,10 @@ class SubagentManager:
                 final_result = result.final_content or "Task completed but no final response was generated."
                 final_status = "ok"
                 logger.info("Subagent [{}] completed successfully", task_id)
+            status.result = final_result
+            status.chat_id = origin.get("chat_id")
+            status.finished_at = time.monotonic()
+            await self._emit_event(status, "done")
             if announce:
                 await self._announce_result(
                     task_id,
@@ -436,8 +491,12 @@ class SubagentManager:
         except Exception as e:
             status.phase = "error"
             status.error = str(e)
+            status.result = f"Error: {e}"
+            status.chat_id = origin.get("chat_id")
+            status.finished_at = time.monotonic()
             logger.exception("Subagent [{}] failed", task_id)
             final_result = f"Error: {e}"
+            await self._emit_event(status, "error")
             if announce:
                 await self._announce_result(
                     task_id,
@@ -449,6 +508,17 @@ class SubagentManager:
                     origin_message_id,
                 )
             return final_result
+
+    async def _emit_event(self, status: SubagentStatus, event: str) -> None:
+        callback = self._event_callback
+        if callback is None:
+            return
+        payload = status.to_payload()
+        payload["event"] = event
+        try:
+            await callback(payload)
+        except Exception:
+            logger.exception("Subagent event callback raised; ignoring")
 
     async def _announce_result(
         self,

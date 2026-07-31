@@ -1285,3 +1285,44 @@ export type Outbound =
        * generic websocket protocol for other clients. */
       webui?: true;
     };
+
+/** Lifecycle of a subagent as it executes in the background. */
+export type SubagentPhase =
+  | "initializing"
+  | "awaiting_tools"
+  | "tools_completed"
+  | "final_response"
+  | "done"
+  | "error";
+
+/** Per-tool execution event inside a subagent run. */
+export interface SubagentToolEvent {
+  call_id?: string;
+  name: string;
+  status: "pending" | "running" | "done" | "error";
+  detail?: string;
+}
+
+/** Full status snapshot of a subagent, mirrored to the WebUI over WS + HTTP. */
+export interface SubagentStatusPayload {
+  task_id: string;
+  label: string;
+  task_description: string;
+  phase: SubagentPhase;
+  iteration: number;
+  tool_events: SubagentToolEvent[];
+  usage: Record<string, number>;
+  stop_reason: string | null;
+  error: string | null;
+  result: string | null;
+  chat_id?: string | null;
+}
+
+/** Optional event-level metadata for subagent_update frames. */
+export type SubagentLifecycleEvent =
+  | "spawned"
+  | "progress"
+  | "tool_call"
+  | "tool_result"
+  | "completed"
+  | "failed";
