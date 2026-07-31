@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
+import { SubagentPanelHost } from "@/components/SubagentPanelHost";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { ChatProjectChip } from "@/components/thread/ChatProjectChip";
@@ -1127,6 +1128,7 @@ export function ThreadShell({
           onClose={handleCloseFilePreview}
         />
       ) : null}
+      <SubagentPanelHost chatId={chatId} sessionKey={historyKey} />
     </section>
   );
 }

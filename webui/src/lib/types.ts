@@ -1215,11 +1215,22 @@ export type InboundEvent =
       workspace_scope?: WorkspaceScopePayload;
     }
   | { event: "transcription_result"; request_id: string; text: string }
+  | { event: "transcription_error"; request_id?: string; detail?: string; provider?: string }
+  | { event: "subagent_subscribed"; task_id: string }
   | {
-      event: "transcription_error";
-      request_id?: string;
-      detail?: string;
-      provider?: string;
+      event: "subagent_update";
+      chat_id: string;
+      task_id: string;
+      label: string;
+      task_description: string;
+      phase: SubagentPhase;
+      iteration: number;
+      tool_events: SubagentToolEvent[];
+      usage: Record<string, number>;
+      stop_reason: string | null;
+      error: string | null;
+      result: string | null;
+      subagent_event?: SubagentLifecycleEvent;
     }
   | { event: "error"; chat_id?: string; detail?: string; reason?: string; project_id?: string; request_id?: string };
 
@@ -1271,6 +1282,7 @@ export type Outbound =
   | { type: "attach"; chat_id: string }
   | { type: "set_workspace_scope"; chat_id: string; workspace_scope: WorkspaceScopePayload }
   | { type: "transcribe_audio"; request_id: string; data_url: string; duration_ms?: number }
+  | { type: "subscribe_subagent"; task_id: string }
   | {
       type: "message";
       chat_id: string;

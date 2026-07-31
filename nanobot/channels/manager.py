@@ -122,6 +122,7 @@ class ChannelManager:
         webui_runtime_surface: str = "browser",
         webui_runtime_capabilities: dict[str, Any] | None = None,
         agent_loop: Any | None = None,
+        subagent_manager: Any | None = None,
     ):
         self.config = config
         self.bus = bus
@@ -134,6 +135,7 @@ class ChannelManager:
         self._webui_static_dist = webui_static_dist
         self._webui_runtime_surface = webui_runtime_surface
         self._agent_loop = agent_loop
+        self._subagent_manager = subagent_manager
         self._webui_runtime_capabilities = dict(webui_runtime_capabilities or {})
         self.channels: dict[str, BaseChannel] = {}
         self._channel_owners: dict[str, str] = {}
@@ -202,10 +204,13 @@ class ChannelManager:
                 channel_feature_action=self.apply_channel_feature_action,
                 channel_runtime_status=self.get_status,
                 agent_loop=getattr(self, "_agent_loop", None),
+                subagent_manager=getattr(self, "_subagent_manager", None),
                 logger=logger,
             )
             kwargs["gateway"] = gateway
         channel = cls(section, self.bus, **kwargs)
+        if cls.name == "websocket" and self._subagent_manager is not None:
+            self._wire_subagent_broadcast(channel)
         if runtime_name and runtime_name != channel.name:
             channel.name = runtime_name
         channel.send_progress = self._resolve_bool_override(
@@ -218,6 +223,19 @@ class ChannelManager:
             section, "show_reasoning", self.config.channels.show_reasoning,
         )
         return channel
+
+    def _wire_subagent_broadcast(self, channel: Any) -> None:
+        """Pipe SubagentManager events into the websocket fan-out."""
+        if self._subagent_manager is None:
+            return
+
+        async def _broadcast(payload: dict[str, Any]) -> None:
+            chat_id = payload.get("chat_id")
+            if not chat_id:
+                return
+            await channel.send_subagent_update(chat_id, payload)
+
+        self._subagent_manager.set_event_callback(_broadcast)
 
     def _init_channels(self) -> None:
         """Initialize enabled runtimes from dependency-free channel descriptors."""

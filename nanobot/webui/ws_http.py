@@ -189,6 +189,7 @@ class GatewayHTTPHandler:
         local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
+        subagent_manager: Any | None = None,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -207,6 +208,7 @@ class GatewayHTTPHandler:
         self.local_trigger_store = local_trigger_store
         self.cron_pending_job_ids = cron_pending_job_ids
         self.local_trigger_pending_ids = local_trigger_pending_ids
+        self.subagent_manager = subagent_manager
         self._log = log
         self._runtime_surface = runtime_surface
 
@@ -411,6 +413,10 @@ class GatewayHTTPHandler:
         m = re.match(r"^/api/sessions/([^/]+)/file-preview$", got)
         if m:
             return self._handle_file_preview(request, m.group(1))
+
+        m = re.match(r"^/api/sessions/([^/]+)/subagents/([^/]+)$", got)
+        if m:
+            return self._handle_session_subagent(request, m.group(1), m.group(2))
 
         m = re.match(r"^/api/sessions/([^/]+)/automations$", got)
         if m:
@@ -727,6 +733,27 @@ class GatewayHTTPHandler:
                 return _http_json_response({"available": False})
             return _http_error(e.status, e.message)
         return _http_json_response(payload)
+
+    def _handle_session_subagent(
+        self,
+        request: WsRequest,
+        key: str,
+        task_id: str,
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not _is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+        manager = getattr(self, "subagent_manager", None)
+        if manager is None:
+            return _http_error(503, "subagent manager unavailable")
+        status = manager.get_status(task_id)
+        if status is None:
+            return _http_error(404, "subagent not found")
+        return _http_json_response(status.to_payload())
 
     def _handle_session_automations(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):

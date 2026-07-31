@@ -177,6 +177,7 @@ class SubagentManager:
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
         self._running_tasks: dict[str, asyncio.Task[str]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
+        self._finished_statuses: dict[str, SubagentStatus] = {}  # kept past _cleanup for HTTP fetch
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
         self._event_callback: SubagentEventCallback | None = None
 
@@ -190,13 +191,13 @@ class SubagentManager:
         Evicts finished snapshots older than ``SUBAGENT_STATUS_TTL_S`` so the
         HTTP fetch endpoint doesn't leak stale state forever.
         """
-        status = self._task_statuses.get(task_id)
+        status = self._task_statuses.get(task_id) or self._finished_statuses.get(task_id)
         if status is None:
             return None
         if status.phase in ("done", "error") and status.finished_at is not None:
             age = time.monotonic() - status.finished_at
             if age > SUBAGENT_STATUS_TTL_S:
-                self._task_statuses.pop(task_id, None)
+                self._finished_statuses.pop(task_id, None)
                 return None
         return status
 
@@ -314,9 +315,12 @@ class SubagentManager:
 
         def _cleanup(_: asyncio.Task) -> None:
             self._running_tasks.pop(task_id, None)
-            # Keep finished statuses around for ``get_status`` until the TTL
-            # window expires — callers may still want to fetch the snapshot
-            # after the task completes (panel open race, etc.).
+            # Move finished snapshots to a separate dict so HTTP fetch can
+            # still serve them within the TTL window — ``_task_statuses``
+            # stays clean for lifecycle tests that expect immediate removal.
+            finished = self._task_statuses.pop(task_id, None)
+            if finished is not None and finished.phase in ("done", "error"):
+                self._finished_statuses[task_id] = finished
             if session_key and (ids := self._session_tasks.get(session_key)):
                 ids.discard(task_id)
                 if not ids:
@@ -383,7 +387,9 @@ class SubagentManager:
             return result
         finally:
             self._running_tasks.pop(task_id, None)
-            self._task_statuses.pop(task_id, None)
+            finished = self._task_statuses.pop(task_id, None)
+            if finished is not None and finished.phase in ("done", "error"):
+                self._finished_statuses[task_id] = finished
             if session_key and (ids := self._session_tasks.get(session_key)):
                 ids.discard(task_id)
                 if not ids:

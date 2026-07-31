@@ -627,6 +627,13 @@ class WebSocketChannel(BaseChannel):
             event, payload = await webui_transcription_event(envelope)
             await self._send_event(connection, event, **payload)
             return
+        if t == "subscribe_subagent":
+            task_id = envelope.get("task_id")
+            if not isinstance(task_id, str) or not task_id:
+                await self._send_event(connection, "error", detail="missing task_id")
+                return
+            await self._send_event(connection, "subagent_subscribed", task_id=task_id)
+            return
         if t == "message":
             cid = envelope.get("chat_id")
             content = envelope.get("content")
@@ -1067,6 +1074,16 @@ class WebSocketChannel(BaseChannel):
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" goal_state ")
+
+    async def send_subagent_update(self, chat_id: str, payload: dict[str, Any]) -> None:
+        """Push a subagent status frame to subscribers of *chat_id*."""
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
+        body = {"event": "subagent_update", "chat_id": chat_id, **payload}
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" subagent_update ")
 
     async def send_goal_status(
         self,

@@ -3603,3 +3603,84 @@ def test_handle_webui_thread_get_does_not_backfill_hidden_subagent_result(
     body = json.loads(resp.body.decode())
     assert [message["role"] for message in body["messages"]] == ["assistant"]
     assert [message["content"] for message in body["messages"]] == ["subagent summary"]
+
+
+def test_handle_session_subagent_returns_snapshot(tmp_path: Path) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.schema import AgentDefaults
+
+    workspace = tmp_path
+    manager = SubagentManager(
+        workspace=workspace,
+        bus=MessageBus(),
+        max_tool_result_chars=AgentDefaults().max_tool_result_chars,
+    )
+    status = manager._task_statuses["task-1"] = type("S", (), {})()
+    # Build a real SubagentStatus to keep the contract honest.
+    from nanobot.agent.subagent import SubagentStatus
+
+    status = SubagentStatus(
+        task_id="task-1",
+        label="Refactor",
+        task_description="do the thing",
+        started_at=0.0,
+        phase="done",
+        iteration=2,
+        result="all done",
+    )
+    status.chat_id = "chat-1"
+    manager._task_statuses["task-1"] = status
+
+    gateway = _basic_handler(MagicMock(), workspace_path=workspace)
+    gateway.http.subagent_manager = manager
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    enc = quote("websocket:chat-1", safe="")
+    task_id = quote("task-1", safe="")
+    req = Request(
+        f"/api/sessions/{enc}/subagents/{task_id}",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+
+    resp = gateway.http._handle_session_subagent(req, enc, "task-1")
+
+    assert resp.status_code == 200
+    body = json.loads(resp.body.decode())
+    assert body["task_id"] == "task-1"
+    assert body["phase"] == "done"
+    assert body["result"] == "all done"
+    assert body["chat_id"] == "chat-1"
+
+
+def test_handle_session_subagent_returns_404_when_missing(tmp_path: Path) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.schema import AgentDefaults
+
+    manager = SubagentManager(
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=AgentDefaults().max_tool_result_chars,
+    )
+    gateway = _basic_handler(MagicMock(), workspace_path=tmp_path)
+    gateway.http.subagent_manager = manager
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    enc = quote("websocket:chat-1", safe="")
+    req = Request(
+        f"/api/sessions/{enc}/subagents/missing",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+
+    resp = gateway.http._handle_session_subagent(req, enc, "missing")
+
+    assert resp.status_code == 404

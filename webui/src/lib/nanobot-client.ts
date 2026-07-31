@@ -421,6 +421,10 @@ export class NanobotClient {
     });
   }
 
+  sendEnvelope(frame: Outbound): void {
+    this.queueSend(frame);
+  }
+
   setWorkspaceScope(chatId: string, workspaceScope: WorkspaceScopePayload): void {
     this.knownChats.add(chatId);
     this.queueSend({

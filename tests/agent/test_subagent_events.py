@@ -97,8 +97,13 @@ class TestEventCallback:
         sm.set_event_callback(bad_cb)
         await sm.spawn("task", runtime=_runtime(), origin_chat_id="c3")
         await _drain(sm)
-        # Subagent still completed despite callback raising.
-        assert any(s.result == "ok" for s in sm._task_statuses.values())
+        # Subagent still completed despite callback raising; snapshot survives
+        # the cleanup callback via the TTL window.
+        all_ids = list(sm._task_statuses) + list(sm._finished_statuses)
+        tid = all_ids[0]
+        snapshot = sm.get_status(tid)
+        assert snapshot is not None
+        assert snapshot.result == "ok"
 
 
 class TestGetStatus:
@@ -134,10 +139,10 @@ class TestGetStatus:
         ))
         await sm.spawn("task", runtime=_runtime())
         await _drain(sm)
-        tid = next(iter(sm._task_statuses.keys()))
+        tid = next(iter(sm._finished_statuses.keys()))
         # Force the snapshot to look finished long ago.
-        sm._task_statuses[tid].finished_at = time.monotonic() - SUBAGENT_STATUS_TTL_S - 1
+        sm._finished_statuses[tid].finished_at = time.monotonic() - SUBAGENT_STATUS_TTL_S - 1
         # First call evicts; second call returns None.
         assert sm.get_status(tid) is None
         assert sm.get_status(tid) is None
-        assert tid not in sm._task_statuses
+        assert tid not in sm._finished_statuses
