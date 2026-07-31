@@ -186,19 +186,8 @@ import type {
   WebuiDefaultAccessMode,
 } from "@/lib/types";
 
-export type SettingsSectionKey =
-  | "overview"
-  | "appearance"
-  | "models"
-  | "image"
-  | "voice"
-  | "browser"
-  | "channels"
-  | "apps"
-  | "automations"
-  | "skills"
-  | "runtime"
-  | "advanced";
+export type { SettingsSectionKey } from "@/lib/types";
+import type { SettingsSectionKey } from "@/lib/types";
 
 function isProviderOAuthAuthorizationRequired(
   payload: ProviderOAuthLoginResult,

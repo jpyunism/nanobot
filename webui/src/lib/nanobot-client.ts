@@ -139,6 +139,7 @@ export class NanobotClient {
   private pendingNewChat: PendingRequest<string> | null = null;
   private pendingTranscriptions = new Map<string, PendingRequest<string>>();
   private pendingSystemCommands = new Map<string, PendingRequest<void>>();
+  private pendingProjectOps = new Map<string, PendingRequest<unknown> & { event: string }>();
   // Frames queued while the socket is not yet OPEN
   private sendQueue: Outbound[] = [];
   private reconnectAttempts = 0;
@@ -430,6 +431,95 @@ export class NanobotClient {
     });
   }
 
+  addProjectFile(
+    projectId: string,
+    name: string,
+    dataUrl: string,
+    timeoutMs: number = 60_000,
+  ): Promise<{
+    project_id: string;
+    file: { name: string; size: number; mime: string; path: string };
+  }> {
+    return this.projectRequest<{
+      project_id: string;
+      file: { name: string; size: number; mime: string; path: string };
+    }>(
+      "project_file_added",
+      (resolve, reject) => {
+        const requestId = crypto.randomUUID();
+        this.queueSend({
+          type: "add_project_file",
+          project_id: projectId,
+          name,
+          data_url: dataUrl,
+          request_id: requestId,
+        });
+        return { resolve, reject, requestId };
+      },
+      timeoutMs,
+    );
+  }
+
+  bindProject(chatId: string, projectId: string, timeoutMs: number = 10_000) {
+    return this.projectRequest<{ chat_id: string; project_id: string; workspace_path: string }>(
+      "project_bound",
+      (resolve, reject) => {
+        const requestId = crypto.randomUUID();
+        this.queueSend({
+          type: "bind_project",
+          chat_id: chatId,
+          project_id: projectId,
+          request_id: requestId,
+        });
+        return { resolve, reject, requestId };
+      },
+      timeoutMs,
+    );
+  }
+
+  unbindProject(chatId: string, timeoutMs: number = 10_000) {
+    return this.projectRequest<{ chat_id: string }>(
+      "project_unbound",
+      (resolve, reject) => {
+        const requestId = crypto.randomUUID();
+        this.queueSend({
+          type: "unbind_project",
+          chat_id: chatId,
+          request_id: requestId,
+        });
+        return { resolve, reject, requestId };
+      },
+      timeoutMs,
+    );
+  }
+
+  private projectRequest<T>(
+    eventName: string,
+    build: (resolve: (value: T) => void, reject: (err: Error) => void) => {
+      resolve: (value: T) => void;
+      reject: (err: Error) => void;
+      requestId: string;
+    },
+    timeoutMs: number,
+  ): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const pending = build(resolve, (err) => {
+        this.pendingProjectOps.delete(pending.requestId);
+        reject(err);
+      });
+      const timer = setTimeout(() => {
+        this.pendingProjectOps.delete(pending.requestId);
+        reject(new Error(`${eventName} timed out`));
+      }, timeoutMs);
+      this.pendingProjectOps.set(pending.requestId, {
+        event: eventName,
+        resolve: pending.resolve as (value: unknown) => void,
+        reject: pending.reject,
+        timer,
+      });
+    });
+  }
+
   // -- internals ---------------------------------------------------------
 
   private setStatus(status: ConnectionStatus): void {
@@ -536,6 +626,28 @@ export class NanobotClient {
       }
     }
 
+    const requestId = "request_id" in parsed && typeof parsed.request_id === "string"
+      ? parsed.request_id
+      : null;
+    if (requestId) {
+      if (parsed.event === "project_file_added") {
+        this.resolveProjectOp(requestId, parsed);
+        return;
+      }
+      if (parsed.event === "project_bound") {
+        this.resolveProjectOp(requestId, parsed);
+        return;
+      }
+      if (parsed.event === "project_unbound") {
+        this.resolveProjectOp(requestId, parsed);
+        return;
+      }
+      if (parsed.event === "error") {
+        this.rejectProjectOp(requestId, parsed);
+        return;
+      }
+    }
+
     if (parsed.event === "error" && this.pendingNewChat) {
       clearTimeout(this.pendingNewChat.timer);
       const detail = typeof parsed.detail === "string" ? parsed.detail : "server error";
@@ -607,6 +719,11 @@ export class NanobotClient {
       pending.reject(new Error("socket closed"));
     }
     this.pendingSystemCommands.clear();
+    for (const pending of this.pendingProjectOps.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("socket closed"));
+    }
+    this.pendingProjectOps.clear();
     // Surface structured reasons *before* reconnect logic so the UI can
     // display the error even while the client transparently reconnects.
     // Browsers populate ``CloseEvent.code`` with the wire-level close code;
@@ -669,6 +786,24 @@ export class NanobotClient {
     clearTimeout(pending.timer);
     this.pendingSystemCommands.delete(turnId);
     pending.resolve();
+  }
+
+  private resolveProjectOp(requestId: string, payload: unknown): void {
+    const pending = this.pendingProjectOps.get(requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingProjectOps.delete(requestId);
+    pending.resolve(payload as never);
+  }
+
+  private rejectProjectOp(requestId: string, payload: { detail?: string; reason?: string }): void {
+    const pending = this.pendingProjectOps.get(requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingProjectOps.delete(requestId);
+    const detail = payload?.detail || "error";
+    const reason = payload?.reason ? `:${payload.reason}` : "";
+    pending.reject(new Error(`${detail}${reason}`));
   }
 
   private scheduleReconnect(): void {

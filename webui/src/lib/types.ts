@@ -1,3 +1,17 @@
+export type SettingsSectionKey =
+  | "overview"
+  | "appearance"
+  | "models"
+  | "image"
+  | "voice"
+  | "browser"
+  | "channels"
+  | "apps"
+  | "automations"
+  | "skills"
+  | "runtime"
+  | "advanced";
+
 export type Role = "user" | "assistant" | "tool" | "system";
 
 /** "trace" rows are intermediate agent breadcrumbs (tool-call hints,
@@ -252,6 +266,8 @@ export interface ChatSummary {
   /** Unix epoch seconds when this session currently has a turn in flight. */
   runStartedAt?: number | null;
   workspaceScope?: WorkspaceScopePayload | null;
+  /** Project id when this chat is bound to a project. */
+  projectId?: string | null;
 }
 
 export type WorkspaceAccessMode = "restricted" | "full";
@@ -1173,7 +1189,25 @@ export type InboundEvent =
       detail?: string;
       provider?: string;
     }
-  | { event: "error"; chat_id?: string; detail?: string; reason?: string };
+  | {
+      event: "project_file_added";
+      project_id: string;
+      file: ProjectFile;
+      request_id?: string;
+    }
+  | {
+      event: "project_bound";
+      chat_id: string;
+      project_id: string;
+      workspace_path: string;
+      request_id?: string;
+    }
+  | {
+      event: "project_unbound";
+      chat_id: string;
+      request_id?: string;
+    }
+  | { event: "error"; chat_id?: string; detail?: string; reason?: string; project_id?: string; request_id?: string };
 
 /** Base64-encoded file attached to an outbound ``message`` envelope.
  *
@@ -1256,4 +1290,43 @@ export type Outbound =
       /** Marks messages sent by the embedded WebUI, without changing the
        * generic websocket protocol for other clients. */
       webui?: true;
-    };
+    }
+  | { type: "add_project_file"; project_id: string; name: string; data_url: string; request_id?: string }
+  | { type: "bind_project"; chat_id: string; project_id: string; request_id?: string }
+  | { type: "unbind_project"; chat_id: string; request_id?: string };
+
+export interface ProjectFile {
+  name: string;
+  size: number;
+  mime: string;
+  path: string;
+}
+
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  file_count: number;
+  total_bytes: number;
+  workspace_path: string;
+}
+
+export interface ProjectDetail extends ProjectSummary {
+  instructions_md: string;
+  files: ProjectFile[];
+}
+
+export interface ProjectListResponse {
+  projects: ProjectSummary[];
+}
+
+export interface ProjectChatsPayload {
+  chats: Array<{
+    key: string;
+    chat_id: string;
+    title: string;
+    preview: string;
+    updated_at: string;
+  }>;
+}

@@ -1,6 +1,22 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
+import { readFileSync } from "node:fs";
+import { execSync } from "node:child_process";
+
+const pkg = JSON.parse(
+  readFileSync(path.resolve(__dirname, "package.json"), "utf8"),
+) as { version: string };
+let commitSha = "dev";
+try {
+  commitSha = execSync("git rev-parse --short HEAD", {
+    cwd: path.resolve(__dirname, "..", "nanobot"),
+  })
+    .toString()
+    .trim() || "dev";
+} catch {
+  // not a git checkout
+}
 
 export function webuiManualChunk(id: string): string | undefined {
   if (id.includes("node_modules/refractor/lang/")) {
@@ -71,6 +87,10 @@ export default defineConfig(({ mode }) => {
           manualChunks: webuiManualChunk,
         },
       },
+    },
+    define: {
+      __WEBUI_VERSION__: JSON.stringify(pkg.version),
+      __WEBUI_COMMIT__: JSON.stringify(commitSha),
     },
     server: {
       host: "127.0.0.1",

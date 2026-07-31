@@ -6,6 +6,7 @@ import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailab
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
+import { ChatProjectChip } from "@/components/thread/ChatProjectChip";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import type { ModelPresetOption } from "@/components/thread/ModelPresetBadge";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
@@ -1053,6 +1054,14 @@ export function ThreadShell({
   const sessionInfoAction = historyKey ? (
     <SessionInfoPopover sessionKey={historyKey} token={token} title={title} />
   ) : undefined;
+  const projectChip = historyKey && session ? (
+    <ChatProjectChip
+      chatId={session.chatId}
+      projectId={session.projectId}
+      token={token}
+      onChanged={onTurnEnd}
+    />
+  ) : null;
   const promptNavigatorAction = historyKey ? (
     <PromptNavigator
       messages={displayMessages}
@@ -1075,6 +1084,7 @@ export function ThreadShell({
             minimal={!session && !loading}
             promptNavigatorAction={promptNavigatorAction}
             sessionInfoAction={sessionInfoAction}
+            projectChip={projectChip}
           />
         ) : null}
         <FilePreviewAvailabilityProvider

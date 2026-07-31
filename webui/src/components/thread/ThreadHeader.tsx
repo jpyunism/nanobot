@@ -16,6 +16,7 @@ interface ThreadHeaderProps {
   minimal?: boolean;
   promptNavigatorAction?: ReactNode;
   sessionInfoAction?: ReactNode;
+  projectChip?: ReactNode;
 }
 
 export function ThreadHeader({
@@ -29,6 +30,7 @@ export function ThreadHeader({
   minimal = false,
   promptNavigatorAction,
   sessionInfoAction,
+  projectChip,
 }: ThreadHeaderProps) {
   const { t } = useTranslation();
 
@@ -54,8 +56,9 @@ export function ThreadHeader({
           <Menu className="h-3.5 w-3.5" />
         </Button>
         {!minimal ? (
-          <div className="flex min-w-0 items-center rounded-md px-1.5 py-1 text-[12px] font-medium text-muted-foreground">
+          <div className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-[12px] font-medium text-muted-foreground">
             <span className="max-w-[min(60vw,32rem)] truncate">{title}</span>
+            {projectChip}
           </div>
         ) : null}
       </div>

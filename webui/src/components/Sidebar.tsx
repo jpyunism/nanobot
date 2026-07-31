@@ -3,6 +3,7 @@ import {
   Archive,
   Brain,
   CalendarClock,
+  FolderKanban,
   Menu,
   Search,
   Settings,
@@ -13,6 +14,7 @@ import { useTranslation } from "react-i18next";
 
 import { ChatList } from "@/components/ChatList";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
+import { WebuiVersionBadge } from "@/components/WebuiVersionBadge";
 import { Button } from "@/components/ui/button";
 import type {
   ChatSummary,
@@ -37,9 +39,10 @@ interface SidebarProps {
   onOpenApps: () => void;
   onOpenSkills: () => void;
   onOpenAutomations: () => void;
+  onOpenProjects?: () => void;
   onSettingsIntent?: () => void;
   onOpenSearch: () => void;
-  activeUtility?: "apps" | "skills" | "automations" | null;
+  activeUtility?: "apps" | "skills" | "automations" | "projects" | null;
   onToggleArchived: () => void;
   onCollapse: () => void;
   onExpand?: () => void;
@@ -153,6 +156,16 @@ export function Sidebar(props: SidebarProps) {
           onClick={props.onOpenSearch}
           icon={<Search className="h-4 w-4" />}
         />
+        {props.onOpenProjects && (
+          <SidebarActionButton
+            collapsed={collapsed}
+            label={t("sidebar.projects", { defaultValue: "Projects" })}
+            onClick={props.onOpenProjects}
+            onIntent={props.onSettingsIntent}
+            active={props.activeUtility === "projects"}
+            icon={<FolderKanban className="h-4 w-4" />}
+          />
+        )}
         <SidebarActionButton
           collapsed={collapsed}
           label={t("sidebar.apps")}
@@ -241,6 +254,7 @@ export function Sidebar(props: SidebarProps) {
         />
         <ConnectionBadge />
       </div>
+      <WebuiVersionBadge collapsed={collapsed} />
     </nav>
   );
 }

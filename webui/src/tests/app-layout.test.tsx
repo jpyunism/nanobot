@@ -194,6 +194,21 @@ vi.mock("@/lib/bootstrap", () => ({
   loadSavedSecret: vi.fn(() => ""),
   saveSecret: vi.fn(),
   clearSavedSecret: vi.fn(),
+  isBootstrapAuthRequired: (error: unknown) => {
+    if (error && typeof error === "object" && "name" in error) {
+      if ((error as { name: string }).name === "BootstrapAuthRequiredError") {
+        return true;
+      }
+    }
+    const msg = error instanceof Error ? error.message : String(error);
+    return msg.includes("HTTP 401") || msg.includes("HTTP 403");
+  },
+  bootstrapTokenExpiresAt: (expiresInSeconds: number) =>
+    Date.now() + Math.max(0, expiresInSeconds) * 1000,
+  tokenRefreshDelayMs: (expiresAt: number) => {
+    const remaining = Math.max(0, expiresAt - Date.now());
+    return Math.max(5_000, remaining - 30_000);
+  },
 }));
 
 vi.mock("@/lib/nanobot-client", () => {
