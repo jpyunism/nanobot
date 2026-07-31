@@ -44,9 +44,12 @@ class WhatsAppConfig(Base):
 class _NeonizeAPI(NamedTuple):
     NewAClient: Any
     ConnectedEv: Any
+    ConnectFailureEv: Any
     DisconnectedEv: Any
+    LoggedOutEv: Any
     MessageEv: Any
     PairStatusEv: Any
+    StreamErrorEv: Any
     build_jid: Any
 
 
@@ -80,7 +83,15 @@ def _load_neonize() -> _NeonizeAPI:
 
     try:
         from neonize.aioze.client import NewAClient
-        from neonize.aioze.events import ConnectedEv, DisconnectedEv, MessageEv, PairStatusEv
+        from neonize.aioze.events import (
+            ConnectedEv,
+            ConnectFailureEv,
+            DisconnectedEv,
+            LoggedOutEv,
+            MessageEv,
+            PairStatusEv,
+            StreamErrorEv,
+        )
         from neonize.utils.jid import build_jid
     except ImportError as exc:
         raise RuntimeError(
@@ -92,9 +103,12 @@ def _load_neonize() -> _NeonizeAPI:
     _NEONIZE_API = _NeonizeAPI(
         NewAClient=NewAClient,
         ConnectedEv=ConnectedEv,
+        ConnectFailureEv=ConnectFailureEv,
         DisconnectedEv=DisconnectedEv,
+        LoggedOutEv=LoggedOutEv,
         MessageEv=MessageEv,
         PairStatusEv=PairStatusEv,
+        StreamErrorEv=StreamErrorEv,
         build_jid=build_jid,
     )
     return _NEONIZE_API
@@ -731,6 +745,43 @@ class WhatsAppChannel(BaseChannel):
                     login_result.set_exception(exc)
                 raise exc
             self.logger.info("WhatsApp pair status: {}", event)
+
+        @client.event(api.LoggedOutEv)
+        async def _on_logged_out(_: Any, event: Any) -> None:
+            reason = _safe_attr(event, "Reason", 0)
+            on_connect = _safe_attr(event, "OnConnect", False)
+            self.logger.warning(
+                "WhatsApp logged out: reason={} on_connect={}", reason, on_connect
+            )
+            if login_result is not None and not login_result.done():
+                login_result.set_exception(
+                    RuntimeError(
+                        "WhatsApp logged out (reason={} on_connect={}); "
+                        "this usually means the session was opened on another device. "
+                        "Run `nanobot channels login whatsapp --force` to re-authenticate.".format(
+                            reason, on_connect
+                        )
+                    )
+                )
+
+        @client.event(api.ConnectFailureEv)
+        async def _on_connect_failure(_: Any, event: Any) -> None:
+            reason = _safe_attr(event, "Reason", 0)
+            message = _safe_attr(event, "Message", "")
+            self.logger.warning("WhatsApp connect failure: reason={} message={}", reason, message)
+            if login_result is not None and not login_result.done():
+                login_result.set_exception(
+                    RuntimeError(f"WhatsApp connect failure: {message or reason}")
+                )
+
+        @client.event(api.StreamErrorEv)
+        async def _on_stream_error(_: Any, event: Any) -> None:
+            code = _safe_attr(event, "Code", "")
+            self.logger.warning("WhatsApp stream error: code={}", code)
+            if login_result is not None and not login_result.done():
+                login_result.set_exception(
+                    RuntimeError(f"WhatsApp stream error: {code}")
+                )
 
         if not handle_messages:
             return

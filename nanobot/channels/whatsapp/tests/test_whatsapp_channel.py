@@ -88,9 +88,12 @@ def _patch_neonize_api(monkeypatch) -> None:
         _NeonizeAPI(
             NewAClient=object,
             ConnectedEv=object(),
+            ConnectFailureEv=object(),
             DisconnectedEv=object(),
+            LoggedOutEv=object(),
             MessageEv=object(),
             PairStatusEv=object(),
+            StreamErrorEv=object(),
             build_jid=lambda user, server="s.whatsapp.net": (user, server),
         ),
     )
@@ -185,6 +188,68 @@ async def test_login_fails_when_connect_task_fails(monkeypatch) -> None:
     ch._new_client = MagicMock(return_value=client)
 
     assert await ch.login() is False
+    assert client._stop_calls == 1
+
+
+class _LoggedOutClient(_FakeLoginClient):
+    """Fake client that fires LoggedOutEv on connect instead of ConnectedEv.
+
+    Mirrors the real whatsmeow behavior when a 401 "logged out from another
+    device" arrives: the session is deleted and the websocket closes, but
+    the channel must still surface a clear error to the user instead of
+    hanging on `await login_result` forever.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.logged_out = False
+
+    async def connect(self) -> None:
+        from nanobot.channels.whatsapp import runtime as whatsapp_module
+        ev = whatsapp_module._NEONIZE_API.LoggedOutEv
+        # Reason=0 is the generic logged-out code in whatsmeow.
+        self.logged_out = True
+        await self.handlers[ev](self, _Proto(Reason=0, OnConnect=False))
+
+
+@pytest.mark.asyncio
+async def test_login_fails_when_session_was_logged_out(monkeypatch) -> None:
+    """If whatsmeow fires LoggedOutEv (e.g. 401 from another device),
+    login() must fail with a clear error instead of hanging forever
+    waiting for ConnectedEv.
+    """
+    _patch_neonize_api(monkeypatch)
+    client = _LoggedOutClient()
+    ch = _make_channel()
+    ch._new_client = MagicMock(return_value=client)
+
+    assert await ch.login() is False
+    assert client.logged_out is True
+    assert client._stop_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_login_fails_when_connect_failure_event_fires(monkeypatch) -> None:
+    """ConnectFailureEv must also resolve login_result with an error."""
+    _patch_neonize_api(monkeypatch)
+    from nanobot.channels.whatsapp import runtime as whatsapp_module
+
+    class _ConnectFailureClient(_FakeLoginClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.connect_failure = False
+
+        async def connect(self) -> None:
+            ev = whatsapp_module._NEONIZE_API.ConnectFailureEv
+            self.connect_failure = True
+            await self.handlers[ev](self, _Proto(Reason=403, Message="forbidden"))
+
+    client = _ConnectFailureClient()
+    ch = _make_channel()
+    ch._new_client = MagicMock(return_value=client)
+
+    assert await ch.login() is False
+    assert client.connect_failure is True
     assert client._stop_calls == 1
 
 
