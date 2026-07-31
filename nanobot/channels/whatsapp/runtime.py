@@ -367,6 +367,10 @@ class WhatsAppChannel(BaseChannel):
         # Per-group turn queue: one worker per chat processes messages sequentially.
         self._group_queues: dict[str, asyncio.Queue[tuple[Any, str | None]]] = {}
         self._group_queue_tasks: dict[str, asyncio.Task[None]] = {}
+        # Lifecycle hook fired by the ConnectedEv handler. start() installs
+        # a callback here to signal that login completed, so the
+        # login_timeout_s cap doesn't tear down a healthy session.
+        self._on_connected_for_lifecycle: Callable[[], None] | None = None
         # Persisted display-name mappings per chat (phone/sender_id -> push_name).
         self._display_names: dict[str, dict[str, str]] = {}
         self._display_names_path = get_runtime_subdir("whatsapp-auth") / "display_names.json"
@@ -474,18 +478,36 @@ class WhatsAppChannel(BaseChannel):
                     "WhatsApp login timeout: {} seconds; channel will stop if no login completes by then.",
                     login_timeout_s,
                 )
+                # The cap only matters before login completes. Once we're
+                # connected, idle() running past the cap must NOT tear down
+                # the channel — that would kill a healthy session every
+                # 300s. Race the login-completion signal against the cap,
+                # then block on idle() for as long as the session stays up.
+                connected_event = asyncio.Event()
+                self._on_connected_for_lifecycle = connected_event.set
                 try:
-                    await asyncio.wait_for(client.idle(), timeout=login_timeout_s)
-                except asyncio.TimeoutError:
-                    if not self._connected:
-                        self.logger.warning(
-                            "WhatsApp login not completed in {} seconds; stopping channel. "
-                            "Scan the QR and restart the gateway to retry.",
-                            login_timeout_s,
+                    try:
+                        await asyncio.wait_for(
+                            connected_event.wait(), timeout=login_timeout_s
                         )
-                        # Returning here lets the `finally` call client.stop()
-                        # which breaks the whatsmeow internal reconnect loop.
-                        return
+                    except asyncio.TimeoutError:
+                        if self._connected:
+                            # Login already happened — the cap doesn't apply.
+                            # Block on idle() so the channel keeps processing
+                            # events until something actually disconnects.
+                            await client.idle()
+                        else:
+                            self.logger.warning(
+                                "WhatsApp login not completed in {} seconds; stopping channel. "
+                                "Scan the QR and restart the gateway to retry.",
+                                login_timeout_s,
+                            )
+                            return
+                finally:
+                    self._on_connected_for_lifecycle = None
+                # Login completed within the cap — block on idle() so the
+                # channel keeps the websocket alive and processes events.
+                await client.idle()
             else:
                 await client.idle()
         except asyncio.CancelledError:
@@ -726,6 +748,9 @@ class WhatsAppChannel(BaseChannel):
             if login_result is not None and not login_result.done():
                 login_result.set_result(None)
             self.logger.info("WhatsApp connected")
+            lifecycle_cb = getattr(self, "_on_connected_for_lifecycle", None)
+            if lifecycle_cb is not None:
+                lifecycle_cb()
 
         @client.event(api.DisconnectedEv)
         async def _on_disconnected(_: Any, event: Any) -> None:

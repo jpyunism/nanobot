@@ -369,6 +369,35 @@ async def test_start_completes_normally_when_login_succeeds(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_start_keeps_running_after_login_timeout_when_already_connected(
+    monkeypatch,
+) -> None:
+    """Regression: with login_timeout_s > 0 and a fast login, the channel
+    must NOT tear itself down when the cap elapses. Previously the cap
+    fired every 300s on healthy sessions, flipping is_running=False and
+    making the WebUI show the channel as 'stopped'.
+    """
+    _patch_neonize_api(monkeypatch)
+    client = _FakeLoginClient()
+    ch = _make_channel({"login_timeout_s": 1})
+    ch._new_client = MagicMock(return_value=client)
+
+    # _FakeLoginClient.connect() already fired ConnectedEv, so by the
+    # time start() schedules the cap the channel is connected. Wait
+    # longer than the cap to prove the channel stays up.
+    start_task = asyncio.create_task(ch.start())
+    await asyncio.sleep(1.5)
+    # Channel must still be running: the cap fired but login had already
+    # completed, so the channel fell through to blocking on idle().
+    assert ch._running is True
+    assert ch._connected is True
+    # Now release idle() and let start() return.
+    await client.stop()
+    await start_task
+    assert ch._running is False
+
+
+@pytest.mark.asyncio
 async def test_send_text_uses_neonize_send_message(monkeypatch) -> None:
     _patch_neonize_api(monkeypatch)
     client = SimpleNamespace(
