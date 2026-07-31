@@ -1,6 +1,12 @@
 import type { SettingsSectionKey } from "@/lib/types";
 
-export type ShellView = "chat" | "settings" | "apps" | "automations" | "skills";
+export type ShellView =
+  | "chat"
+  | "settings"
+  | "apps"
+  | "automations"
+  | "skills"
+  | "projects";
 
 export type ShellRoute = {
   view: ShellView;
@@ -103,6 +109,7 @@ export function readShellRoute(): ShellRoute {
   if (path === "/apps") return { view: "apps", activeKey, settingsSection: "apps" };
   if (path === "/automations") return { view: "automations", activeKey, settingsSection: "automations" };
   if (path === "/skills") return { view: "skills", activeKey, settingsSection: "skills" };
+  if (path === "/projects") return { view: "projects", activeKey, settingsSection: "overview" };
   if (path.startsWith("/chat/")) {
     const encoded = path.slice("/chat/".length);
     try {

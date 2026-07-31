@@ -421,12 +421,12 @@ export function useChatActions(args: UseChatActionsArgs): ActionsApi {
   }, [activeKey, navigate, sessions, setMobileSidebarOpen]);
 
   const onOpenUtility = useCallback(
-    (view: Extract<ShellView, "apps" | "automations" | "skills">) => {
+    (view: Extract<ShellView, "apps" | "automations" | "skills" | "projects">) => {
       dialogs.closeSessionSearch();
       navigate({
         view,
         activeKey,
-        settingsSection: view,
+        settingsSection: view === "projects" ? "overview" : view,
       });
       setMobileSidebarOpen(false);
     },

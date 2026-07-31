@@ -22,7 +22,9 @@ export type UtilityActions = {
   onOpenApps: () => void;
   onOpenAutomations: () => void;
   onOpenSkills: () => void;
-  onOpenUtility: (view: Extract<ShellView, "apps" | "automations" | "skills">) => void;
+  onOpenUtility: (
+    view: Extract<ShellView, "apps" | "automations" | "skills" | "projects">,
+  ) => void;
   onSettingsIntent: () => void;
   onSettingsSectionChange: (section: SettingsSectionKey) => void;
 };
@@ -35,9 +37,13 @@ export function useUtilityActions({
   loadSettingsView,
 }: Args): UtilityActions {
   const openUtility = useCallback(
-    (view: Extract<ShellView, "apps" | "automations" | "skills">) => {
+    (view: Extract<ShellView, "apps" | "automations" | "skills" | "projects">) => {
       closeSessionSearch();
-      navigate({ view, activeKey, settingsSection: view });
+      navigate({
+        view,
+        activeKey,
+        settingsSection: view === "projects" ? "overview" : view,
+      });
       setMobileSidebarOpen(false);
     },
     [activeKey, closeSessionSearch, navigate, setMobileSidebarOpen],

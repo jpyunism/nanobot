@@ -1,5 +1,6 @@
 import { Suspense, lazy, type ReactNode } from "react";
 import { ThreadShell } from "@/components/thread/ThreadShell";
+import { ProjectsView } from "@/components/ProjectsView";
 import type { ChatSummary, SettingsPayload, WorkspacesPayload, WorkspaceScopePayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -10,7 +11,13 @@ const SettingsView = lazy(() =>
 type ThreadProps = React.ComponentProps<typeof ThreadShell>;
 type SettingsProps = React.ComponentProps<typeof SettingsView>;
 
-export type MainView = "chat" | "settings" | "apps" | "automations" | "skills";
+export type MainView =
+  | "chat"
+  | "settings"
+  | "apps"
+  | "automations"
+  | "skills"
+  | "projects";
 
 type Args = {
   view: MainView;
@@ -115,12 +122,25 @@ function SettingsSurface(props: Args) {
 }
 
 export function MainView(props: Args) {
-  const isChat = props.view === "chat";
   return (
     <main
       className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background"
     >
-      {isChat ? <ChatSurface {...props} /> : <SettingsSurface {...props} />}
+      {props.view === "chat" ? (
+        <ChatSurface {...props} />
+      ) : props.view === "projects" ? (
+        <ProjectsSurface />
+      ) : (
+        <SettingsSurface {...props} />
+      )}
     </main>
+  );
+}
+
+function ProjectsSurface() {
+  return (
+    <div className="absolute inset-0 flex flex-col">
+      <ProjectsView />
+    </div>
   );
 }

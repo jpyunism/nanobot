@@ -4,7 +4,7 @@ import { displayTitle } from "@/lib/chat-groups";
 import type { ChatSummary, SidebarStatePayload } from "@/lib/types";
 
 type Args = {
-  view: "chat" | "settings" | "apps" | "automations" | "skills";
+  view: "chat" | "settings" | "apps" | "automations" | "skills" | "projects";
   activeSession: ChatSummary | null;
   sidebarState: SidebarStatePayload;
 };
@@ -33,6 +33,12 @@ export function useDocumentTitle({ view, activeSession, sidebarState }: Args) {
     if (view === "skills") {
       document.title = t("app.documentTitle.chat", {
         title: t("settings.nav.skills", { defaultValue: "Skills" }),
+      });
+      return;
+    }
+    if (view === "projects") {
+      document.title = t("app.documentTitle.chat", {
+        title: t("sidebar.projects", { defaultValue: "Projects" }),
       });
       return;
     }

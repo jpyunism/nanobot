@@ -6,7 +6,7 @@ type Args = {
   sessions: ChatSummary[];
   activeKey: string | null;
   loading: boolean;
-  view: "chat" | "settings" | "apps" | "automations" | "skills";
+  view: "chat" | "settings" | "apps" | "automations" | "skills" | "projects";
   sidebarState: SidebarStatePayload;
   workspaces: WorkspacesPayload | null;
   runningChatIdList: string[];
@@ -47,10 +47,16 @@ export function useSidebarProps({
       onOpenApps: () => onOpenUtility("apps"),
       onOpenAutomations: () => onOpenUtility("automations"),
       onOpenSkills: () => onOpenUtility("skills"),
+      onOpenProjects: () => onOpenUtility("projects"),
       onSettingsIntent: utility.onSettingsIntent,
       onOpenSearch: chatActions.onOpenSessionSearch,
       activeUtility:
-        view === "apps" || view === "automations" || view === "skills" ? view : null,
+        view === "apps" ||
+        view === "automations" ||
+        view === "skills" ||
+        view === "projects"
+          ? view
+          : null,
       onToggleArchived: chatActions.onToggleArchived,
       pinnedKeys: sidebarState.pinned_keys,
       archivedKeys: sidebarState.archived_keys,
