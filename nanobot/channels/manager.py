@@ -62,16 +62,23 @@ _RESTART_NOTICE_START_POLL_S = 0.25
 def _is_non_retriable_send_error(exc: BaseException) -> bool:
     """Return True if a send error should not be retried.
 
-    WhatsApp blocks first-message sends to new contacts with error 463
-    (whatsmeow issue tulir/whatsmeow#1197, July 2nd 2026 protocol change).
-    Retrying just keeps the block active longer, so fail fast and let the
-    caller surface the issue to the user.
+    WhatsApp blocks first-message sends to new contacts with rate-limit
+    errors 463 / 429 / 419 (whatsmeow issue tulir/whatsmeow#1197, July
+    2nd 2026 protocol change). Retrying just keeps the block active
+    longer, so fail fast and let the caller surface the issue to the
+    user. The same applies to the channel's own 463-cooldown gate: it
+    surfaces as a RuntimeError saying 'cooldown active', and retrying
+    would only re-trigger the gate.
     """
     cls_name = type(exc).__name__
     if cls_name == "SendMessageError":
         text = str(exc)
-        if "463" in text:
-            return True
+        for code in ("463", "429", "419"):
+            if code in text:
+                return True
+    text = str(exc)
+    if "cooldown active" in text:
+        return True
     return False
 
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import time
 import types
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -72,12 +74,28 @@ def _event(
     )
 
 
-def _make_channel(config: dict | None = None) -> WhatsAppChannel:
+def _make_channel(
+    config: dict | None = None,
+    *,
+    tmp_path: Path | None = None,
+    monkeypatch: pytest.MonkeyPatch | None = None,
+) -> WhatsAppChannel:
     merged = {"enabled": True, "allowFrom": ["*"]}
     if config:
         merged.update(config)
     ch = WhatsAppChannel(merged, MagicMock())
     ch._started_at = 0
+    if tmp_path is not None and monkeypatch is not None:
+        # Isolate the persistent throttle state per test so cooldown
+        # counters don't leak across tests or into the real runtime dir.
+        # The class-level patch is reverted automatically by monkeypatch
+        # at end of test.
+        state_file = tmp_path / "throttle.json"
+        monkeypatch.setattr(
+            whatsapp_module.WhatsAppChannel,
+            "_throttle_state_path",
+            lambda self, _f=state_file: _f,
+        )
     return ch
 
 
@@ -395,6 +413,186 @@ async def test_start_keeps_running_after_login_timeout_when_already_connected(
     await client.stop()
     await start_task
     assert ch._running is False
+
+
+def _patch_throttle_path(monkeypatch, tmp_path) -> Path:
+    """Redirect the channel's throttle state file to a tmp location."""
+    state_file = tmp_path / "throttle.json"
+    monkeypatch.setattr(
+        whatsapp_module.WhatsAppChannel,
+        "_throttle_state_path",
+        lambda self: state_file,
+    )
+    return state_file
+
+
+@pytest.mark.asyncio
+async def test_463_throttle_trips_after_threshold_and_blocks_sends(
+    monkeypatch, tmp_path
+) -> None:
+    """After ``throttle_threshold`` consecutive 463s, the channel stops
+    sending and surfaces a cooldown error. Once in cooldown, even a
+    hypothetical success on the same call must not resume sending —
+    the next send call must check the gate and bail.
+    """
+    _patch_neonize_api(monkeypatch)
+    state_file = _patch_throttle_path(monkeypatch, tmp_path)
+
+    from neonize.exc import SendMessageError
+
+    client = SimpleNamespace(
+        send_message=AsyncMock(
+            side_effect=SendMessageError("server returned error 463")
+        )
+    )
+    ch = _make_channel(
+        {"throttle_threshold": 3, "throttle_cooldown_s": 600},
+        tmp_path=tmp_path, monkeypatch=monkeypatch,
+    )
+    ch._client = client
+    ch._connected = True
+
+    from nanobot.bus.events import OutboundMessage
+    msg = OutboundMessage(channel="whatsapp", chat_id="56975746099", content="x")
+
+    # First two 463s: counter climbs but no cooldown yet.
+    for _ in range(2):
+        with pytest.raises(SendMessageError):
+            await ch.send(msg)
+    assert ch._check_throttle() is None
+    # Third 463: trips the cooldown.
+    with pytest.raises(SendMessageError):
+        await ch.send(msg)
+    assert ch._check_throttle() is not None
+    # Persisted to disk so a restart respects it.
+    assert state_file.exists()
+    data = json.loads(state_file.read_text())
+    assert data["consecutive_463"] == 3
+    assert data["cooldown_until"] > time.time()
+
+
+@pytest.mark.asyncio
+async def test_send_during_cooldown_raises_without_calling_client(
+    monkeypatch, tmp_path
+) -> None:
+    """Once the cooldown is active, send() must not even attempt the
+    underlying call. Otherwise we'd just hand WhatsApp another 463
+    and harden the throttle.
+    """
+    _patch_neonize_api(monkeypatch)
+    state_file = _patch_throttle_path(monkeypatch, tmp_path)
+
+    client = SimpleNamespace(send_message=AsyncMock())
+    ch = _make_channel(
+        {"throttle_threshold": 1, "throttle_cooldown_s": 600},
+        tmp_path=tmp_path, monkeypatch=monkeypatch,
+    )
+    ch._client = client
+    ch._connected = True
+
+    from nanobot.bus.events import OutboundMessage
+    msg = OutboundMessage(channel="whatsapp", chat_id="56975746099", content="hi")
+
+    # Trip the gate directly.
+    ch._save_throttle_state(consecutive=1, cooldown_until=time.time() + 600)
+
+    with pytest.raises(RuntimeError, match="cooldown active"):
+        await ch.send(msg)
+    client.send_message.assert_not_called()
+    # Cooldown state still on disk for the rest of the test.
+    assert state_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_cooldown_expires_and_send_resumes(monkeypatch, tmp_path) -> None:
+    """When cooldown_until is in the past, the next send() must check
+    the gate, see it expired, clear it, and proceed normally.
+    """
+    _patch_neonize_api(monkeypatch)
+    _patch_throttle_path(monkeypatch, tmp_path)
+
+    client = SimpleNamespace(send_message=AsyncMock())
+    ch = _make_channel(
+        {"throttle_threshold": 3, "throttle_cooldown_s": 600},
+        tmp_path=tmp_path, monkeypatch=monkeypatch,
+    )
+    ch._client = client
+    ch._connected = True
+
+    from nanobot.bus.events import OutboundMessage
+    msg = OutboundMessage(channel="whatsapp", chat_id="56975746099", content="hi")
+
+    # Pretend the cooldown expired 1 second ago.
+    ch._save_throttle_state(consecutive=3, cooldown_until=time.time() - 1)
+
+    await ch.send(msg)
+    client.send_message.assert_awaited_once()
+    # State should be cleared after a successful send.
+    data = json.loads(ch._throttle_state_path().read_text())
+    assert data == {"consecutive_463": 0, "cooldown_until": 0.0}
+
+
+@pytest.mark.asyncio
+async def test_successful_send_resets_consecutive_463(monkeypatch, tmp_path) -> None:
+    """A single non-463 success must reset the 463 counter so a stray
+    463 from earlier doesn't accumulate toward the next cooldown.
+    """
+    _patch_neonize_api(monkeypatch)
+    _patch_throttle_path(monkeypatch, tmp_path)
+
+    client = SimpleNamespace(send_message=AsyncMock())
+    ch = _make_channel(
+        {"throttle_threshold": 3, "throttle_cooldown_s": 600},
+        tmp_path=tmp_path, monkeypatch=monkeypatch,
+    )
+    ch._client = client
+    ch._connected = True
+
+    from nanobot.bus.events import OutboundMessage
+    msg = OutboundMessage(channel="whatsapp", chat_id="56975746099", content="hi")
+
+    # Two prior 463s (counter at 2, no cooldown).
+    ch._save_throttle_state(consecutive=2, cooldown_until=0.0)
+    await ch.send(msg)
+    data = json.loads(ch._throttle_state_path().read_text())
+    assert data == {"consecutive_463": 0, "cooldown_until": 0.0}
+
+
+@pytest.mark.asyncio
+async def test_throttle_threshold_zero_disables_cooldown(
+    monkeypatch, tmp_path
+) -> None:
+    """With threshold=0 the channel must keep sending through 463s
+    (the existing behaviour before the cooldown was added)."""
+    _patch_neonize_api(monkeypatch)
+    _patch_throttle_path(monkeypatch, tmp_path)
+
+    from neonize.exc import SendMessageError
+
+    client = SimpleNamespace(
+        send_message=AsyncMock(
+            side_effect=SendMessageError("server returned error 463")
+        )
+    )
+    ch = _make_channel(
+        {"throttle_threshold": 0, "throttle_cooldown_s": 600},
+        tmp_path=tmp_path, monkeypatch=monkeypatch,
+    )
+    ch._client = client
+    ch._connected = True
+
+    from nanobot.bus.events import OutboundMessage
+    msg = OutboundMessage(channel="whatsapp", chat_id="56975746099", content="x")
+
+    for _ in range(5):
+        with pytest.raises(SendMessageError):
+            await ch.send(msg)
+    # No cooldown persisted because the threshold is disabled.
+    assert ch._check_throttle() is None
+    assert not ch._throttle_state_path().exists()
+
+
+
 
 
 @pytest.mark.asyncio

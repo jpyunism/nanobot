@@ -39,6 +39,17 @@ class WhatsAppConfig(Base):
     # this many seconds the channel calls client.stop() and exits cleanly.
     # Set to 0 to disable (login runs forever, original behavior).
     login_timeout_s: int = Field(default=300, ge=0, le=3600)
+    # ponytail: 463 cooldown. WhatsApp replies with error 463 when it
+    # throttles a number (whatsmeow issue tulir/whatsmeow#1197). Hammering
+    # through the throttle hardens it into a real ban. After
+    # ``throttle_threshold`` consecutive 463s, the channel stops sending
+    # for ``throttle_cooldown_s`` seconds (state persisted to disk so a
+    # restart cannot bring a cooling number back early). The default
+    # 2-hour cooldown is conservative; the murpati.com reference suggests
+    # 24h once a number has been throttled, but starting shorter lets the
+    # user probe whether the block has lifted. Set threshold=0 to disable.
+    throttle_threshold: int = Field(default=3, ge=0, le=100)
+    throttle_cooldown_s: int = Field(default=7200, ge=0, le=604800)
 
 
 class _NeonizeAPI(NamedTuple):
@@ -408,6 +419,102 @@ class WhatsAppChannel(BaseChannel):
         except Exception:
             self.logger.exception("Failed to save WhatsApp display names")
 
+    def _throttle_state_path(self) -> Path:
+        return get_runtime_subdir("whatsapp-auth") / "throttle.json"
+
+    def _load_throttle_state(self) -> dict[str, Any]:
+        """Load persisted 463-throttle state. Missing file → empty state."""
+        path = self._throttle_state_path()
+        if not path.exists():
+            return {"consecutive_463": 0, "cooldown_until": 0.0}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            consecutive = int(data.get("consecutive_463", 0) or 0)
+            cooldown_until = float(data.get("cooldown_until", 0.0) or 0.0)
+        except Exception:
+            self.logger.exception("Failed to load WhatsApp throttle state; resetting")
+            return {"consecutive_463": 0, "cooldown_until": 0.0}
+        return {"consecutive_463": max(consecutive, 0), "cooldown_until": max(cooldown_until, 0.0)}
+
+    def _save_throttle_state(self, consecutive: int, cooldown_until: float) -> None:
+        """Persist throttle state atomically."""
+        path = self._throttle_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        try:
+            tmp.write_text(
+                json.dumps(
+                    {"consecutive_463": consecutive, "cooldown_until": cooldown_until},
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+            tmp.replace(path)
+        except Exception:
+            self.logger.exception("Failed to save WhatsApp throttle state")
+
+    def _check_throttle(self) -> float | None:
+        """Return remaining cooldown seconds if the channel is throttled, else None.
+
+        Expired cooldowns auto-clear so the next send can resume normally.
+        """
+        state = self._load_throttle_state()
+        cooldown_until = state["cooldown_until"]
+        now = time.time()
+        if cooldown_until and now >= cooldown_until:
+            if state["consecutive_463"] or cooldown_until:
+                self._save_throttle_state(0, 0.0)
+                self.logger.info(
+                    "WhatsApp 463 cooldown expired; sending resumed."
+                )
+            return None
+        if cooldown_until and now < cooldown_until:
+            return cooldown_until - now
+        return None
+
+    def _record_send_success(self) -> None:
+        """Reset the 463 counter on a successful send."""
+        state = self._load_throttle_state()
+        if state["consecutive_463"] or state["cooldown_until"]:
+            self._save_throttle_state(0, 0.0)
+
+    def _record_send_throttled(self) -> float | None:
+        """Bump the 463 counter and trip the cooldown if the threshold is reached.
+
+        Returns the cooldown duration in seconds if a new cooldown was just
+        tripped, otherwise None.
+        """
+        threshold = int(getattr(self.config, "throttle_threshold", 0) or 0)
+        if threshold <= 0:
+            return None
+        cooldown_s = int(getattr(self.config, "throttle_cooldown_s", 0) or 0)
+        if cooldown_s <= 0:
+            return None
+        state = self._load_throttle_state()
+        consecutive = state["consecutive_463"] + 1
+        now = time.time()
+        if state["cooldown_until"] and now < state["cooldown_until"]:
+            # Already cooling down; just persist the bumped counter.
+            self._save_throttle_state(consecutive, state["cooldown_until"])
+            return None
+        if consecutive >= threshold:
+            cooldown_until = now + cooldown_s
+            self._save_throttle_state(consecutive, cooldown_until)
+            self.logger.warning(
+                "WhatsApp 463 throttle tripped after {} consecutive errors; "
+                "pausing sends for {}s (~{}h) until {}. "
+                "After that, sends resume automatically on the next success.",
+                consecutive, cooldown_s, cooldown_s // 3600,
+                time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(cooldown_until)),
+            )
+            return float(cooldown_s)
+        self._save_throttle_state(consecutive, state["cooldown_until"])
+        self.logger.warning(
+            "WhatsApp 463 throttled ({}/{} before cooldown).",
+            consecutive, threshold,
+        )
+        return None
+
     def _remember_display_name(
         self, chat_id: str, sender_key: str, push_name: str | None
     ) -> str | None:
@@ -557,6 +664,18 @@ class WhatsAppChannel(BaseChannel):
         if client is None or not self._connected:
             raise RuntimeError("WhatsApp channel is not connected")
 
+        remaining = self._check_throttle()
+        if remaining is not None:
+            hours = remaining / 3600
+            self.logger.warning(
+                "WhatsApp 463 cooldown active; skipping send to {} "
+                "(~{}h remaining).",
+                msg.chat_id, f"{hours:.1f}",
+            )
+            raise RuntimeError(
+                f"WhatsApp 463 cooldown active; {remaining:.0f}s remaining"
+            )
+
         to = self._resolve_send_target(msg.chat_id)
         typing_jid = self._build_typing_jid(msg.chat_id)
         await self._stop_typing(typing_jid)
@@ -564,8 +683,16 @@ class WhatsAppChannel(BaseChannel):
         mention = (msg.metadata or {}).get("whatsapp_mention")
         if mention and self._is_group_chat(msg.chat_id):
             content = f"{mention} {content}"
-        if content:
-            await client.send_message(to, content)
+        try:
+            if content:
+                await client.send_message(to, content)
+        except Exception as exc:
+            cls_name = type(exc).__name__
+            if cls_name == "SendMessageError" and "463" in str(exc):
+                self._record_send_throttled()
+            raise
+        else:
+            self._record_send_success()
 
         ptt_override = (msg.metadata or {}).get("ptt")
         for media_path in msg.media or []:
