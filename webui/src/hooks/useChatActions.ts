@@ -23,7 +23,7 @@ interface GetSessionAutomationsFn {
   (key: string): Promise<SessionAutomationJob[]>;
 }
 
-interface ActionsApi {
+export interface ActionsApi {
   chat: {
     onCreate: (scope?: WorkspaceScopePayload | null) => Promise<string | null>;
     onFork: (sourceChatId: string, beforeUserIndex: number) => Promise<string | null>;
