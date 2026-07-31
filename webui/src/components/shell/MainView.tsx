@@ -1,6 +1,6 @@
-import { lazy, Suspense, type ReactNode } from "react";
+import { Suspense, lazy, type ReactNode } from "react";
 import { ThreadShell } from "@/components/thread/ThreadShell";
-import type { ChatSummary, SettingsPayload, WorkspaceScopePayload, WorkspacesPayload } from "@/lib/types";
+import type { ChatSummary, SettingsPayload, WorkspacesPayload, WorkspaceScopePayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const SettingsView = lazy(() =>
@@ -10,8 +10,10 @@ const SettingsView = lazy(() =>
 type ThreadProps = React.ComponentProps<typeof ThreadShell>;
 type SettingsProps = React.ComponentProps<typeof SettingsView>;
 
+export type MainView = "chat" | "settings" | "apps" | "automations" | "skills";
+
 type Args = {
-  view: "chat" | "settings" | "apps" | "automations" | "skills";
+  view: MainView;
   session: ChatSummary | null;
   title: string;
   settingsInitialSection: SettingsProps["initialSection"];
@@ -45,100 +47,80 @@ type Args = {
   fallback: ReactNode;
 };
 
-export function MainView({
-  view,
-  session,
-  title,
-  settingsInitialSection,
-  settingsSnapshot,
-  skills,
-  workspaces,
-  activeWorkspaceScope,
-  activeChatRunning,
-  workspaceError,
-  hostChromeInset,
-  isRestarting,
-  onToggleSidebar,
-  onNewChat,
-  onCreateChat,
-  onForkChat,
-  onTurnEnd,
-  theme,
-  onToggleTheme,
-  hostChromeTitleInset,
-  onWorkspaceScopeChange,
-  onOpenModelSettings,
-  onBackToChat,
-  onModelNameChange,
-  onSettingsChange,
-  onWorkspaceSettingsChange,
-  onSectionChange,
-  onLogout,
-  onRestart,
-  onNativeEngineRestart,
-  showSidebar,
-  fallback,
-}: Args) {
+function ChatSurface(props: Args) {
   return (
-    <main
+    <div
       className={cn(
-        "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background",
+        "absolute inset-0 flex flex-col",
+        props.view !== "chat" && "hidden",
       )}
     >
-      <div
-        className={cn(
-          "absolute inset-0 flex flex-col",
-          view !== "chat" && "hidden",
-        )}
-      >
-        <ThreadShell
-          session={session}
-          title={title}
-          onToggleSidebar={onToggleSidebar}
-          onNewChat={onNewChat}
-          onCreateChat={onCreateChat}
-          onForkChat={onForkChat}
-          onTurnEnd={onTurnEnd}
-          theme={theme}
-          onToggleTheme={onToggleTheme}
-          hideSidebarToggleForHostChrome
-          hostChromeTitleInset={hostChromeTitleInset}
-          hideHeader={false}
-          workspaceScope={activeWorkspaceScope}
-          workspaceDefaultScope={workspaces?.default_scope ?? null}
-          workspaceControls={workspaces?.controls ?? null}
-          workspaceScopeDisabled={activeChatRunning}
-          workspaceError={workspaceError}
-          onWorkspaceScopeChange={onWorkspaceScopeChange}
-          settingsSnapshot={settingsSnapshot}
-          onOpenModelSettings={onOpenModelSettings}
-          skills={skills}
-        />
-      </div>
-      {view !== "chat" && (
-        <div className="absolute inset-0 flex flex-col">
-          <Suspense fallback={fallback}>
-            <SettingsView
-              theme={theme}
-              initialSection={settingsInitialSection}
-              initialSettings={settingsSnapshot}
-              showSidebar={showSidebar}
-              onToggleTheme={onToggleTheme}
-              onBackToChat={onBackToChat}
-              onModelNameChange={onModelNameChange}
-              onSettingsChange={onSettingsChange}
-              skills={skills}
-              onWorkspaceSettingsChange={onWorkspaceSettingsChange}
-              onSectionChange={onSectionChange}
-              onLogout={onLogout}
-              onRestart={onRestart}
-              onNativeEngineRestart={onNativeEngineRestart}
-              isRestarting={isRestarting}
-              hostChromeInset={hostChromeInset}
-            />
-          </Suspense>
-        </div>
+      <ThreadShell
+        session={props.session}
+        title={props.title}
+        onToggleSidebar={props.onToggleSidebar}
+        onNewChat={props.onNewChat}
+        onCreateChat={props.onCreateChat}
+        onForkChat={props.onForkChat}
+        onTurnEnd={props.onTurnEnd}
+        theme={props.theme}
+        onToggleTheme={props.onToggleTheme}
+        hideSidebarToggleForHostChrome
+        hostChromeTitleInset={props.hostChromeTitleInset}
+        hideHeader={false}
+        workspaceScope={props.activeWorkspaceScope}
+        workspaceDefaultScope={props.workspaces?.default_scope ?? null}
+        workspaceControls={props.workspaces?.controls ?? null}
+        workspaceScopeDisabled={props.activeChatRunning}
+        workspaceError={props.workspaceError}
+        onWorkspaceScopeChange={props.onWorkspaceScopeChange}
+        settingsSnapshot={props.settingsSnapshot}
+        onOpenModelSettings={props.onOpenModelSettings}
+        skills={props.skills}
+      />
+    </div>
+  );
+}
+
+function SettingsSurface(props: Args) {
+  return (
+    <div
+      className={cn(
+        "absolute inset-0 flex flex-col",
+        props.view === "chat" && "hidden",
       )}
+    >
+      <Suspense fallback={props.fallback}>
+        <SettingsView
+          theme={props.theme}
+          initialSection={props.settingsInitialSection}
+          initialSettings={props.settingsSnapshot}
+          showSidebar={props.showSidebar}
+          onToggleTheme={props.onToggleTheme}
+          onBackToChat={props.onBackToChat}
+          onModelNameChange={props.onModelNameChange}
+          onSettingsChange={props.onSettingsChange}
+          skills={props.skills}
+          onWorkspaceSettingsChange={props.onWorkspaceSettingsChange}
+          onSectionChange={props.onSectionChange}
+          onLogout={props.onLogout}
+          onRestart={props.onRestart}
+          onNativeEngineRestart={props.onNativeEngineRestart}
+          isRestarting={props.isRestarting}
+          hostChromeInset={props.hostChromeInset}
+        />
+      </Suspense>
+    </div>
+  );
+}
+
+export function MainView(props: Args) {
+  const isChat = props.view === "chat";
+  return (
+    <main
+      className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background"
+    >
+      {isChat ? <ChatSurface {...props} /> : <SettingsSurface {...props} />}
     </main>
   );
 }
