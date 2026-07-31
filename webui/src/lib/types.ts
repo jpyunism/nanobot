@@ -100,6 +100,7 @@ export interface UICliAppAttachment {
   logo_url?: string | null;
   brand_color?: string | null;
 }
+export type OutboundCliAppMention = UICliAppAttachment;
 
 export interface UIMcpPresetAttachment {
   name: string;
@@ -111,6 +112,7 @@ export interface UIMcpPresetAttachment {
   logo_url?: string | null;
   brand_color?: string | null;
 }
+export type OutboundMcpPresetMention = UIMcpPresetAttachment;
 
 export interface SessionAutomationJob {
   id: string;
@@ -159,8 +161,8 @@ export interface SessionAutomationJob {
   };
 }
 
-export interface SessionAutomationsPayload { jobs: SessionAutomationJob[]; }
 export interface AutomationsPayload { jobs: SessionAutomationJob[]; }
+export type SessionAutomationsPayload = AutomationsPayload;
 export interface AutomationUpdatePayload {
   name?: string;
   message?: string;
@@ -1219,26 +1221,6 @@ export type InboundEvent =
 export interface OutboundMedia {
   data_url: string;
   name?: string;
-}
-
-export interface OutboundCliAppMention {
-  name: string;
-  display_name?: string;
-  category?: string;
-  entry_point?: string;
-  logo_url?: string | null;
-  brand_color?: string | null;
-}
-
-export interface OutboundMcpPresetMention {
-  name: string;
-  display_name?: string;
-  category?: string;
-  transport?: string;
-  status?: string;
-  configured?: boolean;
-  logo_url?: string | null;
-  brand_color?: string | null;
 }
 
 /** Response shape for ``GET .../webui-thread`` (server-built transcript replay). */

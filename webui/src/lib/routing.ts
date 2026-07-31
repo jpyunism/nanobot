@@ -1,4 +1,4 @@
-import type { SettingsSectionKey } from "@/components/settings/SettingsView";
+import type { SettingsSectionKey } from "@/lib/types";
 
 export type ShellView = "chat" | "settings" | "apps" | "automations" | "skills";
 

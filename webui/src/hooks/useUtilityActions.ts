@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import type { SettingsSectionKey } from "@/components/settings/SettingsView";
+import type { SettingsSectionKey } from "@/lib/types";
 import { shellViewForSettingsSection, type ShellView } from "@/lib/routing";
 
 type ShellRoute = {

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import type { SettingsSectionKey } from "@/components/settings/SettingsView";
+import type { SettingsSectionKey } from "@/lib/types";
 import type { ShellRoute, ShellView } from "@/lib/routing";
 
 type Args = {
