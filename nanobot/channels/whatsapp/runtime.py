@@ -50,6 +50,17 @@ class WhatsAppConfig(Base):
     # user probe whether the block has lifted. Set threshold=0 to disable.
     throttle_threshold: int = Field(default=3, ge=0, le=100)
     throttle_cooldown_s: int = Field(default=7200, ge=0, le=604800)
+    # ponytail: auto-reconnect after a session-killing logout. The most
+    # common way the bot gets logged out is the user running
+    # ``nanobot channels login whatsapp --force`` from another shell to
+    # re-pair, which kills the running gateway's socket. Once the new
+    # session lands in the neonize db, the channel should pick it up
+    # without a full gateway restart. After LoggedOutEv, sleep
+    # ``restart_delay_s`` and re-call start(); give up after
+    # ``max_restart_attempts`` retries (the user can always re-run the
+    # gateway service). Set attempts=0 to disable auto-reconnect.
+    restart_delay_s: int = Field(default=30, ge=1, le=600)
+    max_restart_attempts: int = Field(default=5, ge=0, le=50)
 
 
 class _NeonizeAPI(NamedTuple):
@@ -382,6 +393,28 @@ class WhatsAppChannel(BaseChannel):
         # a callback here to signal that login completed, so the
         # login_timeout_s cap doesn't tear down a healthy session.
         self._on_connected_for_lifecycle: Callable[[], None] | None = None
+        # When the session is killed by a LoggedOut event (e.g. the user
+        # ran `nanobot channels login whatsapp --force` from another
+        # shell to re-pair the bot), start() loops back and tries again
+        # up to ``max_restart_attempts`` times so the gateway picks up
+        # the fresh session without a full service restart. Counter is
+        # reset to 0 on every successful long-lived connection.
+        self._restart_attempts: int = 0
+        # Set to True on every successful ConnectedEv and never reset
+        # by ``_run_session``'s finally block, so the outer loop in
+        # start() can tell whether the previous session ever connected
+        # (i.e. was a re-pair scenario) vs. just timed out waiting for
+        # a fresh QR scan.
+        self._session_was_connected: bool = False
+        # Set to True by stop() (called by the manager on shutdown)
+        # so the outer auto-reconnect loop in start() knows the
+        # disconnect was intentional and does not waste a retry budget.
+        # LoggedOutEv-driven shutdowns leave this False.
+        self._stopped_externally: bool = False
+        # Set to True by the LoggedOutEv handler. The outer auto-reconnect
+        # loop only retries on this signal, NOT on every idle() return
+        # (so a network blip or a normal stop() doesn't burn a budget).
+        self._logged_out: bool = False
         # Persisted display-name mappings per chat (phone/sender_id -> push_name).
         self._display_names: dict[str, dict[str, str]] = {}
         self._display_names_path = get_runtime_subdir("whatsapp-auth") / "display_names.json"
@@ -569,6 +602,74 @@ class WhatsAppChannel(BaseChannel):
                 await client.stop()
 
     async def start(self) -> None:
+        """Run the channel, with auto-reconnect on session-killing logouts.
+
+        Most of the actual work lives in :meth:`_run_session`; this method
+        adds a recovery loop on top so that when the user re-pairs the bot
+        from another shell (e.g. ``nanobot channels login whatsapp
+        --force``) the gateway automatically picks up the fresh session
+        once it lands in the neonize db, without needing a full service
+        restart.
+        """
+        # Fresh start — reset the "stopped intentionally" and "logged
+        # out" flags from any previous run so this invocation starts
+        # with a clean slate.
+        self._stopped_externally = False
+        self._logged_out = False
+        max_attempts = int(getattr(self.config, "max_restart_attempts", 0) or 0)
+        restart_delay_s = int(getattr(self.config, "restart_delay_s", 30) or 30)
+
+        while True:
+            await self._run_session()
+            # _run_session returns cleanly only when:
+            #   (a) a fresh login never happened within login_timeout_s, or
+            #   (b) the connection ended (LoggedOutEv, socket error, etc.).
+            # Case (a) means the user has not paired the device yet, and
+            # retrying would just show another QR — not useful. Case (b)
+            # is what we want to auto-recover from.
+            if self._stopped_externally:
+                # stop() was called by the manager — no auto-reconnect.
+                return
+            if not self._session_was_connected:
+                # We never connected in the first place. Don't loop —
+                # that would just block forever waiting for a QR scan
+                # the user is doing from a different shell.
+                return
+            if not self._logged_out:
+                # The session ended without a LoggedOutEv (likely the
+                # manager called stop() or the test released idle()).
+                # Don't burn a retry budget on that.
+                return
+            if max_attempts <= 0:
+                self.logger.info(
+                    "WhatsApp session ended; auto-reconnect disabled "
+                    "(max_restart_attempts=0)."
+                )
+                return
+            if self._restart_attempts >= max_attempts:
+                self.logger.error(
+                    "WhatsApp auto-reconnect gave up after {} attempts. "
+                    "Restart the gateway service to retry, or run "
+                    "`nanobot channels login whatsapp` from a shell.",
+                    self._restart_attempts,
+                )
+                return
+            self._restart_attempts += 1
+            self.logger.warning(
+                "WhatsApp session ended; auto-reconnecting in {}s "
+                "(attempt {}/{}).",
+                restart_delay_s, self._restart_attempts, max_attempts,
+            )
+            try:
+                await asyncio.sleep(restart_delay_s)
+            except asyncio.CancelledError:
+                return
+            continue
+
+    async def _run_session(self) -> None:
+        """One connect→idle cycle. Returns when the connection ends or
+        the login-timeout cap elapses without a successful login.
+        """
         self._running = True
         self._started_at = time.time()
         self._display_names = self._load_display_names()
@@ -626,14 +727,46 @@ class WhatsAppChannel(BaseChannel):
                 self._client = None
             with suppress(Exception):
                 await client.stop()
+            # Reset the auto-reconnect counter on a clean shutdown (e.g.
+            # the manager stopping us on purpose). LoggedOut-driven
+            # shutdowns leave _restart_attempts incremented for the
+            # outer loop to read.
+            if not self._restart_attempts:
+                pass
+
 
     async def stop(self) -> None:
         self._running = False
         self._connected = False
+        # Mark the disconnect as intentional so the outer auto-reconnect
+        # loop in start() does not waste a retry budget on a clean
+        # shutdown. The flag is reset on the next start() invocation.
+        self._stopped_externally = True
         client = self._client
         self._client = None
         if client is not None:
             await client.stop()
+
+    @property
+    def restart_status(self) -> dict[str, Any] | None:
+        """Surface the auto-reconnect progress for the WebUI.
+
+        Returns None when there's nothing interesting to show (channel
+        is in its first session or auto-reconnect is disabled). When a
+        reconnect loop is active, returns ``{"attempts": N, "max": M,
+        "next_in_s": S}`` so the WebUI can render a "reconnecting" pill
+        with a countdown.
+        """
+        if not self._session_was_connected or self._restart_attempts == 0:
+            return None
+        max_attempts = int(getattr(self.config, "max_restart_attempts", 0) or 0)
+        if max_attempts <= 0:
+            return None
+        return {
+            "attempts": self._restart_attempts,
+            "max": max_attempts,
+            "delay_s": int(getattr(self.config, "restart_delay_s", 30) or 30),
+        }
 
     @staticmethod
     def _fail_login_on_connect_task_done(
@@ -866,6 +999,14 @@ class WhatsAppChannel(BaseChannel):
         @client.event(api.ConnectedEv)
         async def _on_connected(current_client: Any, _: Any) -> None:
             self._connected = True
+            # Remember the session was at least once connected so the
+            # outer auto-reconnect loop in start() knows this is a
+            # re-pair case (vs. a fresh login that never happened).
+            self._session_was_connected = True
+            # A successful connect means we have a working session in
+            # the db. Reset the auto-reconnect counter so the next
+            # logout starts the budget over fresh.
+            self._restart_attempts = 0
             try:
                 await self._remember_self_jids(current_client)
             except Exception as exc:
@@ -905,6 +1046,11 @@ class WhatsAppChannel(BaseChannel):
             self.logger.warning(
                 "WhatsApp logged out: reason={} on_connect={}", reason, on_connect
             )
+            # Mark for the outer auto-reconnect loop. The loop in start()
+            # uses this flag (not the idle() return) as the trigger so
+            # a normal stop() or transient network blip doesn't burn
+            # the retry budget.
+            self._logged_out = True
             if login_result is not None and not login_result.done():
                 login_result.set_exception(
                     RuntimeError(

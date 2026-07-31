@@ -209,7 +209,48 @@ async def test_login_fails_when_connect_task_fails(monkeypatch) -> None:
     assert client._stop_calls == 1
 
 
-class _LoggedOutClient(_FakeLoginClient):
+# ponytail: a second fake client that lets the test fire LoggedOutEv
+# on demand. We can't reuse _FakeLoginClient because its handlers are
+# bound at construction time; this one exposes the registered event
+# handler so the test can call it. The flow mimics what real neonize
+# does on LoggedOutEv: close the websocket, which makes the pending
+# ``client.idle()`` (awaited by ``_run_session``) return.
+class _LoggedOutClient:
+    def __init__(self) -> None:
+        self._stopped = asyncio.Event()
+        self._stop_calls = 0
+        self.handlers: dict = {}
+        self.connected_event = asyncio.Event()
+        # Pre-populate get_me() so _remember_self_jids works after
+        # ConnectedEv fires.
+        self.me = _Proto(JID=_jid("56928861873", "s.whatsapp.net"),
+                         LID=_jid("BOTLID", "lid"))
+
+    def event(self, event_type):
+        def register(func):
+            self.handlers[event_type] = func
+            return func
+        return register
+
+    def qr(self, _func):
+        return _func
+
+    async def connect(self) -> None:
+        from nanobot.channels.whatsapp import runtime as whatsapp_module
+        ev = whatsapp_module._NEONIZE_API.ConnectedEv
+        await self.handlers[ev](self, _Proto())
+        self.connected_event.set()
+
+    async def idle(self) -> None:
+        await self._stopped.wait()
+
+    async def stop(self) -> None:
+        self._stop_calls += 1
+        self._stopped.set()
+
+
+@pytest.mark.asyncio
+class _LoggedOutOnConnectClient(_FakeLoginClient):
     """Fake client that fires LoggedOutEv on connect instead of ConnectedEv.
 
     Mirrors the real whatsmeow behavior when a 401 "logged out from another
@@ -237,7 +278,7 @@ async def test_login_fails_when_session_was_logged_out(monkeypatch) -> None:
     waiting for ConnectedEv.
     """
     _patch_neonize_api(monkeypatch)
-    client = _LoggedOutClient()
+    client = _LoggedOutOnConnectClient()
     ch = _make_channel()
     ch._new_client = MagicMock(return_value=client)
 
@@ -413,6 +454,181 @@ async def test_start_keeps_running_after_login_timeout_when_already_connected(
     await client.stop()
     await start_task
     assert ch._running is False
+
+
+# ponytail: a second fake client that lets the test fire LoggedOutEv
+# on demand. We can't reuse _FakeLoginClient because its handlers are
+# bound at construction time; this one exposes the registered event
+# handler so the test can call it. The flow mimics what real neonize
+# does on LoggedOutEv: close the websocket, which makes the pending
+# ``client.idle()`` (awaited by ``_run_session``) return.
+class _LoggedOutClient:
+    def __init__(self) -> None:
+        self._stopped = asyncio.Event()
+        self._stop_calls = 0
+        self.handlers: dict = {}
+        self.connected_event = asyncio.Event()
+        # Pre-populate get_me() so _remember_self_jids works after
+        # ConnectedEv fires.
+        self.me = _Proto(JID=_jid("56928861873", "s.whatsapp.net"),
+                         LID=_jid("BOTLID", "lid"))
+
+    def event(self, event_type):
+        def register(func):
+            self.handlers[event_type] = func
+            return func
+        return register
+
+    def qr(self, _func):
+        return _func
+
+    async def connect(self) -> None:
+        from nanobot.channels.whatsapp import runtime as whatsapp_module
+        ev = whatsapp_module._NEONIZE_API.ConnectedEv
+        await self.handlers[ev](self, _Proto())
+        self.connected_event.set()
+
+    async def idle(self) -> None:
+        await self._stopped.wait()
+
+    async def stop(self) -> None:
+        self._stop_calls += 1
+        self._stopped.set()
+
+
+@pytest.mark.asyncio
+async def test_start_reconnects_after_logged_out(monkeypatch) -> None:
+    """After LoggedOutEv the channel's auto-reconnect loop should
+    call start() again, which connects to the freshly-paired session.
+    The user only needs to scan the QR once via the CLI; the running
+    gateway picks up the new device in its db.
+    """
+    _patch_neonize_api(monkeypatch)
+
+    first = _LoggedOutClient()
+    second = _LoggedOutClient()
+    ch = _make_channel(
+        {"max_restart_attempts": 3, "restart_delay_s": 1, "login_timeout_s": 1},
+    )
+    # Schedule a different client for the second attempt (simulates the
+    # user re-pairing from another shell, which writes a new entry to
+    # the neonize db).
+    ch._new_client = MagicMock(side_effect=[first, second])
+
+    start_task = asyncio.create_task(ch.start())
+
+    # Give the first session time to connect, then fire LoggedOutEv to
+    # simulate the user re-pairing the bot from another shell.
+    await asyncio.sleep(0.05)
+    from nanobot.channels.whatsapp import runtime as whatsapp_module
+    logged_out_ev = whatsapp_module._NEONIZE_API.LoggedOutEv
+    # ponytail: in real neonize, LoggedOutEv causes the websocket to
+    # close, which makes the pending client.idle() return. We simulate
+    # that here by calling stop() in addition to firing the event.
+    await first.handlers[logged_out_ev](first, _Proto(Reason=2, OnConnect=False))
+    await first.stop()
+
+    # Wait for the reconnect loop to run and the second client to be
+    # asked to connect.
+    for _ in range(150):
+        if second.connected_event.is_set():
+            break
+        await asyncio.sleep(0.02)
+
+    # Second client should have been used; channel should be running.
+    assert ch._new_client.call_count == 2
+    assert ch._connected is True
+    assert ch._session_was_connected is True
+
+    # Stop cleanly to end the test.
+    await ch.stop()
+    await start_task
+
+
+@pytest.mark.asyncio
+async def test_start_auto_reconnect_keeps_looping_until_external_stop(
+    monkeypatch,
+) -> None:
+    """Repeated LoggedOutEv cycles (e.g. the user re-pairs, gateway
+    reconnects, then re-pairs again) should keep the auto-reconnect
+    loop alive. A clean external stop() is the only thing that ends
+    it without burning a retry budget — LoggedOutEv keeps the budget
+    open since each reconnect is a fresh chance.
+    """
+    _patch_neonize_api(monkeypatch)
+
+    clients = [_LoggedOutClient() for _ in range(5)]
+    ch = _make_channel(
+        {"max_restart_attempts": 2, "restart_delay_s": 1, "login_timeout_s": 1},
+    )
+    ch._new_client = MagicMock(side_effect=clients)
+
+    from nanobot.channels.whatsapp import runtime as whatsapp_module
+    logged_out_ev = whatsapp_module._NEONIZE_API.LoggedOutEv
+
+    async def _drive():
+        # Fire LoggedOutEv + stop() on each client after it connects.
+        # We don't try to give up on a counter — the test just verifies
+        # the auto-reconnect loop keeps trying until ch.stop() is called
+        # externally (which is what the manager does on shutdown).
+        for client in clients:
+            for _ in range(50):
+                if client.connected_event.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            if logged_out_ev in client.handlers:
+                await client.handlers[logged_out_ev](client, _Proto(Reason=2, OnConnect=False))
+            await client.stop()
+            await asyncio.sleep(0.05)
+            if not ch._session_was_connected:
+                return
+
+    start_task = asyncio.create_task(ch.start())
+    await _drive()
+    # The loop should keep running until we stop it. Verify by
+    # checking it made at least one reconnect attempt.
+    assert ch._new_client.call_count >= 2
+    # External stop must end the loop without further retry attempts.
+    await ch.stop()
+    await asyncio.wait_for(start_task, timeout=3)
+    assert ch._stopped_externally is True
+
+
+@pytest.mark.asyncio
+async def test_start_does_not_retry_when_stop_called_externally(
+    monkeypatch,
+) -> None:
+    """A clean stop() (manager shutdown, not LoggedOutEv) must NOT
+    trigger the auto-reconnect loop.
+    """
+    _patch_neonize_api(monkeypatch)
+    client = _FakeLoginClient()
+    ch = _make_channel(
+        {"max_restart_attempts": 3, "restart_delay_s": 1, "login_timeout_s": 1},
+    )
+    ch._new_client = MagicMock(return_value=client)
+
+    start_task = asyncio.create_task(ch.start())
+    await asyncio.sleep(0.05)
+    # External stop — should not enter the retry loop.
+    await ch.stop()
+    await asyncio.wait_for(start_task, timeout=5)
+    assert ch._new_client.call_count == 1
+
+
+def test_restart_status_surfaces_progress(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    ch = _make_channel(
+        {"max_restart_attempts": 5, "restart_delay_s": 7},
+    )
+    # No reconnect yet — status is None.
+    assert ch.restart_status is None
+    # After a successful connect + logout event, status reports
+    # attempts so the WebUI can render a "reconnecting" pill.
+    ch._session_was_connected = True
+    ch._restart_attempts = 2
+    status = ch.restart_status
+    assert status == {"attempts": 2, "max": 5, "delay_s": 7}
 
 
 def _patch_throttle_path(monkeypatch, tmp_path) -> Path:
