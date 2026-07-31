@@ -5,7 +5,9 @@ import { useTranslation } from "react-i18next";
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { SubagentPanelHost } from "@/components/SubagentPanelHost";
+import { SubagentSpawnChips } from "@/components/SubagentSpawnChips";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
+import { extractSubagentSpawns } from "@/components/thread/activity/subagent-model";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { ChatProjectChip } from "@/components/thread/ChatProjectChip";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
@@ -537,6 +539,13 @@ export function ThreadShell({
   }, []);
 
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
+  const subagentSpawns = useMemo(
+    () => extractSubagentSpawns(displayMessages).map((s) => ({
+      taskId: s.taskId,
+      label: s.label,
+    })),
+    [displayMessages],
+  );
   const currentRunStartedAt = messagesReady ? runStartedAt : null;
   const currentGoalState = messagesReady ? goalState : undefined;
   const turnActive = messagesReady && (isStreaming || currentRunStartedAt !== null);
@@ -1127,6 +1136,18 @@ export function ThreadShell({
           onResizeStart={handleFilePreviewResizeStart}
           onClose={handleCloseFilePreview}
         />
+      ) : null}
+      {subagentSpawns.length > 0 ? (
+        <div
+          className="pointer-events-none absolute bottom-4 left-4 z-20 flex max-w-[min(420px,calc(100vw-2rem))] flex-col gap-1 [&>*]:pointer-events-auto"
+          data-testid="subagent-spawn-chips"
+        >
+          <SubagentSpawnChips
+            chatId={chatId}
+            seeds={subagentSpawns}
+            isTurnActive={turnActive}
+          />
+        </div>
       ) : null}
       <SubagentPanelHost chatId={chatId} sessionKey={historyKey} />
     </section>

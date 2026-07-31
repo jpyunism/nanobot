@@ -2,6 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 
 import { SubagentPanel } from "@/components/SubagentPanel";
+import {
+  SubagentPanelContext,
+  type SubagentPanelController,
+} from "@/components/SubagentPanelContext";
 import { useClient } from "@/providers/ClientProvider";
 import type { SubagentStatusPayload } from "@/lib/types";
 
@@ -82,8 +86,6 @@ export function SubagentPanelHost({ chatId, sessionKey }: SubagentPanelHostProps
     },
     [client, chatId],
   );
-  // Exposed for future use from the AgentActivityCluster chip click handler.
-  void open;
 
   const close = useCallback(() => {
     if (!taskId || closing) return;
@@ -127,18 +129,22 @@ export function SubagentPanelHost({ chatId, sessionKey }: SubagentPanelHostProps
     window.addEventListener("pointerup", onUp);
   }, []);
 
-  if (!taskId || !sessionKey) return null;
+  const controller = useMemo<SubagentPanelController>(() => ({ open }), [open]);
 
   return (
-    <SubagentPanel
-      sessionKey={sessionKey}
-      taskId={taskId}
-      token={token}
-      liveStatus={liveStatus}
-      desktopWidth={width}
-      isClosing={closing}
-      onResizeStart={handleResizeStart}
-      onClose={close}
-    />
+    <SubagentPanelContext.Provider value={controller}>
+      {taskId && sessionKey ? (
+        <SubagentPanel
+          sessionKey={sessionKey}
+          taskId={taskId}
+          token={token}
+          liveStatus={liveStatus}
+          desktopWidth={width}
+          isClosing={closing}
+          onResizeStart={handleResizeStart}
+          onClose={close}
+        />
+      ) : null}
+    </SubagentPanelContext.Provider>
   );
 }
