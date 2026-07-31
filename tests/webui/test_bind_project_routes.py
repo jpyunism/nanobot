@@ -11,6 +11,7 @@ from websockets.datastructures import Headers
 from websockets.http11 import Request as WsRequest
 
 from nanobot.channels.websocket.runtime import WebSocketConfig
+from nanobot.channels.websocket.tests.ws_test_client import _HttpConnection
 from nanobot.session.manager import SessionManager
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.ingress_policy import DEFAULT_WEBUI_INGRESS_POLICY
@@ -18,8 +19,6 @@ from nanobot.webui.media_gateway import WebUIMediaGateway
 from nanobot.webui.projects import WebUIProjectsController
 from nanobot.webui.workspaces import WebUIWorkspaceController
 from nanobot.webui.ws_http import GatewayHTTPHandler
-
-from nanobot.channels.websocket.tests.ws_test_client import _HttpConnection
 
 pytestmark = pytest.mark.asyncio
 

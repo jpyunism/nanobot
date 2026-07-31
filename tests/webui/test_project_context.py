@@ -13,8 +13,8 @@ from nanobot.runtime_context import (
     PROJECT_CONTEXT_SOURCE,
     compile_project_context,
 )
-from nanobot.webui.projects import WebUIProjectsController
 from nanobot.webui.project_context_provider import make_project_context_provider
+from nanobot.webui.projects import WebUIProjectsController
 
 
 @pytest.fixture

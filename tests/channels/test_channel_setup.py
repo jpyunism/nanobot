@@ -27,6 +27,7 @@ EXPECTED_CHANNELS = {
     "signal",
     "slack",
     "telegram",
+    "twitter",
     "websocket",
     "wecom",
     "weixin",

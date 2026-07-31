@@ -1,7 +1,5 @@
 """Twitter / X channel setup contract."""
 
-from __future__ import annotations
-
 from nanobot.channels._manifest import field, required_fields
 from nanobot.channels.contracts import ChannelSetupSpec
 from nanobot.channels.plugin import ChannelPlugin

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from nanobot.webui.session_meta import (
     CHAT_PROJECT_ID_METADATA_KEY,
     CHAT_PROJECT_INJECTED_FLAG,
