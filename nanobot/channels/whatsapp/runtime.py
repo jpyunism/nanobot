@@ -33,6 +33,12 @@ class WhatsAppConfig(Base):
     group_policy: Literal["open", "mention"] = "open"
     database_path: str = ""
     lid_mappings: dict[str, str] = Field(default_factory=dict)
+    # ponytail: login timeout cap. The neonize client internally relies on
+    # whatsmeow's reconnect loop; without an external cap, an unscanned QR
+    # keeps the channel alive indefinitely spamming 515/EOF logs. After
+    # this many seconds the channel calls client.stop() and exits cleanly.
+    # Set to 0 to disable (login runs forever, original behavior).
+    login_timeout_s: int = Field(default=300, ge=0, le=3600)
 
 
 class _NeonizeAPI(NamedTuple):
@@ -445,10 +451,29 @@ class WhatsAppChannel(BaseChannel):
         self._client = client
         self._register_handlers(client, handle_messages=True)
 
+        login_timeout_s = int(getattr(self.config, "login_timeout_s", 0) or 0)
         try:
             self.logger.info("Connecting WhatsApp channel with neonize...")
             await client.connect()
-            await client.idle()
+            if login_timeout_s > 0:
+                self.logger.info(
+                    "WhatsApp login timeout: {} seconds; channel will stop if no login completes by then.",
+                    login_timeout_s,
+                )
+                try:
+                    await asyncio.wait_for(client.idle(), timeout=login_timeout_s)
+                except asyncio.TimeoutError:
+                    if not self._connected:
+                        self.logger.warning(
+                            "WhatsApp login not completed in {} seconds; stopping channel. "
+                            "Scan the QR and restart the gateway to retry.",
+                            login_timeout_s,
+                        )
+                        # Returning here lets the `finally` call client.stop()
+                        # which breaks the whatsmeow internal reconnect loop.
+                        return
+            else:
+                await client.idle()
         except asyncio.CancelledError:
             raise
         finally:

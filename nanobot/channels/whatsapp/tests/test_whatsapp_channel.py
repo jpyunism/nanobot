@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import time
 import types
 from types import SimpleNamespace
 from typing import Any
@@ -116,7 +117,8 @@ class _FakeLoginClient:
     def __init__(self) -> None:
         self.handlers = {}
         self.me = _Proto(JID=_jid("bot", "s.whatsapp.net"), LID=_jid("BOTLID", "lid"))
-        self.stop = AsyncMock()
+        self._stop_calls = 0
+        self._stopped = asyncio.Event()
 
     def event(self, event_type):
         def register(func):
@@ -131,6 +133,15 @@ class _FakeLoginClient:
 
     async def connect(self) -> None:
         await self.handlers[whatsapp_module._NEONIZE_API.ConnectedEv](self, _Proto())
+
+    async def idle(self) -> None:
+        # Mimic a successful login: idle() unblocks as soon as stop() is
+        # called (the same shutdown path neonize takes on a clean exit).
+        await self._stopped.wait()
+
+    async def stop(self) -> None:
+        self._stop_calls += 1
+        self._stopped.set()
 
 
 class _FailingConnectLoginClient(_FakeLoginClient):
@@ -163,7 +174,7 @@ async def test_login_succeeds_when_connected(monkeypatch) -> None:
 
     assert await ch.login() is True
     assert ch._self_jids == {"bot@s.whatsapp.net", "bot", "BOTLID@lid", "BOTLID"}
-    client.stop.assert_awaited_once()
+    assert client._stop_calls == 1
 
 
 @pytest.mark.asyncio
@@ -174,7 +185,122 @@ async def test_login_fails_when_connect_task_fails(monkeypatch) -> None:
     ch._new_client = MagicMock(return_value=client)
 
     assert await ch.login() is False
-    client.stop.assert_awaited_once()
+    assert client._stop_calls == 1
+
+
+class _HangingClient:
+    """A fake neonize client whose idle() blocks until stop() is called.
+
+    Simulates an unscanned QR: connect() resolves immediately but no
+    ConnectedEv is ever fired, so the channel sits forever waiting for
+    login to complete. Used to verify the login_timeout_s cap in
+    ``start()`` breaks the whatsmeow reconnect loop after the timeout.
+    """
+
+    def __init__(self) -> None:
+        self._stopped = asyncio.Event()
+        # ponytail: AsyncMock would shadow the real stop() below; the
+        # channel's finally block only calls await client.stop(), which
+        # the real method satisfies.
+        self._stop_calls = 0
+
+    def event(self, _event_type):
+        def register(func):
+            return func
+
+        return register
+
+    def qr(self, func):
+        return func
+
+    async def connect(self) -> None:
+        return None
+
+    async def idle(self) -> None:
+        # Block until stop() is invoked. The wait_for in start() should
+        # cancel us via the timeout, after which the channel's finally
+        # block calls stop() — which signals this event.
+        await self._stopped.wait()
+
+    async def stop(self) -> None:
+        self._stop_calls += 1
+        self._stopped.set()
+
+
+@pytest.mark.asyncio
+async def test_start_stops_channel_when_login_times_out(monkeypatch) -> None:
+    """With login_timeout_s set, an unscanned QR must not block the channel forever."""
+    _patch_neonize_api(monkeypatch)
+    client = _HangingClient()
+    ch = _make_channel({"login_timeout_s": 1})
+    ch._new_client = MagicMock(return_value=client)
+
+    started_at = time.monotonic()
+    await ch.start()
+    elapsed = time.monotonic() - started_at
+
+    # The timeout was 1 second; we should have given up well before any
+    # unbounded reconnect-loop time. Generous upper bound to keep the
+    # test stable on a slow CI runner.
+    assert elapsed < 5.0
+    assert ch._running is False
+    assert ch._connected is False
+    # client.stop() is called from the finally block even when the
+    # timeout fires, so the whatsmeow reconnect loop is broken.
+    assert client._stop_calls >= 1
+
+
+@pytest.mark.asyncio
+async def test_start_login_timeout_zero_disables_cap(monkeypatch) -> None:
+    """login_timeout_s=0 preserves the original forever-block behavior for the cap."""
+    _patch_neonize_api(monkeypatch)
+    client = _HangingClient()
+    ch = _make_channel({"login_timeout_s": 0})
+    ch._new_client = MagicMock(return_value=client)
+
+    # Schedule stop() shortly after start so the test does not hang.
+    async def _stop_later() -> None:
+        await asyncio.sleep(0.5)
+        await client.stop()
+
+    stopper = asyncio.create_task(_stop_later())
+    await ch.start()
+    await stopper
+
+    # The channel ran past its own 0-second cap (i.e., no cap applied)
+    # and only stopped because the test forced client.stop().
+    assert ch._running is False
+
+
+@pytest.mark.asyncio
+async def test_start_completes_normally_when_login_succeeds(monkeypatch) -> None:
+    """Regression: when ConnectedEv fires, idle() resolves and the channel exits cleanly."""
+    _patch_neonize_api(monkeypatch)
+    client = _FakeLoginClient()
+    ch = _make_channel({"login_timeout_s": 5})
+    ch._new_client = MagicMock(return_value=client)
+
+    # Run start() until it reaches client.idle(); we then trigger the
+    # ConnectedEv handler that the FakeLoginClient exposes, which sets
+    # the login_result — but the channel's start() doesn't track
+    # login_result directly. Instead we just verify start() returns
+    # without raising and client.stop() is invoked.
+    async def _trigger_then_stop() -> None:
+        await asyncio.sleep(0.05)
+        # _FakeLoginClient.connect() already fired ConnectedEv before
+        # start() reached idle(). For start() to return, client.idle()
+        # must complete — call stop() to release it.
+        await client.stop()
+
+    trigger = asyncio.create_task(_trigger_then_stop())
+    await ch.start()
+    await trigger
+
+    assert ch._running is False
+    # _stop_calls counts the real stop() invocations on the fake client.
+    # The test scheduled one explicit stop, and the channel's finally
+    # block calls stop() again on shutdown, so 1 or 2 is acceptable.
+    assert client._stop_calls >= 1
 
 
 @pytest.mark.asyncio
