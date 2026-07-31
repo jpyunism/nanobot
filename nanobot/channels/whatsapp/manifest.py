@@ -28,7 +28,7 @@ PLUGIN = ChannelPlugin(
     setup=SETUP_SPEC,
     management=ChannelManagementSpec(local_state_present=local_state_present),
     dependencies=(
-        "neonize>=0.3.18.post0,<0.4.0",
+        "neonize>=0.4.0,<0.5.0",
         "segno>=1.6.1,<2.0.0",
     ),
     webui="webui/index.ts",
