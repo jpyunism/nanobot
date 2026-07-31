@@ -221,6 +221,7 @@ export function useShellBootstrap({
     chatActions: chatActions.chat,
     utility: chatActions.utility,
     onOpenUtility,
+    token,
   });
 
   return {

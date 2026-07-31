@@ -100,6 +100,32 @@ def http_error(status: int, message: str | None = None) -> Response:
     return http_response(body, status=status)
 
 
+def read_json_request_header(
+    request: Any,
+    header_name: str,
+    max_bytes: int = 256 * 1024,
+) -> tuple[dict[str, Any] | None, Response | None]:
+    """Read a JSON payload from a request header.
+
+    The WebUI's WS+HTTP transport has no request body, so POST/PUT/DELETE
+    payloads travel in headers. This helper pulls the header, validates
+    size, and parses it. Returns ``(None, error_response)`` on failure.
+    """
+    raw = request.headers.get(header_name) if hasattr(request, "headers") else None
+    if not raw:
+        return None, http_error(400, f"missing {header_name} header")
+    encoded = raw.encode("utf-8") if isinstance(raw, str) else raw
+    if len(encoded) > max_bytes:
+        return None, http_error(413, f"{header_name} payload is too large")
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError) as exc:
+        return None, http_error(400, f"invalid json in {header_name}: {exc}")
+    if not isinstance(data, dict):
+        return None, http_error(400, f"{header_name} must be a JSON object")
+    return data, None
+
+
 def parse_request_path(path_with_query: str) -> tuple[str, QueryParams]:
     """Parse normalized path and query parameters in one pass."""
     parsed = urlparse("ws://x" + path_with_query)

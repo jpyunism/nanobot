@@ -514,18 +514,31 @@
       "testForTools": "Ejecuta Probar para inspeccionar y elegir herramientas individuales."
     },
     "api": {
-      "title": "Servidor API", "openaiCompatible": "API compatible con OpenAI",
+      "title": "Servidor API",
+      "openaiCompatible": "API compatible con OpenAI",
       "description": "Conecta SDK y agentes mediante un endpoint /v1 local.",
-      "start": "Iniciar servidor API", "starting": "Iniciando...", "stop": "Detener", "stopping": "Deteniendo...",
-      "access": "Acceso", "thisDevice": "Este dispositivo", "localNetwork": "Red local",
-      "localHelp": "Solo este dispositivo puede conectarse.", "networkHelp": "Otros dispositivos pueden conectarse; se requiere una clave API.",
-      "port": "Puerto", "portHelp": "La API usa este puerto local.", "apiKey": "Clave API",
-      "apiKeyHelp": "Los clientes la envían como token Bearer.", "apiKeyRequired": "Obligatoria antes de exponer la API en la red.",
-      "apiKeyPlaceholder": "Introduce una clave API", "autoInstall": "El soporte API se instalará automáticamente al iniciarlo."
+      "start": "Iniciar servidor API",
+      "starting": "Iniciando...",
+      "stop": "Detener",
+      "stopping": "Deteniendo...",
+      "access": "Acceso",
+      "thisDevice": "Este dispositivo",
+      "localNetwork": "Red local",
+      "localHelp": "Solo este dispositivo puede conectarse.",
+      "networkHelp": "Otros dispositivos pueden conectarse; se requiere una clave API.",
+      "port": "Puerto",
+      "portHelp": "La API usa este puerto local.",
+      "apiKey": "Clave API",
+      "apiKeyHelp": "Los clientes la envían como token Bearer.",
+      "apiKeyRequired": "Obligatoria antes de exponer la API en la red.",
+      "apiKeyPlaceholder": "Introduce una clave API",
+      "autoInstall": "El soporte API se instalará automáticamente al iniciarlo."
     },
     "observability": {
-      "title": "Observabilidad", "configured": "Las credenciales de trazas están disponibles para nanobot.",
-      "environment": "Configura LANGFUSE_SECRET_KEY y LANGFUSE_PUBLIC_KEY y reinicia nanobot.", "enable": "Habilitar soporte de trazas"
+      "title": "Observabilidad",
+      "configured": "Las credenciales de trazas están disponibles para nanobot.",
+      "environment": "Configura LANGFUSE_SECRET_KEY y LANGFUSE_PUBLIC_KEY y reinicia nanobot.",
+      "enable": "Habilitar soporte de trazas"
     },
     "legal": {
       "thirdPartyBrands": "Los nombres, logotipos y marcas de productos pertenecen a sus respectivos propietarios. Su uso es solo identificativo y no implica respaldo."
@@ -844,7 +857,11 @@
       "yesterday": "Yesterday",
       "earlier": "Earlier",
       "archived": "Archived"
-    }
+    },
+    "projectNone": "No project",
+    "projectCurrent": "current",
+    "projectUnassign": "Unassign",
+    "projectAriaLabel": "Project binding"
   },
   "deleteConfirm": {
     "title": "¿Eliminar este chat?",
@@ -1248,5 +1265,41 @@
       "usePath": "Usar ruta",
       "absolutePathRequired": "Introduce una ruta absoluta de carpeta en esta máquina."
     }
+  },
+  "projects": {
+    "title": "Projects",
+    "subtitle": "Bundle instructions and files into reusable capsules for focused chats.",
+    "new": "New project",
+    "refresh": "Refresh",
+    "empty": "No projects yet. Click 'New project' to create one.",
+    "loading": "Loading…",
+    "nameLabel": "Name",
+    "namePlaceholder": "e.g. refactor-research",
+    "instructionsLabel": "Instructions",
+    "instructionsPlaceholder": "Optional instructions prepended to the agent's context when this project is attached.",
+    "noInstructions": "No instructions yet.",
+    "fileCount": "{{count}} file",
+    "byteCount": "{{bytes}} bytes",
+    "updated": "Updated {{date}}",
+    "create": "Create",
+    "creating": "Creating…",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this project?",
+    "detail": {
+      "ariaLabel": "Project detail",
+      "title": "Project detail",
+      "close": "Close",
+      "save": "Save",
+      "saving": "Saving…"
+    },
+    "files": {
+      "title": "Files",
+      "upload": "Upload",
+      "uploading": "Uploading…",
+      "remove": "Remove file",
+      "empty": "No files yet."
+    },
+    "bindToChat": "Bind chat to project"
   }
 }

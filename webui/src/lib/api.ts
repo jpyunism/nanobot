@@ -140,6 +140,7 @@ export async function listSessions(
     model_preset?: string | null;
     run_started_at?: number | null;
     workspace_scope?: WorkspaceScopePayload | null;
+    project_id?: string | null;
   };
   const body = await request<{ sessions: Row[] }>(
     `${base}/api/sessions`,
@@ -157,6 +158,7 @@ export async function listSessions(
     modelPreset: s.model_preset ?? null,
     runStartedAt: s.run_started_at ?? null,
     workspaceScope: s.workspace_scope ?? null,
+    projectId: s.project_id ?? null,
   }));
 }
 
@@ -323,6 +325,53 @@ export async function deleteSession(
   return request<SessionDeleteResult>(
     `${resolvedBase}/api/sessions/${encodeURIComponent(key)}/delete${suffix}`,
     token,
+  );
+}
+
+export interface ChatProjectBinding {
+  session_key: string;
+  project_id: string | null;
+}
+
+export async function getChatProject(
+  token: string,
+  key: string,
+  base: string = "",
+): Promise<ChatProjectBinding> {
+  return request<ChatProjectBinding>(
+    `${base}/api/sessions/${encodeURIComponent(key)}/project`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function bindChatProject(
+  token: string,
+  key: string,
+  projectId: string,
+  base: string = "",
+): Promise<ChatProjectBinding> {
+  const query = new URLSearchParams();
+  query.set("project_id", projectId);
+  return request<ChatProjectBinding>(
+    `${base}/api/sessions/${encodeURIComponent(key)}/project/bind?${query}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function unbindChatProject(
+  token: string,
+  key: string,
+  base: string = "",
+): Promise<ChatProjectBinding> {
+  return request<ChatProjectBinding>(
+    `${base}/api/sessions/${encodeURIComponent(key)}/project/unbind`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
   );
 }
 

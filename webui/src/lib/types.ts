@@ -203,6 +203,36 @@ export interface SkillDetail extends SkillSummary {
 
 export interface SkillsPayload { skills: SkillSummary[]; }
 
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  instructions_md: string;
+  created_at_ms: number;
+  updated_at_ms: number;
+  file_count: number;
+  byte_count: number;
+}
+
+export interface ProjectFile {
+  id: string;
+  project_id: string;
+  name: string;
+  mime_type: string;
+  size: number;
+  created_at_ms: number;
+}
+
+export interface ProjectDetail {
+  id: string;
+  name: string;
+  instructions_md: string;
+  created_at_ms: number;
+  updated_at_ms: number;
+  file_count: number;
+  byte_count: number;
+  files: ProjectFile[];
+}
+
 /** Structured UI blob on ``progress`` WS frames; channels may add more ``kind`` values later. */
 export interface AgentUIBlob {
   kind: string;
@@ -1191,24 +1221,6 @@ export type InboundEvent =
       detail?: string;
       provider?: string;
     }
-  | {
-      event: "project_file_added";
-      project_id: string;
-      file: ProjectFile;
-      request_id?: string;
-    }
-  | {
-      event: "project_bound";
-      chat_id: string;
-      project_id: string;
-      workspace_path: string;
-      request_id?: string;
-    }
-  | {
-      event: "project_unbound";
-      chat_id: string;
-      request_id?: string;
-    }
   | { event: "error"; chat_id?: string; detail?: string; reason?: string; project_id?: string; request_id?: string };
 
 /** Base64-encoded file attached to an outbound ``message`` envelope.
@@ -1272,43 +1284,4 @@ export type Outbound =
       /** Marks messages sent by the embedded WebUI, without changing the
        * generic websocket protocol for other clients. */
       webui?: true;
-    }
-  | { type: "add_project_file"; project_id: string; name: string; data_url: string; request_id?: string }
-  | { type: "bind_project"; chat_id: string; project_id: string; request_id?: string }
-  | { type: "unbind_project"; chat_id: string; request_id?: string };
-
-export interface ProjectFile {
-  name: string;
-  size: number;
-  mime: string;
-  path: string;
-}
-
-export interface ProjectSummary {
-  id: string;
-  name: string;
-  created_at: string;
-  updated_at: string;
-  file_count: number;
-  total_bytes: number;
-  workspace_path: string;
-}
-
-export interface ProjectDetail extends ProjectSummary {
-  instructions_md: string;
-  files: ProjectFile[];
-}
-
-export interface ProjectListResponse {
-  projects: ProjectSummary[];
-}
-
-export interface ProjectChatsPayload {
-  chats: Array<{
-    key: string;
-    chat_id: string;
-    title: string;
-    preview: string;
-    updated_at: string;
-  }>;
-}
+    };

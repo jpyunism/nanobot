@@ -1967,6 +1967,7 @@ def _run_gateway(
         config,
         bus,
         session_manager=session_manager,
+        agent_loop=agent,
         cron_service=cron,
         local_trigger_store=trigger_store,
         webui_runtime_model_name=_webui_runtime_model_name,

@@ -514,17 +514,31 @@
       "testForTools": "Jalankan Uji untuk memeriksa dan memilih alat individual."
     },
     "api": {
-      "title": "Server API", "openaiCompatible": "API kompatibel OpenAI", "description": "Hubungkan SDK dan agen melalui endpoint /v1 lokal.",
-      "start": "Mulai server API", "starting": "Memulai...", "stop": "Hentikan", "stopping": "Menghentikan...",
-      "access": "Akses", "thisDevice": "Perangkat ini", "localNetwork": "Jaringan lokal",
-      "localHelp": "Hanya perangkat ini yang dapat terhubung.", "networkHelp": "Perangkat lain dapat terhubung; kunci API diperlukan.",
-      "port": "Port", "portHelp": "API menggunakan port lokal ini.", "apiKey": "Kunci API", "apiKeyHelp": "Klien mengirimkannya sebagai token Bearer.",
-      "apiKeyRequired": "Wajib sebelum membuka API ke jaringan.", "apiKeyPlaceholder": "Masukkan kunci API",
+      "title": "Server API",
+      "openaiCompatible": "API kompatibel OpenAI",
+      "description": "Hubungkan SDK dan agen melalui endpoint /v1 lokal.",
+      "start": "Mulai server API",
+      "starting": "Memulai...",
+      "stop": "Hentikan",
+      "stopping": "Menghentikan...",
+      "access": "Akses",
+      "thisDevice": "Perangkat ini",
+      "localNetwork": "Jaringan lokal",
+      "localHelp": "Hanya perangkat ini yang dapat terhubung.",
+      "networkHelp": "Perangkat lain dapat terhubung; kunci API diperlukan.",
+      "port": "Port",
+      "portHelp": "API menggunakan port lokal ini.",
+      "apiKey": "Kunci API",
+      "apiKeyHelp": "Klien mengirimkannya sebagai token Bearer.",
+      "apiKeyRequired": "Wajib sebelum membuka API ke jaringan.",
+      "apiKeyPlaceholder": "Masukkan kunci API",
       "autoInstall": "Dukungan API akan dipasang otomatis saat dimulai."
     },
     "observability": {
-      "title": "Observabilitas", "configured": "Kredensial tracing tersedia untuk nanobot.",
-      "environment": "Atur LANGFUSE_SECRET_KEY dan LANGFUSE_PUBLIC_KEY, lalu mulai ulang nanobot.", "enable": "Aktifkan dukungan tracing"
+      "title": "Observabilitas",
+      "configured": "Kredensial tracing tersedia untuk nanobot.",
+      "environment": "Atur LANGFUSE_SECRET_KEY dan LANGFUSE_PUBLIC_KEY, lalu mulai ulang nanobot.",
+      "enable": "Aktifkan dukungan tracing"
     },
     "legal": {
       "thirdPartyBrands": "Nama produk, logo, dan merek adalah milik pemiliknya masing-masing. Penggunaan hanya untuk identifikasi dan tidak menyiratkan dukungan."
@@ -843,7 +857,11 @@
       "yesterday": "Yesterday",
       "earlier": "Earlier",
       "archived": "Archived"
-    }
+    },
+    "projectNone": "No project",
+    "projectCurrent": "current",
+    "projectUnassign": "Unassign",
+    "projectAriaLabel": "Project binding"
   },
   "deleteConfirm": {
     "title": "Hapus obrolan ini?",
@@ -1247,5 +1265,41 @@
       "usePath": "Gunakan path",
       "absolutePathRequired": "Masukkan path folder absolut di mesin ini."
     }
+  },
+  "projects": {
+    "title": "Projects",
+    "subtitle": "Bundle instructions and files into reusable capsules for focused chats.",
+    "new": "New project",
+    "refresh": "Refresh",
+    "empty": "No projects yet. Click 'New project' to create one.",
+    "loading": "Loading…",
+    "nameLabel": "Name",
+    "namePlaceholder": "e.g. refactor-research",
+    "instructionsLabel": "Instructions",
+    "instructionsPlaceholder": "Optional instructions prepended to the agent's context when this project is attached.",
+    "noInstructions": "No instructions yet.",
+    "fileCount": "{{count}} file",
+    "byteCount": "{{bytes}} bytes",
+    "updated": "Updated {{date}}",
+    "create": "Create",
+    "creating": "Creating…",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this project?",
+    "detail": {
+      "ariaLabel": "Project detail",
+      "title": "Project detail",
+      "close": "Close",
+      "save": "Save",
+      "saving": "Saving…"
+    },
+    "files": {
+      "title": "Files",
+      "upload": "Upload",
+      "uploading": "Uploading…",
+      "remove": "Remove file",
+      "empty": "No files yet."
+    },
+    "bindToChat": "Bind chat to project"
   }
 }

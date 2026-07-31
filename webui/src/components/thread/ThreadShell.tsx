@@ -1057,6 +1057,7 @@ export function ThreadShell({
   const projectChip = historyKey && session ? (
     <ChatProjectChip
       chatId={session.chatId}
+      sessionKey={historyKey}
       projectId={session.projectId}
       token={token}
       onChanged={onTurnEnd}

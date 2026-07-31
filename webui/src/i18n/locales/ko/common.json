@@ -514,17 +514,31 @@
       "testForTools": "테스트를 실행해 개별 도구를 확인하고 선택하세요."
     },
     "api": {
-      "title": "API 서버", "openaiCompatible": "OpenAI 호환 API", "description": "로컬 /v1 엔드포인트로 SDK와 에이전트를 연결합니다.",
-      "start": "API 서버 시작", "starting": "시작 중...", "stop": "중지", "stopping": "중지 중...",
-      "access": "접근", "thisDevice": "이 기기", "localNetwork": "로컬 네트워크",
-      "localHelp": "이 기기만 연결할 수 있습니다.", "networkHelp": "다른 기기도 연결할 수 있으므로 API 키가 필요합니다.",
-      "port": "포트", "portHelp": "API가 사용할 로컬 포트입니다.", "apiKey": "API 키", "apiKeyHelp": "클라이언트는 Bearer 토큰으로 전송합니다.",
-      "apiKeyRequired": "네트워크에 공개하기 전에 필요합니다.", "apiKeyPlaceholder": "API 키 입력",
+      "title": "API 서버",
+      "openaiCompatible": "OpenAI 호환 API",
+      "description": "로컬 /v1 엔드포인트로 SDK와 에이전트를 연결합니다.",
+      "start": "API 서버 시작",
+      "starting": "시작 중...",
+      "stop": "중지",
+      "stopping": "중지 중...",
+      "access": "접근",
+      "thisDevice": "이 기기",
+      "localNetwork": "로컬 네트워크",
+      "localHelp": "이 기기만 연결할 수 있습니다.",
+      "networkHelp": "다른 기기도 연결할 수 있으므로 API 키가 필요합니다.",
+      "port": "포트",
+      "portHelp": "API가 사용할 로컬 포트입니다.",
+      "apiKey": "API 키",
+      "apiKeyHelp": "클라이언트는 Bearer 토큰으로 전송합니다.",
+      "apiKeyRequired": "네트워크에 공개하기 전에 필요합니다.",
+      "apiKeyPlaceholder": "API 키 입력",
       "autoInstall": "시작할 때 API 지원을 자동으로 설치합니다."
     },
     "observability": {
-      "title": "관측성", "configured": "nanobot이 추적 자격 증명을 사용할 수 있습니다.",
-      "environment": "LANGFUSE_SECRET_KEY와 LANGFUSE_PUBLIC_KEY를 설정한 뒤 nanobot을 다시 시작하세요.", "enable": "추적 지원 활성화"
+      "title": "관측성",
+      "configured": "nanobot이 추적 자격 증명을 사용할 수 있습니다.",
+      "environment": "LANGFUSE_SECRET_KEY와 LANGFUSE_PUBLIC_KEY를 설정한 뒤 nanobot을 다시 시작하세요.",
+      "enable": "추적 지원 활성화"
     },
     "legal": {
       "thirdPartyBrands": "제품 이름, 로고 및 브랜드는 각 소유자의 자산입니다. 사용은 식별 목적일 뿐 보증이나 제휴를 의미하지 않습니다."
@@ -843,7 +857,11 @@
       "yesterday": "Yesterday",
       "earlier": "Earlier",
       "archived": "Archived"
-    }
+    },
+    "projectNone": "No project",
+    "projectCurrent": "current",
+    "projectUnassign": "Unassign",
+    "projectAriaLabel": "Project binding"
   },
   "deleteConfirm": {
     "title": "이 채팅을 삭제할까요?",
@@ -1247,5 +1265,41 @@
       "usePath": "경로 사용",
       "absolutePathRequired": "이 머신의 절대 폴더 경로를 입력하세요."
     }
+  },
+  "projects": {
+    "title": "Projects",
+    "subtitle": "Bundle instructions and files into reusable capsules for focused chats.",
+    "new": "New project",
+    "refresh": "Refresh",
+    "empty": "No projects yet. Click 'New project' to create one.",
+    "loading": "Loading…",
+    "nameLabel": "Name",
+    "namePlaceholder": "e.g. refactor-research",
+    "instructionsLabel": "Instructions",
+    "instructionsPlaceholder": "Optional instructions prepended to the agent's context when this project is attached.",
+    "noInstructions": "No instructions yet.",
+    "fileCount": "{{count}} file",
+    "byteCount": "{{bytes}} bytes",
+    "updated": "Updated {{date}}",
+    "create": "Create",
+    "creating": "Creating…",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this project?",
+    "detail": {
+      "ariaLabel": "Project detail",
+      "title": "Project detail",
+      "close": "Close",
+      "save": "Save",
+      "saving": "Saving…"
+    },
+    "files": {
+      "title": "Files",
+      "upload": "Upload",
+      "uploading": "Uploading…",
+      "remove": "Remove file",
+      "empty": "No files yet."
+    },
+    "bindToChat": "Bind chat to project"
   }
 }

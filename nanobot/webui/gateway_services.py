@@ -8,9 +8,12 @@ from typing import Any, Callable
 
 from loguru import logger as default_logger
 
+from nanobot.config.paths import get_data_dir
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.ingress_policy import DEFAULT_WEBUI_INGRESS_POLICY, WebUIIngressPolicy
 from nanobot.webui.media_gateway import WebUIMediaGateway
+from nanobot.webui.project_context_provider import make_project_context_provider
+from nanobot.webui.projects import WebUIProjectsController
 from nanobot.webui.transcript import WebUITranscriptRecorder
 from nanobot.webui.workspaces import WebUIWorkspaceController
 from nanobot.webui.ws_http import GatewayHTTPHandler
@@ -26,6 +29,7 @@ class GatewayServices:
     ingress: WebUIIngressPolicy
     transcripts: WebUITranscriptRecorder
     workspaces: WebUIWorkspaceController
+    projects: WebUIProjectsController
     session_manager: Any | None
     cron_service: Any | None
     local_trigger_store: Any | None
@@ -51,6 +55,7 @@ def build_gateway_services(
     local_trigger_pending_ids: Callable[[str], set[str]] | None = None,
     channel_feature_action: Callable[..., Any] | None = None,
     channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
+    agent_loop: Any | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
     tokens = GatewayTokenStore()
@@ -74,6 +79,18 @@ def build_gateway_services(
         default_workspace=workspace_path,
         default_restrict_to_workspace=default_restrict_to_workspace,
     )
+    projects = WebUIProjectsController(data_dir=get_data_dir())
+    if (
+        agent_loop is not None
+        and session_manager is not None
+        and callable(getattr(agent_loop, "register_runtime_context_provider", None))
+    ):
+        try:
+            agent_loop.register_runtime_context_provider(
+                make_project_context_provider(session_manager, projects)
+            )
+        except Exception as exc:
+            logger.warning("failed to register project context provider: {}", exc)
     http = GatewayHTTPHandler(
         config=config,
         session_manager=session_manager,
@@ -86,6 +103,7 @@ def build_gateway_services(
         media=media,
         ingress=ingress,
         workspaces=workspaces,
+        projects=projects,
         skills_workspace_path=workspace_path,
         disabled_skills=disabled_skills,
         cron_service=cron_service,
@@ -103,6 +121,7 @@ def build_gateway_services(
         ingress=ingress,
         transcripts=transcripts,
         workspaces=workspaces,
+        projects=projects,
         session_manager=session_manager,
         cron_service=cron_service,
         local_trigger_store=local_trigger_store,

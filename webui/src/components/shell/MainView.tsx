@@ -1,6 +1,6 @@
 import { Suspense, lazy, type ReactNode } from "react";
 import { ThreadShell } from "@/components/thread/ThreadShell";
-import { ProjectsView } from "@/components/ProjectsView";
+import { ProjectsSurface } from "@/components/projects/ProjectsSurface";
 import type { ChatSummary, SettingsPayload, WorkspacesPayload, WorkspaceScopePayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -137,10 +137,3 @@ export function MainView(props: Args) {
   );
 }
 
-function ProjectsSurface() {
-  return (
-    <div className="absolute inset-0 flex flex-col">
-      <ProjectsView />
-    </div>
-  );
-}

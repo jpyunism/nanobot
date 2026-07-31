@@ -72,10 +72,20 @@ from nanobot.webui.http_utils import (
     query_first as _query_first,
 )
 from nanobot.webui.http_utils import (
+    read_json_request_header as read_json_request_header,
+)
+from nanobot.webui.http_utils import (
     safe_host_header as _safe_host_header,
 )
 from nanobot.webui.ingress_policy import WebUIIngressPolicy
 from nanobot.webui.media_gateway import WebUIMediaGateway
+from nanobot.webui.projects import (
+    ProjectError,
+    WebUIProjectsController,
+    project_detail_payload,
+    project_file_payload,
+    projects_list_payload,
+)
 from nanobot.webui.session_automations import (
     all_automations_payload,
     serialize_automation_jobs,
@@ -83,6 +93,10 @@ from nanobot.webui.session_automations import (
     session_automations_payload,
 )
 from nanobot.webui.session_list_index import list_webui_sessions
+from nanobot.webui.session_meta import (
+    chat_project_id_from_metadata,
+    set_chat_project_id,
+)
 from nanobot.webui.sidebar_state import (
     read_webui_sidebar_state,
     write_webui_sidebar_state,
@@ -94,6 +108,10 @@ from nanobot.webui.workspaces import WebUIWorkspaceController
 
 _SLOW_WEBUI_HTTP_LOG_MS = 1_000
 _AUTOMATION_VALUES_HEADER = "X-Nanobot-Automation-Values"
+_PROJECT_DATA_HEADER = "X-Nanobot-Project-Data"
+_PROJECT_FILE_HEADER = "X-Nanobot-Project-File"
+_PROJECT_DATA_HEADER_MAX_BYTES = 256 * 1024
+_PROJECT_FILE_HEADER_MAX_BYTES = 16 * 1024 * 1024
 
 if TYPE_CHECKING:
     from nanobot.bus.queue import MessageBus
@@ -162,6 +180,7 @@ class GatewayHTTPHandler:
         media: WebUIMediaGateway,
         ingress: WebUIIngressPolicy,
         workspaces: WebUIWorkspaceController,
+        projects: WebUIProjectsController,
         skills_workspace_path: Path,
         disabled_skills: set[str] | None = None,
         cron_service: CronService | None = None,
@@ -181,6 +200,7 @@ class GatewayHTTPHandler:
         self.media = media
         self.ingress = ingress
         self.workspaces = workspaces
+        self.projects = projects
         self.skills_workspace_path = skills_workspace_path
         self.disabled_skills = disabled_skills or set()
         self.cron_service = cron_service
@@ -247,6 +267,11 @@ class GatewayHTTPHandler:
 
         # Settings routes (delegated)
         response = await self.settings_routes.dispatch(connection, request, got)
+        if response is not None:
+            return response
+
+        # Project routes
+        response = self._dispatch_project_routes(request, got)
         if response is not None:
             return response
 
@@ -395,7 +420,195 @@ class GatewayHTTPHandler:
         if m:
             return self._handle_session_delete(request, m.group(1))
 
+        m = re.match(r"^/api/sessions/([^/]+)/project$", got)
+        if m:
+            return self._handle_session_project_get(request, m.group(1))
+
+        m = re.match(r"^/api/sessions/([^/]+)/project/bind$", got)
+        if m:
+            return self._handle_session_project_bind(request, m.group(1))
+
+        m = re.match(r"^/api/sessions/([^/]+)/project/unbind$", got)
+        if m:
+            return self._handle_session_project_unbind(request, m.group(1))
+
         return None
+
+    # -- Project routes -----------------------------------------------------
+
+    def _dispatch_project_routes(self, request: WsRequest, got: str) -> Response | None:
+        if got == "/api/projects":
+            return self._handle_projects_list(request)
+        if got == "/api/projects/create":
+            return self._handle_projects_create(request)
+        m = re.match(r"^/api/projects/([^/]+)$", got)
+        if m:
+            return self._handle_projects_detail(request, m.group(1))
+        m = re.match(r"^/api/projects/([^/]+)/update$", got)
+        if m:
+            return self._handle_projects_update(request, m.group(1))
+        m = re.match(r"^/api/projects/([^/]+)/delete$", got)
+        if m:
+            return self._handle_projects_delete(request, m.group(1))
+        m = re.match(r"^/api/projects/([^/]+)/files$", got)
+        if m:
+            return self._handle_projects_files_list(request, m.group(1))
+        if got.startswith("/api/projects/") and "/files/upload" in got:
+            m = re.match(r"^/api/projects/([^/]+)/files/upload$", got)
+            if m:
+                return self._handle_projects_files_upload(request, m.group(1))
+        m = re.match(r"^/api/projects/([^/]+)/files/([^/]+)$", got)
+        if m:
+            return self._handle_projects_file_get(request, m.group(1), m.group(2))
+        m = re.match(r"^/api/projects/([^/]+)/files/([^/]+)/delete$", got)
+        if m:
+            return self._handle_projects_file_delete(request, m.group(1), m.group(2))
+        return None
+
+    def _handle_projects_list(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            payload = projects_list_payload(self.projects)
+        except ProjectError as exc:
+            return _http_error(500, str(exc))
+        return _http_json_response(payload)
+
+    def _handle_projects_create(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(
+            request, _PROJECT_DATA_HEADER, _PROJECT_DATA_HEADER_MAX_BYTES
+        )
+        if err is not None:
+            return err
+        name = (body.get("name") or "").strip() if isinstance(body, dict) else ""
+        instructions = (
+            (body.get("instructions_md") or "") if isinstance(body, dict) else ""
+        )
+        try:
+            summary = self.projects.create_project(name, instructions)
+        except ProjectError as exc:
+            return _http_error(400, str(exc))
+        return _http_json_response(project_detail_payload(self.projects, summary.id))
+
+    def _handle_projects_detail(
+        self, request: WsRequest, project_id: str
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            payload = project_detail_payload(self.projects, project_id)
+        except ProjectError as exc:
+            return _http_error(404, str(exc))
+        return _http_json_response(payload)
+
+    def _handle_projects_update(
+        self, request: WsRequest, project_id: str
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(
+            request, _PROJECT_DATA_HEADER, _PROJECT_DATA_HEADER_MAX_BYTES
+        )
+        if err is not None:
+            return err
+        name = (body.get("name") or "").strip() if isinstance(body, dict) else ""
+        instructions = (
+            (body.get("instructions_md") or "") if isinstance(body, dict) else ""
+        )
+        try:
+            summary = self.projects.update_project(project_id, name, instructions)
+        except ProjectError as exc:
+            return _http_error(404, str(exc))
+        return _http_json_response(project_detail_payload(self.projects, summary.id))
+
+    def _handle_projects_delete(
+        self, request: WsRequest, project_id: str
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            self.projects.delete_project(project_id)
+        except ProjectError as exc:
+            return _http_error(404, str(exc))
+        return _http_json_response({"ok": True, "id": project_id})
+
+    def _handle_projects_files_list(
+        self, request: WsRequest, project_id: str
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            files = self.projects.list_files(project_id)
+        except ProjectError as exc:
+            return _http_error(404, str(exc))
+        return _http_json_response(
+            {
+                "files": [
+                    {
+                        "id": f.id,
+                        "project_id": f.project_id,
+                        "name": f.name,
+                        "mime_type": f.mime_type,
+                        "size": f.size,
+                        "created_at_ms": f.created_at_ms,
+                    }
+                    for f in files
+                ]
+            }
+        )
+
+    def _handle_projects_files_upload(
+        self, request: WsRequest, project_id: str
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(
+            request, _PROJECT_FILE_HEADER, _PROJECT_FILE_HEADER_MAX_BYTES
+        )
+        if err is not None:
+            return err
+        name = (body.get("name") or "").strip() if isinstance(body, dict) else ""
+        data_url = body.get("data_url") if isinstance(body, dict) else None
+        if not isinstance(data_url, str):
+            return _http_error(400, "file data_url is required")
+        try:
+            f = self.projects.add_file(project_id, name, data_url)
+        except ProjectError as exc:
+            return _http_error(400, str(exc))
+        return _http_json_response(
+            {
+                "id": f.id,
+                "project_id": f.project_id,
+                "name": f.name,
+                "mime_type": f.mime_type,
+                "size": f.size,
+                "created_at_ms": f.created_at_ms,
+            }
+        )
+
+    def _handle_projects_file_get(
+        self, request: WsRequest, project_id: str, file_id: str
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            payload = project_file_payload(self.projects, project_id, file_id)
+        except ProjectError as exc:
+            return _http_error(404, str(exc))
+        return _http_json_response(payload)
+
+    def _handle_projects_file_delete(
+        self, request: WsRequest, project_id: str, file_id: str
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            self.projects.delete_file(project_id, file_id)
+        except ProjectError as exc:
+            return _http_error(404, str(exc))
+        return _http_json_response({"ok": True, "id": file_id})
 
     async def _handle_sessions_list(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
@@ -568,6 +781,64 @@ class GatewayHTTPHandler:
         deleted = self.session_manager.delete_session(decoded_key)
         delete_webui_thread(decoded_key)
         return _http_json_response({"deleted": bool(deleted)})
+
+    def _resolve_session_for_project(self, key: str) -> tuple[Any | None, str | None, Response | None]:
+        """Validate a session key and return ``(session, decoded_key, error)``."""
+        if self.session_manager is None:
+            return None, None, _http_error(503, "session manager unavailable")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return None, None, _http_error(400, "invalid session key")
+        if not _is_websocket_channel_session_key(decoded_key):
+            return None, None, _http_error(404, "session not found")
+        session = self.session_manager.get_or_create(decoded_key)
+        return session, decoded_key, None
+
+    def _handle_session_project_get(self, request: WsRequest, key: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        session, decoded_key, err = self._resolve_session_for_project(key)
+        if err is not None:
+            return err
+        project_id = chat_project_id_from_metadata(session.metadata)
+        return _http_json_response({
+            "session_key": decoded_key,
+            "project_id": project_id,
+        })
+
+    def _handle_session_project_bind(self, request: WsRequest, key: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        session, decoded_key, err = self._resolve_session_for_project(key)
+        if err is not None:
+            return err
+        query = _parse_query(request.path)
+        project_id = (_query_first(query, "project_id") or "").strip()
+        if not project_id:
+            return _http_error(400, "missing project_id")
+        try:
+            self.projects.get_project(project_id)
+        except ProjectError as exc:
+            return _http_error(404, str(exc))
+        set_chat_project_id(session, project_id)
+        self.session_manager.save(session)
+        return _http_json_response({
+            "session_key": decoded_key,
+            "project_id": chat_project_id_from_metadata(session.metadata),
+        })
+
+    def _handle_session_project_unbind(self, request: WsRequest, key: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        session, decoded_key, err = self._resolve_session_for_project(key)
+        if err is not None:
+            return err
+        set_chat_project_id(session, None)
+        self.session_manager.save(session)
+        return _http_json_response({
+            "session_key": decoded_key,
+            "project_id": None,
+        })
 
     # -- Automation routes --------------------------------------------------
 

@@ -35,6 +35,17 @@ _WEBUI_ACTIVITY_SIZE = "webui_activity_size"
 _VISIBLE_TRANSCRIPT_ROLES = {"user", "assistant"}
 
 
+def _project_id_from_metadata(metadata: Any) -> str | None:
+    """Public helper: read the chat-project binding from session metadata."""
+    if not isinstance(metadata, dict):
+        return None
+    raw = metadata.get("project_id")
+    if not isinstance(raw, str):
+        return None
+    cleaned = raw.strip()
+    return cleaned or None
+
+
 def list_webui_sessions(session_manager: SessionManager) -> list[dict[str, Any]]:
     """Return session rows for the WebUI sidebar, backed by a rebuildable cache."""
     rows, changed = _reconcile_index(session_manager)
@@ -141,6 +152,7 @@ def _public_row(sessions_dir: Path, row: dict[str, Any]) -> dict[str, Any]:
         "title": row.get("title", ""),
         "preview": row.get("preview", ""),
         _MODEL_PRESET_FIELD: row.get(_MODEL_PRESET_FIELD),
+        "project_id": row.get("project_id"),
         "path": str(sessions_dir / str(row.get("file", ""))),
     }
 
@@ -260,6 +272,7 @@ def _indexed_row_for_session(session: Session, path: Path) -> dict[str, Any]:
         "title": _metadata_title(session.metadata),
         "preview": _preview_from_messages(session.messages),
         _MODEL_PRESET_FIELD: model_preset_from_metadata(session.metadata),
+        "project_id": _project_id_from_metadata(session.metadata),
         "file": path.name,
         "mtime_ns": signature["mtime_ns"],
         "size": signature["size"],
@@ -334,6 +347,7 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
                 "title": _metadata_title(data.get("metadata", {})),
                 "preview": preview or fallback_preview,
                 _MODEL_PRESET_FIELD: model_preset_from_metadata(data.get("metadata", {})),
+                "project_id": _project_id_from_metadata(data.get("metadata", {})),
                 "file": path.name,
                 "mtime_ns": signature["mtime_ns"],
                 "size": signature["size"],

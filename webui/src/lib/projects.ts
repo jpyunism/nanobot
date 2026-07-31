@@ -1,183 +1,172 @@
-// Project CRUD client wrapper for the WebUI.
-//
-// The gateway exposes project CRUD via GET-only HTTP routes that pass JSON
-// bodies through a single `?body=...` query parameter (the gateway's Request
-// object does not expose the HTTP body). File uploads happen via the WebSocket
-// channel directly because base64 data URLs of any reasonable size do not fit
-// in a query string.
+import type {
+  ProjectSummary,
+  ProjectFile,
+  ProjectDetail,
+} from "./types";
+import { fetchWithTimeout } from "./http";
 
-import type { ProjectDetail, ProjectListResponse, ProjectFile, ProjectChatsPayload } from "./types";
-import { ApiError } from "./api";
+const API_READ_TIMEOUT_MS = 20_000;
 
-const PROJECT_READ_TIMEOUT_MS = 20_000;
+export type ProjectListPayload = { projects: ProjectSummary[] };
 
-function buildUrl(path: string, base: string): string {
-  return `${base}${path}`;
-}
-
-function buildQuery(op: string, body?: unknown): string {
-  const query = new URLSearchParams();
-  query.set("op", op);
-  if (body !== undefined) {
-    query.set("body", JSON.stringify(body));
+export class ProjectApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+    this.name = "ProjectApiError";
   }
-  return `?${query.toString()}`;
 }
 
-async function requestJson<T>(
-  path: string,
+async function request<T>(
+  url: string,
   token: string,
-  // Reserved for future per-request timeouts when uploads reintroduce them.
-  // Keeps the call sites uniform with the rest of the lib.
-  timeoutMs: number = PROJECT_READ_TIMEOUT_MS,
+  init?: RequestInit,
 ): Promise<T> {
-  void timeoutMs;
-  const res = await fetch(path, {
-    headers: { Authorization: `Bearer ${token}` },
-    credentials: "same-origin",
-  });
+  const res = await fetchWithTimeout(
+    url,
+    {
+      ...(init ?? {}),
+      headers: {
+        ...(init?.headers ?? {}),
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: "same-origin",
+    },
+    API_READ_TIMEOUT_MS,
+  );
   if (!res.ok) {
-    const text = (await res.text()).trim();
-    let detail = text || `HTTP ${res.status}`;
-    try {
-      const parsed = JSON.parse(text);
-      if (parsed && typeof parsed === "object" && "error" in parsed) {
-        detail = String((parsed as { error: unknown }).error);
-      }
-    } catch {
-      // body was not JSON; keep raw text
-    }
-    throw new ApiError(res.status, detail);
+    const text = typeof res.text === "function" ? (await res.text()).trim() : "";
+    throw new ProjectApiError(res.status, text || `HTTP ${res.status}`);
   }
   return (await res.json()) as T;
 }
 
-export async function listProjects(
+export function fetchProjects(
+  base: string,
   token: string,
-  base: string = "",
-): Promise<ProjectListResponse> {
-  return requestJson<ProjectListResponse>(
-    buildUrl(`/api/projects${buildQuery("list")}`, base),
+): Promise<ProjectListPayload> {
+  return request<ProjectListPayload>(
+    `${base}/api/projects`,
     token,
   );
 }
 
-export async function createProject(
+export function fetchProject(
+  base: string,
   token: string,
-  payload: { name: string; instructions_md?: string },
-  base: string = "",
+  projectId: string,
 ): Promise<ProjectDetail> {
-  return requestJson<ProjectDetail>(
-    buildUrl(`/api/projects${buildQuery("create", payload)}`, base),
-    token,
-  );
+  return request<ProjectDetail>(`${base}/api/projects/${encodeURIComponent(projectId)}`, token);
 }
 
-export async function getProject(
+export function createProject(
+  base: string,
   token: string,
-  projectId: string,
-  base: string = "",
+  name: string,
+  instructionsMd: string,
 ): Promise<ProjectDetail> {
-  return requestJson<ProjectDetail>(
-    buildUrl(`/api/projects/${encodeURIComponent(projectId)}${buildQuery("get")}`, base),
-    token,
-  );
+  return request<ProjectDetail>(`${base}/api/projects/create`, token, {
+    headers: {
+      "X-Nanobot-Project-Data": JSON.stringify({ name, instructions_md: instructionsMd }),
+    },
+  });
 }
 
-export async function updateProject(
+export function updateProject(
+  base: string,
   token: string,
   projectId: string,
-  payload: Partial<{ name: string; instructions_md: string }>,
-  base: string = "",
+  name: string,
+  instructionsMd: string,
 ): Promise<ProjectDetail> {
-  return requestJson<ProjectDetail>(
-    buildUrl(
-      `/api/projects/${encodeURIComponent(projectId)}${buildQuery("update", payload)}`,
-      base,
-    ),
+  return request<ProjectDetail>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/update`,
+    token,
+    {
+      headers: {
+        "X-Nanobot-Project-Data": JSON.stringify({ name, instructions_md: instructionsMd }),
+      },
+    },
+  );
+}
+
+export function deleteProject(
+  base: string,
+  token: string,
+  projectId: string,
+): Promise<{ ok: true; id: string }> {
+  return request<{ ok: true; id: string }>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/delete`,
     token,
   );
 }
 
-export async function deleteProject(
+export function listProjectFiles(
+  base: string,
   token: string,
   projectId: string,
-  base: string = "",
-): Promise<{ deleted: boolean }> {
-  return requestJson<{ deleted: boolean }>(
-    buildUrl(`/api/projects/${encodeURIComponent(projectId)}${buildQuery("delete")}`, base),
-    token,
-  );
-}
-
-export async function listProjectFiles(
-  token: string,
-  projectId: string,
-  base: string = "",
 ): Promise<{ files: ProjectFile[] }> {
-  return requestJson<{ files: ProjectFile[] }>(
-    buildUrl(
-      `/api/projects/${encodeURIComponent(projectId)}/files${buildQuery("list")}`,
-      base,
-    ),
+  return request<{ files: ProjectFile[] }>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/files`,
     token,
   );
 }
 
-export async function deleteProjectFile(
+export function uploadProjectFile(
+  base: string,
   token: string,
   projectId: string,
-  fileName: string,
-  base: string = "",
-): Promise<{ deleted: boolean }> {
-  return requestJson<{ deleted: boolean }>(
-    buildUrl(
-      `/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileName)}${buildQuery("delete")}`,
-      base,
-    ),
+  name: string,
+  dataUrl: string,
+): Promise<ProjectFile> {
+  return request<ProjectFile>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/files/upload`,
     token,
+    {
+      headers: {
+        "X-Nanobot-Project-File": JSON.stringify({ name, data_url: dataUrl }),
+      },
+    },
   );
 }
 
-export async function bindChatToProject(
-  token: string,
-  chatId: string,
-  projectId: string,
-  base: string = "",
-): Promise<{ chat_id: string; project_id: string; workspace_path: string }> {
-  return requestJson<{ chat_id: string; project_id: string; workspace_path: string }>(
-    buildUrl(
-      `/api/sessions/${encodeURIComponent(chatId)}/project${buildQuery("bind", { project_id: projectId })}`,
-      base,
-    ),
-    token,
-  );
-}
-
-export async function unbindChatFromProject(
-  token: string,
-  chatId: string,
-  base: string = "",
-): Promise<{ chat_id: string }> {
-  return requestJson<{ chat_id: string }>(
-    buildUrl(
-      `/api/sessions/${encodeURIComponent(chatId)}/project${buildQuery("unbind")}`,
-      base,
-    ),
-    token,
-  );
-}
-
-export async function listProjectChats(
+export function readProjectFile(
+  base: string,
   token: string,
   projectId: string,
-  base: string = "",
-): Promise<ProjectChatsPayload> {
-  return requestJson<ProjectChatsPayload>(
-    buildUrl(
-      `/api/projects/${encodeURIComponent(projectId)}/chats`,
-      base,
-    ),
+  fileId: string,
+): Promise<ProjectFile & { data_url: string }> {
+  return request<ProjectFile & { data_url: string }>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}`,
     token,
   );
+}
+
+export function deleteProjectFile(
+  base: string,
+  token: string,
+  projectId: string,
+  fileId: string,
+): Promise<{ ok: true; id: string }> {
+  return request<{ ok: true; id: string }>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/delete`,
+    token,
+  );
+}
+
+export function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string") {
+        resolve(result);
+      } else {
+        reject(new Error("file did not produce a data URL"));
+      }
+    };
+    reader.onerror = () => reject(new Error("file read failed"));
+    reader.readAsDataURL(file);
+  });
 }

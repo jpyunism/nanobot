@@ -40,7 +40,12 @@ export function groupSessions(
   labels: ChatGroupLabels,
   options: ChatGroupingOptions,
 ): SessionGroup[] {
-  if (sessions.some((session) => session.projectId || session.workspaceScope?.project_path)) {
+  if (
+    sessions.some((session) =>
+      typeof session.projectId === "string" && session.projectId.trim()
+      || session.workspaceScope?.project_path
+    )
+  ) {
     return groupSessionsByProject(sessions, labels, options);
   }
 
@@ -240,10 +245,10 @@ function groupSessionsByProject(
     if (archived.has(session.key) && !options.showArchived) {
       continue;
     }
-    const pid = session.projectId;
-    if (pid) {
-      const key = `project_id:${pid}`;
-      const label = options.projectNameOverrides[key]?.trim() || pid;
+    const projectId = typeof session.projectId === "string" ? session.projectId.trim() : "";
+    if (projectId) {
+      const key = `project_id:${projectId}`;
+      const label = options.projectNameOverrides[key]?.trim() || projectId;
       const bucket = buckets.get(key) ?? {
         path: undefined,
         label,

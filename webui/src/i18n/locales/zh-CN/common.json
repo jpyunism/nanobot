@@ -857,7 +857,11 @@
       "yesterday": "昨天",
       "earlier": "更早",
       "archived": "已归档"
-    }
+    },
+    "projectNone": "No project",
+    "projectCurrent": "current",
+    "projectUnassign": "Unassign",
+    "projectAriaLabel": "Project binding"
   },
   "deleteConfirm": {
     "title": "删除这个话题？",
@@ -1261,5 +1265,41 @@
       "usePath": "使用路径",
       "absolutePathRequired": "请输入这台机器上的绝对文件夹路径。"
     }
+  },
+  "projects": {
+    "title": "Projects",
+    "subtitle": "Bundle instructions and files into reusable capsules for focused chats.",
+    "new": "New project",
+    "refresh": "Refresh",
+    "empty": "No projects yet. Click 'New project' to create one.",
+    "loading": "Loading…",
+    "nameLabel": "Name",
+    "namePlaceholder": "e.g. refactor-research",
+    "instructionsLabel": "Instructions",
+    "instructionsPlaceholder": "Optional instructions prepended to the agent's context when this project is attached.",
+    "noInstructions": "No instructions yet.",
+    "fileCount": "{{count}} file",
+    "byteCount": "{{bytes}} bytes",
+    "updated": "Updated {{date}}",
+    "create": "Create",
+    "creating": "Creating…",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this project?",
+    "detail": {
+      "ariaLabel": "Project detail",
+      "title": "Project detail",
+      "close": "Close",
+      "save": "Save",
+      "saving": "Saving…"
+    },
+    "files": {
+      "title": "Files",
+      "upload": "Upload",
+      "uploading": "Uploading…",
+      "remove": "Remove file",
+      "empty": "No files yet."
+    },
+    "bindToChat": "Bind chat to project"
   }
 }

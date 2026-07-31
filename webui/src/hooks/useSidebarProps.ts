@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { ChatSummary, SidebarStatePayload, WorkspacesPayload } from "@/lib/types";
 import type { ActionsApi } from "@/hooks/useChatActions";
+import { useProjectNames } from "@/hooks/useProjectNames";
 
 type Args = {
   sessions: ChatSummary[];
@@ -14,6 +15,7 @@ type Args = {
   chatActions: ActionsApi["chat"];
   utility: ActionsApi["utility"];
   onOpenUtility: ActionsApi["utility"]["onOpen"];
+  token: string;
 };
 
 export function useSidebarProps({
@@ -28,7 +30,13 @@ export function useSidebarProps({
   chatActions,
   utility,
   onOpenUtility,
+  token,
 }: Args) {
+  const projectNameOverrides = useProjectNames(
+    "",
+    token,
+    sidebarState.project_name_overrides,
+  );
   return useMemo(
     () => ({
       sessions,
@@ -61,7 +69,7 @@ export function useSidebarProps({
       pinnedKeys: sidebarState.pinned_keys,
       archivedKeys: sidebarState.archived_keys,
       titleOverrides: sidebarState.title_overrides,
-      projectNameOverrides: sidebarState.project_name_overrides,
+      projectNameOverrides,
       collapsedGroups: sidebarState.collapsed_groups,
       runningChatIds: runningChatIdList,
       updatedChatIds: updatedChatIdList,
@@ -82,6 +90,7 @@ export function useSidebarProps({
       chatActions,
       utility,
       onOpenUtility,
+      projectNameOverrides,
     ],
   );
 }
