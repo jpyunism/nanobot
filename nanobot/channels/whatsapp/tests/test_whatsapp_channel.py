@@ -497,138 +497,42 @@ class _LoggedOutClient:
 
 
 @pytest.mark.asyncio
-async def test_start_reconnects_after_logged_out(monkeypatch) -> None:
-    """After LoggedOutEv the channel's auto-reconnect loop should
-    call start() again, which connects to the freshly-paired session.
-    The user only needs to scan the QR once via the CLI; the running
-    gateway picks up the new device in its db.
+async def test_start_runs_single_session_no_reconnect(monkeypatch) -> None:
+    """start() runs exactly one _run_session. After LoggedOutEv the
+    channel stops — no auto-reconnect. The user re-links manually.
     """
     _patch_neonize_api(monkeypatch)
 
-    first = _LoggedOutClient()
-    second = _LoggedOutClient()
-    ch = _make_channel(
-        {"max_restart_attempts": 3, "restart_delay_s": 1, "login_timeout_s": 1},
-    )
-    # Schedule a different client for the second attempt (simulates the
-    # user re-pairing from another shell, which writes a new entry to
-    # the neonize db).
-    ch._new_client = MagicMock(side_effect=[first, second])
-
-    start_task = asyncio.create_task(ch.start())
-
-    # Give the first session time to connect, then fire LoggedOutEv to
-    # simulate the user re-pairing the bot from another shell.
-    await asyncio.sleep(0.05)
-    from nanobot.channels.whatsapp import runtime as whatsapp_module
-    logged_out_ev = whatsapp_module._NEONIZE_API.LoggedOutEv
-    # ponytail: in real neonize, LoggedOutEv causes the websocket to
-    # close, which makes the pending client.idle() return. We simulate
-    # that here by calling stop() in addition to firing the event.
-    await first.handlers[logged_out_ev](first, _Proto(Reason=2, OnConnect=False))
-    await first.stop()
-
-    # Wait for the reconnect loop to run and the second client to be
-    # asked to connect.
-    for _ in range(150):
-        if second.connected_event.is_set():
-            break
-        await asyncio.sleep(0.02)
-
-    # Second client should have been used; channel should be running.
-    assert ch._new_client.call_count == 2
-    assert ch._connected is True
-    assert ch._session_was_connected is True
-
-    # Stop cleanly to end the test.
-    await ch.stop()
-    await start_task
-
-
-@pytest.mark.asyncio
-async def test_start_auto_reconnect_keeps_looping_until_external_stop(
-    monkeypatch,
-) -> None:
-    """Repeated LoggedOutEv cycles (e.g. the user re-pairs, gateway
-    reconnects, then re-pairs again) should keep the auto-reconnect
-    loop alive. A clean external stop() is the only thing that ends
-    it without burning a retry budget — LoggedOutEv keeps the budget
-    open since each reconnect is a fresh chance.
-    """
-    _patch_neonize_api(monkeypatch)
-
-    clients = [_LoggedOutClient() for _ in range(5)]
-    ch = _make_channel(
-        {"max_restart_attempts": 2, "restart_delay_s": 1, "login_timeout_s": 1},
-    )
-    ch._new_client = MagicMock(side_effect=clients)
-
-    from nanobot.channels.whatsapp import runtime as whatsapp_module
-    logged_out_ev = whatsapp_module._NEONIZE_API.LoggedOutEv
-
-    async def _drive():
-        # Fire LoggedOutEv + stop() on each client after it connects.
-        # We don't try to give up on a counter — the test just verifies
-        # the auto-reconnect loop keeps trying until ch.stop() is called
-        # externally (which is what the manager does on shutdown).
-        for client in clients:
-            for _ in range(50):
-                if client.connected_event.is_set():
-                    break
-                await asyncio.sleep(0.01)
-            if logged_out_ev in client.handlers:
-                await client.handlers[logged_out_ev](client, _Proto(Reason=2, OnConnect=False))
-            await client.stop()
-            await asyncio.sleep(0.05)
-            if not ch._session_was_connected:
-                return
-
-    start_task = asyncio.create_task(ch.start())
-    await _drive()
-    # The loop should keep running until we stop it. Verify by
-    # checking it made at least one reconnect attempt.
-    assert ch._new_client.call_count >= 2
-    # External stop must end the loop without further retry attempts.
-    await ch.stop()
-    await asyncio.wait_for(start_task, timeout=3)
-    assert ch._stopped_externally is True
-
-
-@pytest.mark.asyncio
-async def test_start_does_not_retry_when_stop_called_externally(
-    monkeypatch,
-) -> None:
-    """A clean stop() (manager shutdown, not LoggedOutEv) must NOT
-    trigger the auto-reconnect loop.
-    """
-    _patch_neonize_api(monkeypatch)
-    client = _FakeLoginClient()
-    ch = _make_channel(
-        {"max_restart_attempts": 3, "restart_delay_s": 1, "login_timeout_s": 1},
-    )
+    client = _LoggedOutClient()
+    ch = _make_channel({"login_timeout_s": 1})
     ch._new_client = MagicMock(return_value=client)
 
     start_task = asyncio.create_task(ch.start())
     await asyncio.sleep(0.05)
-    # External stop — should not enter the retry loop.
+
+    from nanobot.channels.whatsapp import runtime as whatsapp_module
+    logged_out_ev = whatsapp_module._NEONIZE_API.LoggedOutEv
+    await client.handlers[logged_out_ev](client, _Proto(Reason=2, OnConnect=False))
+    await client.stop()
+
+    await asyncio.wait_for(start_task, timeout=3)
+    assert ch._new_client.call_count == 1
+    assert ch._connected is False
+
+
+@pytest.mark.asyncio
+async def test_start_stops_cleanly_on_external_stop(monkeypatch) -> None:
+    """A clean stop() (manager shutdown) ends the session with no retry."""
+    _patch_neonize_api(monkeypatch)
+    client = _FakeLoginClient()
+    ch = _make_channel({"login_timeout_s": 1})
+    ch._new_client = MagicMock(return_value=client)
+
+    start_task = asyncio.create_task(ch.start())
+    await asyncio.sleep(0.05)
     await ch.stop()
     await asyncio.wait_for(start_task, timeout=5)
     assert ch._new_client.call_count == 1
-
-
-def test_restart_status_surfaces_progress(monkeypatch) -> None:
-    _patch_neonize_api(monkeypatch)
-    ch = _make_channel(
-        {"max_restart_attempts": 5, "restart_delay_s": 7},
-    )
-    # No reconnect yet — status is None.
-    assert ch.restart_status is None
-    # After a successful connect + logout event, status reports
-    # attempts so the WebUI can render a "reconnecting" pill.
-    ch._session_was_connected = True
-    ch._restart_attempts = 2
-    status = ch.restart_status
-    assert status == {"attempts": 2, "max": 5, "delay_s": 7}
 
 
 def _patch_throttle_path(monkeypatch, tmp_path) -> Path:
@@ -1638,61 +1542,6 @@ def test_reset_database_removes_sqlite_sidecars(tmp_path) -> None:
 # ponytail: regression tests for the watchdog / persistence / drop-logging
 # fixes. These exercise the paths that caused the "live but silent" outage
 # the user reported on 2026-08-01.
-
-
-async def test_disconnect_event_triggers_auto_reconnect_flag(monkeypatch) -> None:
-    """DisconnectedEv must set _disconnected=True so the auto-reconnect
-    loop in start() catches transient network drops, not just LoggedOutEv."""
-    _patch_neonize_api(monkeypatch)
-    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, MagicMock())
-    ch._disconnected = False
-    ch._connected = True
-
-    # Use named sentinel classes so we can capture handlers by name.
-    class _NamedDisconnect:
-        pass
-
-    monkeypatch.setattr(
-        whatsapp_module,
-        "DisconnectedEv_for_test",
-        _NamedDisconnect,
-        raising=False,
-    )
-    api = whatsapp_module._NEONIZE_API
-    api = api._replace(DisconnectedEv=_NamedDisconnect())
-    monkeypatch.setattr(whatsapp_module, "_NEONIZE_API", api)
-
-    captured: dict[str, Any] = {}
-
-    real_register = WhatsAppChannel._register_handlers
-
-    def capturing_register(self, client, *, login_result=None, handle_messages=False):
-        original_event = client.event
-
-        def naming_event(event_type):
-            def decorator(func):
-                key = type(event_type).__name__
-                captured.setdefault(key, func)
-                return original_event(event_type)(func)
-            return decorator
-
-        client.event = naming_event  # type: ignore[method-assign]
-        try:
-            real_register(self, client, login_result=login_result, handle_messages=handle_messages)
-        finally:
-            client.event = original_event  # type: ignore[method-assign]
-
-    monkeypatch.setattr(WhatsAppChannel, "_register_handlers", capturing_register)
-
-    client = _FakeLoginClient()
-    ch._client = client
-    ch._register_handlers(client, handle_messages=False)
-
-    disconnect_handler = captured.get("_NamedDisconnect")
-    assert disconnect_handler is not None, f"captured: {list(captured)}"
-    await disconnect_handler(client, _Proto())
-    assert ch._disconnected is True
-    assert ch._connected is False
 
 
 async def test_send_pairing_code_failure_does_not_propagate(monkeypatch) -> None:
