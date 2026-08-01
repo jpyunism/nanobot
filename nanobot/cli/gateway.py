@@ -50,7 +50,24 @@ def create_gateway_app(
         no_args_is_help=False,
     )
 
-    def configure_logging(verbose: bool) -> None:
+    def configure_logging(verbose: bool, log_path: Path | None = None) -> None:
+        # ponytail: always mirror logs to the gateway's managed log file
+        # when one is provided, so QR codes and errors don't disappear into
+        # /dev/null when the foreground process is launched with `> /dev/null`.
+        if log_path is not None:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            logger.add(
+                str(log_path),
+                format=(
+                    "{time:YYYY-MM-DD HH:mm:ss} | "
+                    "<level>{level: <5}</level> | "
+                    "<cyan>{extra[channel]}</cyan> | "
+                    "<level>{message}</level>"
+                ),
+                level="DEBUG" if verbose else "INFO",
+                enqueue=True,
+                filter=lambda record: record["extra"].setdefault("channel", "-") or True,
+            )
         if not verbose:
             return
         logger.remove(log_handler_id)
@@ -169,8 +186,23 @@ def create_gateway_app(
             print_status(result.status)
             raise typer.Exit(1)
 
-        configure_logging(verbose)
         cfg = load_runtime_config(config, workspace)
+        if prepare_webui_bundle is not None:
+            prepare_webui_bundle(cfg, interactive_build_mode())
+        runtime = runtime_for_instance(workspace=workspace, config=config)
+        existing = runtime.status()
+        if existing.running:
+            console.print(
+                f"[red]Error: gateway already running (pid={existing.pid}, port={existing.port}).[/red]"
+            )
+            console.print(
+                f"  Stop it first: [cyan]nanobot gateway stop --config {config} --workspace {workspace}[/cyan]"
+            )
+            console.print(
+                f"  Or check:     [cyan]nanobot gateway status --config {config} --workspace {workspace}[/cyan]"
+            )
+            raise typer.Exit(1)
+        configure_logging(verbose, log_path=runtime.paths.log_path)
         run_gateway(cfg, port=port, webui_bundle_mode=interactive_build_mode())
 
     @gateway_app.command("status")

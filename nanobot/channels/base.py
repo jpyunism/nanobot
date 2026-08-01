@@ -44,6 +44,19 @@ class BaseChannel(ABC):
         self.logger = logger.bind(channel=self.name)
         self.bus = bus
         self._running = False
+        # ponytail: last_activity_at lets the manager watchdog detect a "live
+        # but silent" channel (idle() blocked on a dead socket, group queue
+        # task died, etc.) and force a restart. Subclasses should bump this
+        # whenever they receive any inbound event or successfully publish a
+        # message; BaseChannel bumps it on every publish_inbound. Default 0
+        # means "never had activity" so the watchdog never fires during the
+        # login grace window.
+        self.last_activity_at: float = 0.0
+
+    def _touch_activity(self) -> None:
+        """Record that this channel just did work, for the manager watchdog."""
+        import time as _time
+        self.last_activity_at = _time.monotonic()
 
     async def transcribe_audio(self, file_path: str | Path) -> str:
         """Transcribe an audio file via Whisper (OpenAI or Groq). Returns empty string on failure."""
@@ -237,18 +250,30 @@ class BaseChannel(ABC):
         if not self.is_allowed(permission_id):
             if is_dm:
                 code = generate_code(self.name, str(sender_id))
-                await self.send(
-                    OutboundMessage(
-                        channel=self.name,
-                        chat_id=str(chat_id),
-                        content=format_pairing_reply(code),
-                        metadata={PAIRING_CODE_META_KEY: code},
+                try:
+                    await self.send(
+                        OutboundMessage(
+                            channel=self.name,
+                            chat_id=str(chat_id),
+                            content=format_pairing_reply(code),
+                            metadata={PAIRING_CODE_META_KEY: code},
+                        )
                     )
-                )
-                self.logger.info(
-                    "Sent pairing code {} to sender {} in chat {}",
-                    code, sender_id, chat_id,
-                )
+                except Exception:
+                    # ponytail: never let a send failure (e.g. WhatsApp
+                    # 463 throttle, disconnected socket) propagate out
+                    # of the inbound handler — that would crash the
+                    # event listener and silently drop every subsequent
+                    # message. Log it so the user has a clue to retry.
+                    self.logger.exception(
+                        "Failed to send pairing code {} to sender {} in chat {}",
+                        code, sender_id, chat_id,
+                    )
+                else:
+                    self.logger.info(
+                        "Sent pairing code {} to sender {} in chat {}",
+                        code, sender_id, chat_id,
+                    )
             else:
                 self.logger.warning(
                     "Access denied for sender {}. "
@@ -272,6 +297,7 @@ class BaseChannel(ABC):
         )
 
         await self.bus.publish_inbound(msg)
+        self._touch_activity()
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:

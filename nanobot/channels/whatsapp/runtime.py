@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import mimetypes
 import os
@@ -382,7 +383,14 @@ class WhatsAppChannel(BaseChannel):
         self._client: Any | None = None
         self._connected = False
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
-        self._lid_to_phone = self._load_lid_mappings()
+        self._lid_to_phone: dict[str, str] = self._load_lid_mappings()
+        # ponytail: debounced persistence for _processed_message_ids and
+        # _lid_to_phone. Saves happen on a background task so the hot path
+        # (every inbound message) stays sync-cheap. The cap below is the
+        # last-seen monotonic count; we write when it doubles OR every 5
+        # minutes, whichever comes first.
+        self._state_dirty_count: int = 0
+        self._state_last_save_at: float = 0.0
         self._self_jids: set[str] = set()
         self._started_at = 0.0
         self._typing_tasks: dict[str, asyncio.Task[None]] = {}
@@ -415,6 +423,10 @@ class WhatsAppChannel(BaseChannel):
         # loop only retries on this signal, NOT on every idle() return
         # (so a network blip or a normal stop() doesn't burn a budget).
         self._logged_out: bool = False
+        # Set to True by the DisconnectedEv/StreamErrorEv handler so
+        # transient network drops also trigger auto-reconnect (without
+        # this, only LoggedOutEv-driven shutdowns reconnect).
+        self._disconnected: bool = False
         # Persisted display-name mappings per chat (phone/sender_id -> push_name).
         self._display_names: dict[str, dict[str, str]] = {}
         self._display_names_path = get_runtime_subdir("whatsapp-auth") / "display_names.json"
@@ -451,6 +463,71 @@ class WhatsAppChannel(BaseChannel):
             tmp.replace(self._display_names_path)
         except Exception:
             self.logger.exception("Failed to save WhatsApp display names")
+
+    def _message_state_path(self) -> Path:
+        return self._display_names_path.parent / "message_state.json"
+
+    def _load_message_state(self) -> tuple[OrderedDict[str, None], dict[str, str]]:
+        """Load persisted dedup LRU and LID->phone map. Missing file → empty."""
+        path = self._message_state_path()
+        if not path.exists():
+            return OrderedDict(), {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            self.logger.exception("Failed to load WhatsApp message state; resetting")
+            return OrderedDict(), {}
+        ids_raw = data.get("processed_ids") if isinstance(data, dict) else None
+        lid_raw = data.get("lid_to_phone") if isinstance(data, dict) else None
+        ids: OrderedDict[str, None] = OrderedDict()
+        if isinstance(ids_raw, list):
+            for mid in ids_raw[-1000:]:
+                if isinstance(mid, str) and mid:
+                    ids[mid] = None
+        lid: dict[str, str] = {}
+        if isinstance(lid_raw, dict):
+            for k, v in lid_raw.items():
+                if isinstance(k, str) and isinstance(v, str) and k and v:
+                    lid[k] = v
+        return ids, lid
+
+    def _save_message_state(self) -> None:
+        """Persist the dedup LRU and LID->phone map atomically."""
+        path = self._message_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        try:
+            tmp.write_text(
+                json.dumps(
+                    {
+                        "processed_ids": list(self._processed_message_ids.keys())[-1000:],
+                        "lid_to_phone": dict(self._lid_to_phone),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+            tmp.replace(path)
+        except Exception:
+            self.logger.exception("Failed to save WhatsApp message state")
+
+    def _touch_message_state(self) -> None:
+        """Mark state dirty and persist on the debounced cadence.
+
+        Called on every inbound message and on every LID->phone mapping
+        learned. Keeps the hot path cheap: we only hit the disk when the
+        dirty count doubles or 5 minutes have passed.
+        """
+        import time as _time
+        self._state_dirty_count += 1
+        now = _time.monotonic()
+        if self._state_last_save_at == 0.0:
+            self._state_last_save_at = now
+        if (now - self._state_last_save_at) >= 300.0 or self._state_dirty_count >= 500:
+            self._save_message_state()
+            self._state_dirty_count = 0
+            self._state_last_save_at = now
 
     def _throttle_state_path(self) -> Path:
         return get_runtime_subdir("whatsapp-auth") / "throttle.json"
@@ -616,6 +693,7 @@ class WhatsAppChannel(BaseChannel):
         # with a clean slate.
         self._stopped_externally = False
         self._logged_out = False
+        self._disconnected = False
         max_attempts = int(getattr(self.config, "max_restart_attempts", 0) or 0)
         restart_delay_s = int(getattr(self.config, "restart_delay_s", 30) or 30)
 
@@ -623,7 +701,8 @@ class WhatsAppChannel(BaseChannel):
             await self._run_session()
             # _run_session returns cleanly only when:
             #   (a) a fresh login never happened within login_timeout_s, or
-            #   (b) the connection ended (LoggedOutEv, socket error, etc.).
+            #   (b) the connection ended (LoggedOutEv, DisconnectedEv,
+            #       socket error, etc.).
             # Case (a) means the user has not paired the device yet, and
             # retrying would just show another QR — not useful. Case (b)
             # is what we want to auto-recover from.
@@ -635,10 +714,10 @@ class WhatsAppChannel(BaseChannel):
                 # that would just block forever waiting for a QR scan
                 # the user is doing from a different shell.
                 return
-            if not self._logged_out:
-                # The session ended without a LoggedOutEv (likely the
-                # manager called stop() or the test released idle()).
-                # Don't burn a retry budget on that.
+            if not self._logged_out and not self._disconnected:
+                # The session ended without a tracked disconnect event
+                # (likely the manager called stop() or the test
+                # released idle()). Don't burn a retry budget on that.
                 return
             if max_attempts <= 0:
                 self.logger.info(
@@ -655,15 +734,21 @@ class WhatsAppChannel(BaseChannel):
                 )
                 return
             self._restart_attempts += 1
+            reason = "logout" if self._logged_out else "disconnect"
             self.logger.warning(
-                "WhatsApp session ended; auto-reconnecting in {}s "
-                "(attempt {}/{}).",
-                restart_delay_s, self._restart_attempts, max_attempts,
+                "WhatsApp session ended ({reason}); auto-reconnecting in {delay}s "
+                "(attempt {n}/{max}).",
+                reason=reason, delay=restart_delay_s,
+                n=self._restart_attempts, max=max_attempts,
             )
             try:
                 await asyncio.sleep(restart_delay_s)
             except asyncio.CancelledError:
                 return
+            # Reset the per-cycle flags so the next iteration has a
+            # clean signal.
+            self._logged_out = False
+            self._disconnected = False
             continue
 
     async def _run_session(self) -> None:
@@ -673,6 +758,24 @@ class WhatsAppChannel(BaseChannel):
         self._running = True
         self._started_at = time.time()
         self._display_names = self._load_display_names()
+        # ponytail: restore dedup LRU and LID->phone map from disk so a
+        # restart doesn't re-process buffered messages and doesn't lose
+        # LID routing for DMs.
+        loaded_ids, loaded_lid = self._load_message_state()
+        if loaded_ids:
+            self._processed_message_ids = loaded_ids
+            self.logger.info(
+                "Restored {} processed message ids from message_state.json",
+                len(loaded_ids),
+            )
+        if loaded_lid:
+            self._lid_to_phone.update(loaded_lid)
+            self.logger.info(
+                "Restored {} LID->phone mappings from message_state.json",
+                len(loaded_lid),
+            )
+        self._state_dirty_count = 0
+        self._state_last_save_at = 0.0
         client = self._new_client()
         self._client = client
         self._register_handlers(client, handle_messages=True)
@@ -727,6 +830,9 @@ class WhatsAppChannel(BaseChannel):
                 self._client = None
             with suppress(Exception):
                 await client.stop()
+            # ponytail: flush dedup + LID map to disk on every session end
+            # so the next start() picks up where we left off.
+            self._save_message_state()
             # Reset the auto-reconnect counter on a clean shutdown (e.g.
             # the manager stopping us on purpose). LoggedOut-driven
             # shutdowns leave _restart_attempts incremented for the
@@ -994,7 +1100,18 @@ class WhatsAppChannel(BaseChannel):
             import segno
 
             self.logger.info("Scan the WhatsApp QR code with Linked Devices")
-            segno.make_qr(qr_data).terminal(compact=True)
+            qr_text = io.StringIO()
+            segno.make_qr(qr_data).terminal(compact=True, out=qr_text)
+            # ponytail: render the QR inside a marked banner so it stays findable
+            # even when interleaved with other loguru lines, and so it always
+            # lands in the managed log file (not just stdout). When the gateway
+            # runs under the background manager, stdout is the log file —
+            # these banner lines survive grep/less jumps and don't get lost.
+            banner = "WHATSAPP_QR_BEGIN"
+            self.logger.info(banner)
+            for line in qr_text.getvalue().splitlines():
+                self.logger.info(line)
+            self.logger.info("WHATSAPP_QR_END")
 
         @client.event(api.ConnectedEv)
         async def _on_connected(current_client: Any, _: Any) -> None:
@@ -1019,10 +1136,16 @@ class WhatsAppChannel(BaseChannel):
             lifecycle_cb = getattr(self, "_on_connected_for_lifecycle", None)
             if lifecycle_cb is not None:
                 lifecycle_cb()
+            self._touch_activity()
 
         @client.event(api.DisconnectedEv)
         async def _on_disconnected(_: Any, event: Any) -> None:
             self._connected = False
+            # ponytail: trigger auto-reconnect on transient network
+            # drops, not just on LoggedOutEv. stop() externally sets
+            # _stopped_externally so the loop knows not to retry.
+            self._disconnected = True
+            self._touch_activity()
             if login_result is not None and not login_result.done():
                 login_result.set_exception(
                     RuntimeError(f"WhatsApp disconnected before login completed: {event}")
@@ -1091,6 +1214,7 @@ class WhatsAppChannel(BaseChannel):
             except Exception:
                 self.logger.exception("Error handling WhatsApp message")
                 raise
+            self._touch_activity()
 
     async def _remember_self_jids(self, client: Any) -> None:
         device = _safe_attr(client, "me")
@@ -1151,10 +1275,17 @@ class WhatsAppChannel(BaseChannel):
         if not chat_jid:
             raise ValueError("WhatsApp message has no chat JID")
         if chat_jid == "status@broadcast":
+            self.logger.debug("Ignoring WhatsApp status broadcast message")
             return
 
         timestamp = float(_safe_attr(info, "Timestamp", 0) or 0)
         if self._started_at and timestamp and timestamp < self._started_at:
+            self.logger.debug(
+                "Ignoring pre-start WhatsApp message id={} ts={} started_at={}",
+                str(_safe_attr(info, "ID", "") or ""),
+                int(timestamp),
+                int(self._started_at),
+            )
             return
 
         is_group = bool(_safe_attr(source, "IsGroup", False))
@@ -1165,10 +1296,12 @@ class WhatsAppChannel(BaseChannel):
         message_id = str(_safe_attr(info, "ID", "") or "")
         if message_id:
             if message_id in self._processed_message_ids:
+                self.logger.debug("Ignoring duplicate WhatsApp message id={}", message_id)
                 return
             self._processed_message_ids[message_id] = None
             while len(self._processed_message_ids) > 1000:
                 self._processed_message_ids.popitem(last=False)
+            self._touch_message_state()
 
         # Mark the incoming message as read (blue double-check). Best-effort.
         await self._send_read_receipt(client, source, message_id)
@@ -1181,7 +1314,9 @@ class WhatsAppChannel(BaseChannel):
 
         phone_id, lid_id = _classify_sender_ids(sender_candidates)
         if phone_id and lid_id:
-            self._lid_to_phone[lid_id] = phone_id
+            if self._lid_to_phone.get(lid_id) != phone_id:
+                self._lid_to_phone[lid_id] = phone_id
+                self._touch_message_state()
 
         sender_id = phone_id or self._lid_to_phone.get(lid_id, "") or lid_id
         if not sender_id:
@@ -1263,6 +1398,10 @@ class WhatsAppChannel(BaseChannel):
                     text = self._append_media_tag(text, media.kind, path)
 
             if not text and not media_paths:
+                self.logger.debug(
+                    "WhatsApp message id={} from {} has no parseable text/media; dropping",
+                    message_id, sender_id,
+                )
                 return
 
             await self._start_typing(typing_jid)

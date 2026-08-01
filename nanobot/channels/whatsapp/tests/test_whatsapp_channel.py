@@ -1633,3 +1633,138 @@ def test_reset_database_removes_sqlite_sidecars(tmp_path) -> None:
     assert not db.exists()
     assert not wal.exists()
     assert not shm.exists()
+
+
+# ponytail: regression tests for the watchdog / persistence / drop-logging
+# fixes. These exercise the paths that caused the "live but silent" outage
+# the user reported on 2026-08-01.
+
+
+async def test_disconnect_event_triggers_auto_reconnect_flag(monkeypatch) -> None:
+    """DisconnectedEv must set _disconnected=True so the auto-reconnect
+    loop in start() catches transient network drops, not just LoggedOutEv."""
+    _patch_neonize_api(monkeypatch)
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, MagicMock())
+    ch._disconnected = False
+    ch._connected = True
+
+    # Use named sentinel classes so we can capture handlers by name.
+    class _NamedDisconnect:
+        pass
+
+    monkeypatch.setattr(
+        whatsapp_module,
+        "DisconnectedEv_for_test",
+        _NamedDisconnect,
+        raising=False,
+    )
+    api = whatsapp_module._NEONIZE_API
+    api = api._replace(DisconnectedEv=_NamedDisconnect())
+    monkeypatch.setattr(whatsapp_module, "_NEONIZE_API", api)
+
+    captured: dict[str, Any] = {}
+
+    real_register = WhatsAppChannel._register_handlers
+
+    def capturing_register(self, client, *, login_result=None, handle_messages=False):
+        original_event = client.event
+
+        def naming_event(event_type):
+            def decorator(func):
+                key = type(event_type).__name__
+                captured.setdefault(key, func)
+                return original_event(event_type)(func)
+            return decorator
+
+        client.event = naming_event  # type: ignore[method-assign]
+        try:
+            real_register(self, client, login_result=login_result, handle_messages=handle_messages)
+        finally:
+            client.event = original_event  # type: ignore[method-assign]
+
+    monkeypatch.setattr(WhatsAppChannel, "_register_handlers", capturing_register)
+
+    client = _FakeLoginClient()
+    ch._client = client
+    ch._register_handlers(client, handle_messages=False)
+
+    disconnect_handler = captured.get("_NamedDisconnect")
+    assert disconnect_handler is not None, f"captured: {list(captured)}"
+    await disconnect_handler(client, _Proto())
+    assert ch._disconnected is True
+    assert ch._connected is False
+
+
+async def test_send_pairing_code_failure_does_not_propagate(monkeypatch) -> None:
+    """When the channel's send() raises (e.g. WhatsApp 463 throttle while
+    delivering a pairing code), BaseChannel must log the exception and
+    NOT propagate it — otherwise the inbound handler crashes and every
+    subsequent message is dropped silently."""
+    _patch_neonize_api(monkeypatch)
+    monkeypatch.setattr("nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH")
+    monkeypatch.setattr("nanobot.channels.base.is_approved", lambda _ch, _sid: False)
+    bus = MagicMock()
+    bus.publish_inbound = AsyncMock()
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": []}, bus)
+    ch.send = AsyncMock(side_effect=RuntimeError("simulated 463 throttle"))
+
+    # Must not raise — the send() failure is swallowed + logged.
+    await ch._handle_message(
+        sender_id="blocked",
+        chat_id="blocked",
+        content="hi",
+        is_dm=True,
+        authorization_id=None,
+    )
+
+    ch.send.assert_awaited_once()
+    bus.publish_inbound.assert_not_awaited()
+
+
+def test_message_state_round_trip(tmp_path, monkeypatch) -> None:
+    """Processed message ids and LID->phone map survive a reload from
+    message_state.json — so a restart doesn't re-process buffered messages
+    and doesn't lose LID routing for DMs."""
+    state_path = tmp_path / "message_state.json"
+    monkeypatch.setattr(
+        whatsapp_module.WhatsAppChannel,
+        "_message_state_path",
+        lambda self, _f=state_path: _f,
+    )
+
+    ch = _make_channel()
+    ch._processed_message_ids["m1"] = None
+    ch._processed_message_ids["m2"] = None
+    ch._lid_to_phone["123"] = "456"
+    ch._save_message_state()
+
+    assert state_path.exists()
+
+    # Reload into a fresh channel and confirm both maps survived.
+    ch2 = _make_channel()
+    ids, lid = ch2._load_message_state()
+    assert list(ids.keys()) == ["m1", "m2"]
+    assert lid == {"123": "456"}
+
+
+async def test_drop_silently_logs_no_parseable_content(monkeypatch) -> None:
+    """An inbound message with no text and no media must still log at
+    DEBUG level — so future debugging has a breadcrumb."""
+    _patch_neonize_api(monkeypatch)
+    monkeypatch.setattr("nanobot.channels.base.is_approved", lambda _ch, _sid: True)
+    bus = MagicMock()
+    bus.publish_inbound = AsyncMock()
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    ch._handle_message = AsyncMock()
+    client = SimpleNamespace(download_any=AsyncMock(), mark_read=AsyncMock())
+
+    # A message with neither conversation nor media fields.
+    empty_message = _Proto()
+    await ch._handle_neonize_message(
+        client,
+        _event(message=empty_message, message_id="drop-me"),
+    )
+
+    # No text, no media → _handle_message not called.
+    ch._handle_message.assert_not_awaited()
+    bus.publish_inbound.assert_not_awaited()

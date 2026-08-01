@@ -57,6 +57,13 @@ def _default_webui_dist() -> Path | None:
 _SEND_RETRY_DELAYS = (1, 2, 4)
 _RESTART_NOTICE_START_TIMEOUT_S = 30.0
 _RESTART_NOTICE_START_POLL_S = 0.25
+# ponytail: watchdog settings. Channels that report is_running=True but
+# haven't touched last_activity_at in WATCHDOG_IDLE_S seconds are force-
+# restarted by the manager. The cap is generous (10 min) so quiet DMs
+# in a personal-assistant setup don't trigger false positives.
+WATCHDOG_INTERVAL_S = 60.0
+WATCHDOG_IDLE_S = 600.0
+WATCHDOG_GRACE_S = 120.0  # never trip before this many seconds since channel start
 
 
 def _is_non_retriable_send_error(exc: BaseException) -> bool:
@@ -143,6 +150,7 @@ class ChannelManager:
         self._channel_errors: dict[str, str] = {}
         self._channel_tasks: dict[str, asyncio.Task] = {}
         self._dispatch_task: asyncio.Task | None = None
+        self._watchdog_task: asyncio.Task | None = None
         self._started = False
         self._origin_reply_fingerprints: dict[tuple[str, str, str], str] = {}
 
@@ -601,10 +609,46 @@ class ChannelManager:
         for name, channel in self.channels.items():
             tasks.append(self._start_channel_task(name, channel))
 
+        # ponytail: channel watchdog detects "live but silent" channels
+        # (idle() blocked on dead socket, group queue task died, etc.) and
+        # forces a restart. The interval is large enough to avoid noise.
+        self._watchdog_task = asyncio.create_task(self._watchdog_loop())
+
         self._notify_restart_done_if_needed()
 
         # Wait for all to complete (they should run forever)
         await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _watchdog_loop(self) -> None:
+        """Periodically restart channels that are 'live but silent'."""
+        import time as _time
+        started_at = _time.monotonic()
+        while True:
+            try:
+                await asyncio.sleep(WATCHDOG_INTERVAL_S)
+            except asyncio.CancelledError:
+                return
+            now = _time.monotonic()
+            if now - started_at < WATCHDOG_GRACE_S:
+                continue
+            for name, channel in list(self.channels.items()):
+                task = self._channel_tasks.get(name)
+                if task is None or task.done():
+                    continue
+                if not channel.is_running:
+                    continue
+                last = float(getattr(channel, "last_activity_at", 0.0) or 0.0)
+                if last == 0.0 or (now - last) < WATCHDOG_IDLE_S:
+                    continue
+                logger.warning(
+                    "Channel {} is live but silent for {:.0f}s; forcing restart.",
+                    name, now - last,
+                )
+                try:
+                    await self._stop_channel(name)
+                except Exception:
+                    logger.exception("Watchdog stop_channel failed for {}", name)
+                self._start_channel_task(name, channel)
 
     def _notify_restart_done_if_needed(self) -> asyncio.Task[None] | None:
         """Schedule restart completion after the target channel starts."""
