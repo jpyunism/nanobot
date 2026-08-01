@@ -3,7 +3,12 @@ import { writeSidebarOpen } from "@/lib/sidebar-state-keys";
 
 export const SIDEBAR_WIDTH = 272;
 export const SIDEBAR_RAIL_WIDTH = 56;
-export const MOBILE_SIDEBAR_WIDTH = `min(85vw, ${SIDEBAR_WIDTH}px)`;
+// ponytail: full-screen on phones <640px (so the chat list has room to
+// breathe), narrow drawer on sm+ tablets. 100vw on a 380px phone is far
+// more usable than a cramped 272px slice that leaves 108px of thread
+// peeking behind the overlay. The SheetContent variant already caps at
+// sm:max-w-sm, so we only need to override the base (mobile) width.
+export const MOBILE_SIDEBAR_WIDTH = "100vw";
 
 const HOST_SIDEBAR_PREVIEW_CLOSE_DELAY_MS = 160;
 

@@ -1,10 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Sidebar } from "@/components/Sidebar";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import {
-  MOBILE_SIDEBAR_WIDTH,
-  SIDEBAR_WIDTH,
-} from "@/hooks/useHostSidebarLayout";
+import { SIDEBAR_WIDTH } from "@/hooks/useHostSidebarLayout";
 import { cn } from "@/lib/utils";
 import type { ComponentProps } from "react";
 
@@ -102,8 +99,7 @@ export function SidebarLayout({
           side="left"
           showCloseButton={false}
           aria-describedby={undefined}
-          className="p-0 lg:hidden"
-          style={{ width: MOBILE_SIDEBAR_WIDTH, maxWidth: MOBILE_SIDEBAR_WIDTH }}
+          className="w-full p-0 sm:w-3/4 sm:max-w-sm lg:hidden"
         >
           <SheetTitle className="sr-only">{t("sidebar.navigation")}</SheetTitle>
           <Sidebar
