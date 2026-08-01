@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus, RefreshCw } from "lucide-react";
+import { ChevronLeft, Plus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,7 +9,7 @@ import { useClient } from "@/providers/ClientProvider";
 import { ProjectDetail } from "@/components/projects/ProjectDetail";
 import type { ProjectSummary } from "@/lib/types";
 
-export function ProjectsSurface() {
+export function ProjectsSurface({ onBackToChat }: { onBackToChat?: () => void }) {
   const { t } = useTranslation();
   const { token } = useClient();
   const base = "";
@@ -55,6 +55,16 @@ export function ProjectsSurface() {
   return (
     <div className="absolute inset-0 flex flex-col overflow-y-auto bg-background">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-8">
+        {onBackToChat ? (
+          <button
+            type="button"
+            onClick={onBackToChat}
+            className="touch-target -ml-1 mb-1 inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground lg:hidden"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
+            {t("settings.backToChat", { defaultValue: "Back to chat" })}
+          </button>
+        ) : null}
         <header className="flex items-end justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">

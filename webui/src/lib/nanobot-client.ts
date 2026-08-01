@@ -134,6 +134,8 @@ export class NanobotClient {
   private knownChats = new Set<string>();
   /** Wall-clock run strip: updated from ``goal_status`` even with no ``onChat`` subscriber. */
   private runStartedAtByChatId = new Map<string, number>();
+  /** Active subagent task_ids per chat_id (keeps the run indicator alive). */
+  private activeSubagentTasksByChatId = new Map<string, Set<string>>();
   /** Latest ``goal_state`` snapshot per ``chat_id`` (multi-session isolation). */
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
   private pendingNewChat: PendingRequest<string> | null = null;
@@ -229,20 +231,64 @@ export class NanobotClient {
 
   private recordGoalStatusForRunStrip(chatId: string, ev: InboundEvent): void {
     if (ev.event === "turn_end") {
+      this.activeSubagentTasksByChatId.delete(chatId);
       if (this.runStartedAtByChatId.has(chatId)) {
         this.runStartedAtByChatId.delete(chatId);
         this.emitRunStatus(chatId, null);
       }
       return;
     }
-    if (ev.event !== "goal_status") return;
-    if (ev.status === "running" && typeof ev.started_at === "number") {
-      const previous = this.runStartedAtByChatId.get(chatId);
-      this.runStartedAtByChatId.set(chatId, ev.started_at);
-      if (previous !== ev.started_at) this.emitRunStatus(chatId, ev.started_at);
-    } else if (this.runStartedAtByChatId.has(chatId)) {
-      this.runStartedAtByChatId.delete(chatId);
-      this.emitRunStatus(chatId, null);
+    if (ev.event === "goal_status") {
+      if (ev.status === "running" && typeof ev.started_at === "number") {
+        const previous = this.runStartedAtByChatId.get(chatId);
+        this.runStartedAtByChatId.set(chatId, ev.started_at);
+        if (previous !== ev.started_at) this.emitRunStatus(chatId, ev.started_at);
+      } else if (this.runStartedAtByChatId.has(chatId)) {
+        this.runStartedAtByChatId.delete(chatId);
+        this.emitRunStatus(chatId, null);
+      }
+      return;
+    }
+    // ponytail: keep the chat's run indicator alive while a subagent is
+    // working, even after the parent turn's goal_status has gone idle.
+    // Without this, the chat list spinner disappears the moment the parent
+    // agent yields, even though a spawned subagent is still executing.
+    if (ev.event === "subagent_update") {
+      const activePhases = new Set(["initializing", "awaiting_tools", "tools_completed", "final_response"]);
+      const taskId = ev.task_id;
+      let activeSet = this.activeSubagentTasksByChatId.get(chatId);
+      if (activePhases.has(ev.phase)) {
+        if (!activeSet) {
+          activeSet = new Set();
+          this.activeSubagentTasksByChatId.set(chatId, activeSet);
+        }
+        activeSet.add(taskId);
+        if (!this.runStartedAtByChatId.has(chatId)) {
+          const now = Math.floor(Date.now() / 1000);
+          this.runStartedAtByChatId.set(chatId, now);
+          this.emitRunStatus(chatId, now);
+        }
+      } else {
+        // Subagent finished (done/error): remove from active set and only
+        // clear the run indicator if no other subagent is still active.
+        if (activeSet) {
+          activeSet.delete(taskId);
+          if (activeSet.size === 0) {
+            this.activeSubagentTasksByChatId.delete(chatId);
+            // Only clear if the parent run isn't still active (goal_status).
+            // We check by seeing if the started_at looks like our synthetic
+            // timestamp. A real goal_status started_at comes from the server
+            // and is always <= Date.now()/1000 at the time it was set, but
+            // since we can't distinguish reliably, we just clear: if the
+            // parent run is still active, the next goal_status frame will
+            // re-set it.
+            if (this.runStartedAtByChatId.has(chatId)) {
+              this.runStartedAtByChatId.delete(chatId);
+              this.emitRunStatus(chatId, null);
+            }
+          }
+        }
+      }
     }
   }
 
@@ -443,6 +489,7 @@ export class NanobotClient {
   }
 
   private clearRunStatusesForReconnect(): void {
+    this.activeSubagentTasksByChatId.clear();
     if (this.runStartedAtByChatId.size === 0) return;
     const chatIds = [...this.runStartedAtByChatId.keys()];
     this.runStartedAtByChatId.clear();

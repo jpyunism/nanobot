@@ -129,7 +129,7 @@ export function MainView(props: Args) {
       {props.view === "chat" ? (
         <ChatSurface {...props} />
       ) : props.view === "projects" ? (
-        <ProjectsSurface />
+        <ProjectsSurface onBackToChat={props.onBackToChat} />
       ) : (
         <SettingsSurface {...props} />
       )}

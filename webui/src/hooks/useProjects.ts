@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createProject,
   deleteProject,
@@ -138,20 +138,36 @@ export function useProjects(
     [base, token],
   );
 
-  return {
-    projects,
-    loading,
-    error,
-    refresh,
-    create,
-    remove,
-    load,
-    save,
-    listFiles: listFilesFn,
-    uploadFile: uploadFileFn,
-    removeFile: removeFileFn,
-    downloadFile: downloadFileFn,
-  };
+  return useMemo(
+    () => ({
+      projects,
+      loading,
+      error,
+      refresh,
+      create,
+      remove,
+      load,
+      save,
+      listFiles: listFilesFn,
+      uploadFile: uploadFileFn,
+      removeFile: removeFileFn,
+      downloadFile: downloadFileFn,
+    }),
+    [
+      projects,
+      loading,
+      error,
+      refresh,
+      create,
+      remove,
+      load,
+      save,
+      listFilesFn,
+      uploadFileFn,
+      removeFileFn,
+      downloadFileFn,
+    ],
+  );
 }
 
 function toMessage(err: unknown): string {

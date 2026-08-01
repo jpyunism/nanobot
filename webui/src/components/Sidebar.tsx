@@ -14,7 +14,6 @@ import { useTranslation } from "react-i18next";
 
 import { ChatList } from "@/components/ChatList";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
-import { WebuiVersionBadge } from "@/components/WebuiVersionBadge";
 import { Button } from "@/components/ui/button";
 import type {
   ChatSummary,
@@ -138,8 +137,10 @@ export function Sidebar(props: SidebarProps) {
 
       <div
         className={cn(
-          "space-y-1.5 px-2 pb-2",
-          collapsed && "flex w-14 flex-col items-center px-0",
+          "px-2 pb-2",
+          collapsed
+            ? "flex w-14 flex-col items-center px-0"
+            : "grid grid-cols-2 gap-1.5 lg:flex lg:flex-col lg:gap-0 lg:space-y-1.5",
         )}
       >
         <SidebarActionButton
@@ -254,7 +255,6 @@ export function Sidebar(props: SidebarProps) {
         />
         <ConnectionBadge />
       </div>
-      <WebuiVersionBadge collapsed={collapsed} />
     </nav>
   );
 }
@@ -317,7 +317,7 @@ function SidebarActionButton({
           "min-w-0 overflow-hidden truncate whitespace-nowrap transition-[max-width,opacity,transform] duration-200 ease-out",
           collapsed
             ? "max-w-0 -translate-x-1 opacity-0"
-            : "max-w-[12rem] translate-x-0 opacity-100",
+            : "max-w-[7rem] translate-x-0 opacity-100 lg:max-w-[12rem]",
         )}
       >
         {label}
