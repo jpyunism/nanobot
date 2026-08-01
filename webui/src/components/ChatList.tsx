@@ -304,7 +304,7 @@ export const ChatList = memo(function ChatList({
                           <DropdownMenu modal={false}>
                             <DropdownMenuTrigger
                               className={cn(
-                                "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/75 opacity-40 transition-opacity",
+                                "touch-target inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/75 opacity-40 transition-opacity",
                                 "hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover:opacity-100",
                                 "focus-visible:opacity-100",
                                 active && "opacity-100",
@@ -442,7 +442,7 @@ function ProjectGroupHeader({
         <DropdownMenu modal={false}>
           <DropdownMenuTrigger
             className={cn(
-              "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 opacity-40 transition-opacity",
+              "touch-target inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 opacity-40 transition-opacity",
               "hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover:opacity-100 focus-visible:opacity-100",
             )}
             aria-label={t("chat.actions", { title: label })}
@@ -473,7 +473,7 @@ function ProjectGroupHeader({
             onNewChat();
           }}
           className={cn(
-            "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 opacity-40 transition-opacity",
+            "touch-target inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 opacity-40 transition-opacity",
             "hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover:opacity-100 focus-visible:opacity-100",
           )}
         >

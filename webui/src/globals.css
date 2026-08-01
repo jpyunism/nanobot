@@ -726,6 +726,12 @@
   max-width: 58%;
 }
 
+@container thread-composer (max-width: 22rem) {
+  .thread-composer-footer-actions {
+    max-width: 52%;
+  }
+}
+
 .thread-composer-model-badge {
   flex-shrink: 1;
 }
@@ -785,7 +791,7 @@
   }
 }
 
-@container thread-composer (max-width: 21rem) {
+@container thread-composer (max-width: 22rem) {
   .thread-composer-footer {
     column-gap: 0.25rem;
     padding-inline: 0.5rem;

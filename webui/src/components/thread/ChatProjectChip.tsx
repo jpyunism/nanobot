@@ -90,7 +90,7 @@ export function ChatProjectChip({
           data-chat-id={chatId}
         >
           <FolderKanban className="h-3 w-3" />
-          <span className="max-w-[10rem] truncate">{displayName}</span>
+          <span className="max-w-[5.5rem] truncate sm:max-w-[10rem]">{displayName}</span>
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">

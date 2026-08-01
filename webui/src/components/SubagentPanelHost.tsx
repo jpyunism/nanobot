@@ -30,14 +30,27 @@ export function SubagentPanelHost({ chatId, sessionKey }: SubagentPanelHostProps
   const [statuses, setStatuses] = useState<Map<string, SubagentStatusPayload>>(new Map());
   const [taskId, setTaskId] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
-  const [width, setWidth] = useState(PANEL_DEFAULT_WIDTH);
-  const widthRef = useRef(PANEL_DEFAULT_WIDTH);
+  const [width, setWidth] = useState(() => clampPanelWidth(PANEL_DEFAULT_WIDTH, maxPanelWidth(window.innerWidth)));
+  const widthRef = useRef(width);
   const closeTimerRef = useRef<number | null>(null);
   const subscribedRef = useRef<string | null>(null);
 
   useEffect(() => {
     widthRef.current = width;
   }, [width]);
+
+  // ponytail: re-clamp the panel width when the viewport shrinks (e.g. phone
+  // orientation change, browser chrome show/hide). Without this, a panel
+  // opened at 544px on desktop stays at 544px when the user switches to a
+  // 380px phone layout, covering the whole thread.
+  useEffect(() => {
+    const onResize = () => {
+      const maxWidth = maxPanelWidth(window.innerWidth);
+      setWidth((current) => clampPanelWidth(current, maxWidth));
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   useEffect(() => {
     if (!chatId || !client) return;

@@ -463,11 +463,13 @@ export function ThreadShell({
   const [submittedViewportTurnId, setSubmittedViewportTurnId] = useState<string | null>(null);
   const [filePreviewPath, setFilePreviewPath] = useState<string | null>(null);
   const [filePreviewClosing, setFilePreviewClosing] = useState(false);
-  const [filePreviewWidth, setFilePreviewWidth] = useState(FILE_PREVIEW_DEFAULT_WIDTH);
+  const [filePreviewWidth, setFilePreviewWidth] = useState(() =>
+    clampFilePreviewWidth(FILE_PREVIEW_DEFAULT_WIDTH, maxFilePreviewWidth(window.innerWidth)),
+  );
   const [quotedContext, setQuotedContext] = useState<string | null>(null);
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
   const shellRef = useRef<HTMLElement | null>(null);
-  const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
+  const filePreviewWidthRef = useRef(filePreviewWidth);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
   const [pendingFirstTargetChatId, setPendingFirstTargetChatId] = useState<string | null>(null);
@@ -540,10 +542,12 @@ export function ThreadShell({
 
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
   const subagentSpawns = useMemo(
-    () => extractSubagentSpawns(displayMessages).map((s) => ({
-      taskId: s.taskId,
-      label: s.label,
-    })),
+    () => extractSubagentSpawns(displayMessages)
+      .map((s) => ({
+        taskId: s.taskId,
+        label: s.label,
+      }))
+      .filter((s): s is { taskId: string; label: string | null } => s.taskId !== null),
     [displayMessages],
   );
   const currentRunStartedAt = messagesReady ? runStartedAt : null;

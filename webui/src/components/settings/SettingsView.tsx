@@ -2340,7 +2340,7 @@ export function SettingsView({
             "mx-auto w-full px-4 py-6 sm:px-8 sm:py-8 lg:py-12",
             activeSection === "channels" ? "max-w-[1240px] xl:px-10" : "max-w-[920px]",
             activeSection === "channels" && "flex min-h-full flex-col xl:h-full xl:min-h-0",
-            hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
+            hostChromeInset && "pt-[3.5rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
           )}
         >
           {!showSidebar ? (

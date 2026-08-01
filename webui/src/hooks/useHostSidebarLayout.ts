@@ -3,7 +3,7 @@ import { writeSidebarOpen } from "@/lib/sidebar-state-keys";
 
 export const SIDEBAR_WIDTH = 272;
 export const SIDEBAR_RAIL_WIDTH = 56;
-export const MOBILE_SIDEBAR_WIDTH = `min(${SIDEBAR_WIDTH}px, calc(100vw - 0.75rem))`;
+export const MOBILE_SIDEBAR_WIDTH = `min(85vw, ${SIDEBAR_WIDTH}px)`;
 
 const HOST_SIDEBAR_PREVIEW_CLOSE_DELAY_MS = 160;
 

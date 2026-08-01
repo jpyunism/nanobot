@@ -57,7 +57,7 @@ export function ThreadHeader({
         </Button>
         {!minimal ? (
           <div className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-[12px] font-medium text-muted-foreground">
-            <span className="max-w-[min(60vw,32rem)] truncate">{title}</span>
+            <span className="min-w-0 max-w-[min(38vw,32rem)] truncate sm:max-w-[min(60vw,32rem)]">{title}</span>
             {projectChip}
           </div>
         ) : null}

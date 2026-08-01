@@ -2324,7 +2324,7 @@ function QueuedPromptRow({
         }}
         onDragEnd={onDragEnd}
         className={cn(
-          "inline-flex h-7 w-7 shrink-0 cursor-grab items-center justify-center rounded-lg",
+          "touch-target inline-flex h-7 w-7 shrink-0 cursor-grab items-center justify-center rounded-lg",
           "text-muted-foreground/45 transition-colors hover:bg-background/80 hover:text-muted-foreground",
           "active:cursor-grabbing dark:hover:bg-white/[0.06]",
         )}
@@ -2346,7 +2346,7 @@ function QueuedPromptRow({
         type="button"
         variant="ghost"
         size="sm"
-        className="h-7 shrink-0 rounded-full px-2 text-[11.5px] font-medium text-muted-foreground hover:bg-muted/70 hover:text-foreground dark:hover:bg-white/[0.07]"
+        className="touch-target h-7 shrink-0 rounded-full px-2 text-[11.5px] font-medium text-muted-foreground hover:bg-muted/70 hover:text-foreground dark:hover:bg-white/[0.07]"
         onClick={() => onGuide(prompt)}
       >
         <CornerDownRight className="mr-1 h-3 w-3" aria-hidden />
@@ -2358,7 +2358,7 @@ function QueuedPromptRow({
         size="icon"
         aria-label={editLabel}
         title={editLabel}
-        className="h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:bg-background/85 hover:text-foreground dark:hover:bg-white/[0.07]"
+        className="touch-target h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:bg-background/85 hover:text-foreground dark:hover:bg-white/[0.07]"
         onClick={() => onEdit(prompt)}
       >
         <SquarePen className="h-3.5 w-3.5" aria-hidden />
@@ -2368,7 +2368,7 @@ function QueuedPromptRow({
         variant="ghost"
         size="icon"
         aria-label={deleteLabel}
-        className="h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:bg-background/85 hover:text-destructive dark:hover:bg-white/[0.07]"
+        className="touch-target h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:bg-background/85 hover:text-destructive dark:hover:bg-white/[0.07]"
         onClick={() => onDelete(prompt.id)}
       >
         <Trash2 className="h-3 w-3" aria-hidden />
@@ -2778,7 +2778,7 @@ function AttachmentChip({
         onKeyDown={onKeyDown}
         aria-label={labelRemove}
         className={cn(
-          "ml-1 grid h-5 w-5 flex-none place-items-center rounded-full",
+          "touch-target ml-1 grid h-5 w-5 flex-none place-items-center rounded-full",
           "text-muted-foreground/80 hover:bg-foreground/8 hover:text-foreground",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30",
         )}
