@@ -15,6 +15,7 @@ SETUP_SPEC = ChannelSetupSpec(
             default="open",
             snapshot=False,
         ),
+        "allowSendTo": field("list", snapshot=False),
         "databasePath": field(writable=False, snapshot=False),
     },
     official_url="https://faq.whatsapp.com/",

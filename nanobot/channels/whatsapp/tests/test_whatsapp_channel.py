@@ -1617,3 +1617,61 @@ async def test_drop_silently_logs_no_parseable_content(monkeypatch) -> None:
     # No text, no media → _handle_message not called.
     ch._handle_message.assert_not_awaited()
     bus.publish_inbound.assert_not_awaited()
+
+
+async def test_outbound_allowlist_blocks_unknown_recipient(monkeypatch) -> None:
+    """send() must reject messages to chat IDs not in allow_send_to."""
+    _patch_neonize_api(monkeypatch)
+    client = SimpleNamespace(
+        send_message=AsyncMock(),
+        send_image=AsyncMock(),
+        send_video=AsyncMock(),
+        send_audio=AsyncMock(),
+        send_document=AsyncMock(),
+    )
+    ch = WhatsAppChannel(
+        {"enabled": True, "allowFrom": ["*"], "allowSendTo": ["56975746099"]},
+        MagicMock(),
+    )
+    ch._client = client
+    ch._connected = True
+
+    # Allowed number — send succeeds.
+    await ch.send(OutboundMessage(channel="whatsapp", chat_id="56975746099@s.whatsapp.net", content="hi"))
+    client.send_message.assert_awaited_once()
+
+    # Blocked number — send raises, client.send_message not called again.
+    client.send_message.reset_mock()
+    with pytest.raises(RuntimeError, match="allowlist blocked"):
+        await ch.send(OutboundMessage(channel="whatsapp", chat_id="8281248569@s.whatsapp.net", content="hi"))
+    client.send_message.assert_not_awaited()
+
+
+async def test_outbound_allowlist_empty_allows_all(monkeypatch) -> None:
+    """Empty allow_send_to = allow all destinations (backward compatible)."""
+    _patch_neonize_api(monkeypatch)
+    client = SimpleNamespace(send_message=AsyncMock())
+    ch = WhatsAppChannel(
+        {"enabled": True, "allowFrom": ["*"], "allowSendTo": []},
+        MagicMock(),
+    )
+    ch._client = client
+    ch._connected = True
+
+    await ch.send(OutboundMessage(channel="whatsapp", chat_id="9999999999@s.whatsapp.net", content="hi"))
+    client.send_message.assert_awaited_once()
+
+
+async def test_outbound_allowlist_allows_group(monkeypatch) -> None:
+    """Groups in allow_send_to are allowed by bare group ID."""
+    _patch_neonize_api(monkeypatch)
+    client = SimpleNamespace(send_message=AsyncMock())
+    ch = WhatsAppChannel(
+        {"enabled": True, "allowFrom": ["*"], "allowSendTo": ["120363422292889459"]},
+        MagicMock(),
+    )
+    ch._client = client
+    ch._connected = True
+
+    await ch.send(OutboundMessage(channel="whatsapp", chat_id="120363422292889459@g.us", content="hi"))
+    client.send_message.assert_awaited_once()

@@ -34,6 +34,11 @@ class WhatsAppConfig(Base):
     group_policy: Literal["open", "mention"] = "open"
     database_path: str = ""
     lid_mappings: dict[str, str] = Field(default_factory=dict)
+    # Outbound allowlist: if non-empty, only messages to these chat IDs
+    # (bare phone numbers or group JIDs) are sent. Prevents the bot from
+    # messaging unknown numbers and getting banned by WhatsApp.
+    # Empty list = allow all (backward compatible).
+    allow_send_to: list[str] = Field(default_factory=list)
     # ponytail: login timeout cap. The neonize client internally relies on
     # whatsmeow's reconnect loop; without an external cap, an unscanned QR
     # keeps the channel alive indefinitely spamming 515/EOF logs. After
@@ -743,6 +748,31 @@ class WhatsAppChannel(BaseChannel):
         if client is not None:
             await client.stop()
 
+    def _check_outbound_allowed(self, chat_id: str) -> None:
+        """Reject sends to chat IDs not in the outbound allowlist.
+
+        If ``allow_send_to`` is empty, all destinations are allowed
+        (backward compatible). Otherwise the bare chat ID (phone number
+        or group JID without server suffix) must appear in the list.
+        Groups are allowed if the bare group ID is listed.
+        """
+        allow = getattr(self.config, "allow_send_to", None) or []
+        if not allow:
+            return
+        bare = _bare_jid(chat_id)
+        allow_set = {str(item).strip() for item in allow if str(item).strip()}
+        if bare in allow_set or chat_id in allow_set:
+            return
+        self.logger.warning(
+            "WhatsApp outbound allowlist blocked send to {} "
+            "(not in allow_send_to: {}). "
+            "Add the number to channels.whatsapp.allowSendTo in config.",
+            chat_id, ", ".join(sorted(allow_set)),
+        )
+        raise RuntimeError(
+            f"WhatsApp outbound allowlist blocked send to {chat_id}"
+        )
+
     @staticmethod
     def _fail_login_on_connect_task_done(
         connect_task: asyncio.Task[Any] | None,
@@ -783,6 +813,8 @@ class WhatsAppChannel(BaseChannel):
             raise RuntimeError(
                 f"WhatsApp 463 cooldown active; {remaining:.0f}s remaining"
             )
+
+        self._check_outbound_allowed(msg.chat_id)
 
         to = self._resolve_send_target(msg.chat_id)
         typing_jid = self._build_typing_jid(msg.chat_id)

@@ -14,6 +14,7 @@ export default {
       manualFields: [
         { key: "channels.whatsapp.allowFrom" },
         { key: "channels.whatsapp.groupPolicy" },
+        { key: "channels.whatsapp.allowSendTo" },
       ],
     },
   },
