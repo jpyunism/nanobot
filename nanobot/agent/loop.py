@@ -92,6 +92,7 @@ from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
 )
+from nanobot.workflows import WorkflowLoader, WorkflowRunner
 
 if TYPE_CHECKING:
     from nanobot.agent.tools.mcp import MCPConnection
@@ -282,6 +283,7 @@ class AgentLoop:
         hook_factories: list[AgentTurnHookFactory] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
+        disabled_workflows: list[str] | None = None,
         tools_config: ToolsConfig | None = None,
         image_generation_provider_config: ProviderConfig | None = None,
         image_generation_provider_configs: dict[str, ProviderConfig] | None = None,
@@ -396,6 +398,16 @@ class AgentLoop:
             fail_on_tool_error=fail_on_tool_error,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
         )
+        self.workflow_loader = WorkflowLoader(
+            workspace,
+            disabled_workflows=set(disabled_workflows or []),
+        )
+        self.workflows = WorkflowRunner(
+            subagents=self.subagents,
+            bus=bus,
+            loader=self.workflow_loader,
+            workspace=workspace,
+        )
         self._unified_session = unified_session
         self._running = False
         self._mcp_servers = mcp_servers or {}
@@ -498,6 +510,7 @@ class AgentLoop:
             timezone=defaults.timezone,
             unified_session=defaults.unified_session,
             disabled_skills=defaults.disabled_skills,
+            disabled_workflows=defaults.disabled_workflows,
             session_ttl_minutes=defaults.session_ttl_minutes,
             consolidation_ratio=defaults.consolidation_ratio,
             tools_config=config.tools,
@@ -608,6 +621,7 @@ class AgentLoop:
             workspace=str(self.workspace),
             bus=self.bus,
             subagent_manager=self.subagents,
+            workflow_runner=self.workflows,
             cron_service=self.cron_service,
             exec_session_manager=self._exec_session_manager,
             sessions=self.sessions,
@@ -790,7 +804,8 @@ class AgentLoop:
             with suppress(asyncio.CancelledError, Exception):
                 await t
         sub_cancelled = await self.subagents.cancel_by_session(key)
-        return cancelled + sub_cancelled
+        workflow_cancelled = await self.workflows.cancel_by_session(key)
+        return cancelled + sub_cancelled + workflow_cancelled
 
     def _effective_session_key(self, msg: InboundMessage) -> str:
         """Return the session key used for task routing and mid-turn injections."""
@@ -909,6 +924,17 @@ class AgentLoop:
                         row["subagent_task_id"] = task_id
                     row[HIDDEN_HISTORY_META] = marker
                     row["injected_event"] = "subagent_result"
+                elif (
+                    pending_msg.sender_id == "workflow"
+                    and metadata.get("injected_event") == "workflow_result"
+                ):
+                    marker = {"kind": "workflow_result"}
+                    run_id = metadata.get("workflow_run_id")
+                    if isinstance(run_id, str) and run_id:
+                        marker["workflow_run_id"] = run_id
+                        row["workflow_run_id"] = run_id
+                    row[HIDDEN_HISTORY_META] = marker
+                    row["injected_event"] = "workflow_result"
                 return row
 
             items: list[dict[str, Any]] = []
@@ -1267,11 +1293,14 @@ class AgentLoop:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
         errors: list[BaseException] = []
-        cleanup_steps = (
+        cleanup_steps = [
             self.subagents.close,
             self._exec_session_manager.close_all,
             lambda: agent_context.close_mcp(self),
-        )
+        ]
+        workflows = getattr(self, "workflows", None)
+        if workflows is not None:
+            cleanup_steps.insert(1, workflows.close)
         for cleanup in cleanup_steps:
             try:
                 await cleanup()
@@ -1574,6 +1603,7 @@ class AgentLoop:
                 replay_max_messages=replay_max_messages,
             )
         is_subagent = ctx.kind is TurnKind.SYSTEM and ctx.msg.sender_id == "subagent"
+        is_workflow = ctx.kind is TurnKind.SYSTEM and ctx.msg.sender_id == "workflow"
 
         if ctx.kind is TurnKind.USER and (message_tool := self.tools.get("message")):
             if isinstance(message_tool, MessageTool):
@@ -1582,7 +1612,7 @@ class AgentLoop:
         _hist_kwargs: dict[str, Any] = {
             "max_messages": replay_max_messages,
             "max_tokens": self._replay_token_budget(runtime),
-            "extend_to_user": is_subagent,
+            "extend_to_user": is_subagent or is_workflow,
         }
         ctx.history = ctx.session.get_history(**_hist_kwargs)
         if is_subagent:
