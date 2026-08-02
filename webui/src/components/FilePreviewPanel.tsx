@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { AlertCircle, ChevronRight, Loader2, X } from "lucide-react";
+import { AlertCircle, ChevronRight, Download, Loader2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { CodeBlock } from "@/components/CodeBlock";
+import { MarkdownText } from "@/components/MarkdownText";
 import { splitFilePath } from "@/components/FileReferenceChip";
-import { ApiError, fetchFilePreview } from "@/lib/api";
+import { ApiError, downloadWorkspaceFile, fetchFilePreview } from "@/lib/api";
 import type { FilePreviewPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -16,6 +17,7 @@ interface FilePreviewPanelProps {
   desktopWidth?: number;
   isClosing?: boolean;
   onResizeStart?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onOpenFilePreview?: (path: string) => void;
   onClose: () => void;
 }
 
@@ -31,11 +33,13 @@ export function FilePreviewPanel({
   desktopWidth = 544,
   isClosing = false,
   onResizeStart,
+  onOpenFilePreview,
   onClose,
 }: FilePreviewPanelProps) {
   const { t } = useTranslation();
   const [state, setState] = useState<PreviewState>({ status: "loading" });
   const [entered, setEntered] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setEntered(true));
@@ -92,6 +96,24 @@ export function FilePreviewPanel({
     ...directoryParts,
     fileName,
   ].join("/")}`;
+
+  const handleDownload = async () => {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      const blob = await downloadWorkspaceFile(token, sessionKey, previewPath);
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      setDownloading(false);
+    }
+  };
 
   return (
     <aside
@@ -193,6 +215,26 @@ export function FilePreviewPanel({
                 );
               })}
             </nav>
+            {state.status === "ready" ? (
+              <button
+                type="button"
+                onClick={handleDownload}
+                disabled={downloading}
+                className={cn(
+                  "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
+                  "text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "disabled:cursor-not-allowed disabled:opacity-50",
+                )}
+                title={t("filePreview.download", { defaultValue: "Download file" })}
+                aria-label={t("filePreview.download", { defaultValue: "Download file" })}
+                data-testid="file-preview-download"
+              >
+                {downloading
+                  ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  : <Download className="h-4 w-4" aria-hidden />}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={onClose}
@@ -234,15 +276,26 @@ export function FilePreviewPanel({
                     })}
                   </div>
                 ) : null}
-                <CodeBlock
-                  language={state.payload.language}
-                  code={state.payload.content}
-                  chrome="none"
-                  highlight
-                  showLineNumbers
-                  wrapLongLines={false}
-                  className="min-h-full"
-                />
+                {state.payload.language === "markdown" ? (
+                  <div className="px-4 py-3">
+                    <MarkdownText
+                      className="markdown-content prose max-w-none dark:prose-invert"
+                      onOpenFilePreview={onOpenFilePreview}
+                    >
+                      {state.payload.content}
+                    </MarkdownText>
+                  </div>
+                ) : (
+                  <CodeBlock
+                    language={state.payload.language}
+                    code={state.payload.content}
+                    chrome="none"
+                    highlight
+                    showLineNumbers
+                    wrapLongLines={false}
+                    className="min-h-full"
+                  />
+                )}
               </div>
             )}
           </div>

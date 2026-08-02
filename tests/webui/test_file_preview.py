@@ -3,7 +3,11 @@ from pathlib import Path
 import pytest
 
 from nanobot.security.workspace_access import default_workspace_scope
-from nanobot.webui.file_preview import WebUIFilePreviewError, file_preview_payload
+from nanobot.webui.file_preview import (
+    WebUIFilePreviewError,
+    file_download_bytes,
+    file_preview_payload,
+)
 
 
 def test_restricted_preview_allows_media_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -36,5 +40,31 @@ def test_restricted_preview_rejects_other_root(tmp_path: Path, monkeypatch: pyte
 
     with pytest.raises(WebUIFilePreviewError, match="outside the current workspace") as exc_info:
         file_preview_payload(str(outside), scope=scope)
+
+    assert exc_info.value.status == 403
+
+
+def test_download_bytes_returns_full_file_within_scope(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = workspace / "README.md"
+    target.write_text("# Hello\n\nbody", encoding="utf-8")
+    scope = default_workspace_scope(workspace, restrict_to_workspace=True)
+
+    data, name = file_download_bytes("README.md", scope=scope)
+
+    assert name == "README.md"
+    assert data == b"# Hello\n\nbody"
+
+
+def test_download_bytes_rejects_outside_workspace(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "secret.txt"
+    outside.write_text("secret", encoding="utf-8")
+    scope = default_workspace_scope(workspace, restrict_to_workspace=True)
+
+    with pytest.raises(WebUIFilePreviewError, match="outside the current workspace") as exc_info:
+        file_download_bytes(str(outside), scope=scope)
 
     assert exc_info.value.status == 403

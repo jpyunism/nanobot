@@ -1138,6 +1138,7 @@ export function ThreadShell({
           desktopWidth={filePreviewWidth}
           isClosing={filePreviewClosing}
           onResizeStart={handleFilePreviewResizeStart}
+          onOpenFilePreview={handleOpenFilePreview}
           onClose={handleCloseFilePreview}
         />
       ) : null}

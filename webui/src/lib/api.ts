@@ -245,6 +245,30 @@ export async function fetchFilePreviewAvailability(
   return payload.available !== false;
 }
 
+export async function downloadWorkspaceFile(
+  token: string,
+  key: string,
+  path: string,
+  base: string = "",
+): Promise<Blob> {
+  const query = new URLSearchParams();
+  query.set("path", path);
+  const url = `${base}/api/sessions/${encodeURIComponent(key)}/file-download?${query}`;
+  const res = await fetchWithTimeout(
+    url,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      credentials: "same-origin",
+    },
+    API_READ_TIMEOUT_MS,
+  );
+  if (!res.ok) {
+    const text = (await res.text().catch(() => "")).trim();
+    throw new ApiError(res.status, text || `HTTP ${res.status}`);
+  }
+  return res.blob();
+}
+
 export async function fetchSessionAutomations(
   token: string,
   key: string,

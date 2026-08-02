@@ -79,6 +79,17 @@ def file_preview_availability_payload(
     return {"available": True}
 
 
+def file_download_bytes(raw_path: str | None, *, scope: WorkspaceScope) -> tuple[bytes, str]:
+    """Return the full contents of a workspace file allowed by the scope, plus its name."""
+
+    resolved = _resolve_preview_path(raw_path, scope=scope)
+    try:
+        data = resolved.read_bytes()
+    except OSError as e:
+        raise WebUIFilePreviewError(500, "failed to read file") from e
+    return data, resolved.name
+
+
 def _resolve_preview_path(raw_path: str | None, *, scope: WorkspaceScope) -> Path:
     path = _clean_preview_path(raw_path)
     if not path:

@@ -17,7 +17,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from loguru import logger
 from websockets.http11 import Request as WsRequest
@@ -31,6 +31,7 @@ from nanobot.triggers.local_types import LocalTrigger
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
+    file_download_bytes,
     file_preview_availability_payload,
     file_preview_payload,
 )
@@ -414,6 +415,10 @@ class GatewayHTTPHandler:
         if m:
             return self._handle_file_preview(request, m.group(1))
 
+        m = re.match(r"^/api/sessions/([^/]+)/file-download$", got)
+        if m:
+            return self._handle_file_download(request, m.group(1))
+
         m = re.match(r"^/api/sessions/([^/]+)/subagents/([^/]+)$", got)
         if m:
             return self._handle_session_subagent(request, m.group(1), m.group(2))
@@ -733,6 +738,30 @@ class GatewayHTTPHandler:
                 return _http_json_response({"available": False})
             return _http_error(e.status, e.message)
         return _http_json_response(payload)
+
+    def _handle_file_download(self, request: WsRequest, key: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not _is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+        query = _parse_query(request.path)
+        path = _query_first(query, "path")
+        try:
+            scope = self.workspaces.scope_for_session_key(decoded_key)
+            data, name = file_download_bytes(path, scope=scope)
+        except WebUIFilePreviewError as e:
+            return _http_error(e.status, e.message)
+        content_type, _ = mimetypes.guess_type(name)
+        return _http_response(
+            data,
+            content_type=content_type or "application/octet-stream",
+            extra_headers=[
+                ("Content-Disposition", f"attachment; filename*=UTF-8''{quote(name)}")
+            ],
+        )
 
     def _handle_session_subagent(
         self,
@@ -1102,7 +1131,6 @@ class GatewayHTTPHandler:
     def _handle_webui_skill_detail(self, request: WsRequest, raw_name: str) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
-        from urllib.parse import unquote
 
         name = unquote(raw_name)
         if not name or "/" in name or "\\" in name:
