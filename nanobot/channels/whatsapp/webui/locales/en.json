@@ -24,6 +24,10 @@
           "open": "All messages",
           "allowlist": "Allowlist"
         }
+      },
+      "allowSendTo": {
+        "label": "Allowed recipients",
+        "placeholder": "Phone numbers or WhatsApp IDs"
       }
     }
   }
