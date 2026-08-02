@@ -4,6 +4,7 @@ import asyncio
 import os
 import select
 import signal
+import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterable
@@ -1941,6 +1942,34 @@ def _run_gateway(
                 logger.info("Heartbeat: silenced by post-run evaluation")
             return response
 
+        # PR Guardian is a standalone script (decoupled from agent sessions).
+        # Run it via subprocess — no agent turn, no token consumption.
+        if job.name == "pr-guardian":
+            run_script = config.workspace_path / "pr-guardian" / "run.sh"
+            if not run_script.exists():
+                logger.warning("PR Guardian: run.sh not found at {}", run_script)
+                return None
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "bash", str(run_script),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=600)
+                if proc.returncode != 0:
+                    logger.error(
+                        "PR Guardian: exited with {}: {}",
+                        proc.returncode,
+                        stdout.decode(errors="replace")[-2000:],
+                    )
+                else:
+                    logger.info("PR Guardian: completed (rc=0)")
+            except asyncio.TimeoutError:
+                logger.error("PR Guardian: timed out after 600s")
+            except Exception:
+                logger.exception("PR Guardian: failed to run")
+            return None
+
         if is_bound_cron_job(job):
             return await run_bound_cron_job(job, agent=agent, cron=cron)
 
@@ -2092,6 +2121,24 @@ def _run_gateway(
             ),
             payload=CronPayload(kind="system_event"),
         ))
+
+    # Register PR Guardian system job (idempotent on restart). Runs the
+    # standalone pr-guardian/run.sh via subprocess — no agent turn, no tokens.
+    pr_guardian_script = config.workspace_path / "pr-guardian" / "run.sh"
+    if pr_guardian_script.exists():
+        cron.register_system_job(CronJob(
+            id="pr-guardian",
+            name="pr-guardian",
+            schedule=CronSchedule(
+                kind="every",
+                every_ms=30 * 60 * 1000,
+                tz=config.agents.defaults.timezone,
+            ),
+            payload=CronPayload(kind="system_event"),
+        ))
+        console.print("[green]✓[/green] PR Guardian: every 30m")
+    else:
+        console.print("[yellow]○[/yellow] PR Guardian: run.sh not found, skipped")
 
     async def _open_browser_when_ready() -> None:
         """Wait for the gateway to bind, then point the user's browser at the webui."""

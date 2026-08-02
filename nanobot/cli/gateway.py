@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from collections.abc import Callable
@@ -191,7 +192,7 @@ def create_gateway_app(
             prepare_webui_bundle(cfg, interactive_build_mode())
         runtime = runtime_for_instance(workspace=workspace, config=config)
         existing = runtime.status()
-        if existing.running:
+        if existing.running and existing.pid != os.getpid():
             console.print(
                 f"[red]Error: gateway already running (pid={existing.pid}, port={existing.port}).[/red]"
             )

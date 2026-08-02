@@ -1,4 +1,6 @@
+import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import typer
 from rich.console import Console
@@ -14,6 +16,10 @@ runner = CliRunner()
 
 class FakeRuntime:
     def __init__(self, tmp_path: Path):
+        self.paths = SimpleNamespace(
+            log_path=tmp_path / "gateway.log",
+            state_path=tmp_path / "gateway.json",
+        )
         self.status_value = GatewayStatus(
             running=True,
             pid=12345,
@@ -121,7 +127,13 @@ def _test_app(tmp_path: Path, config: Config | None = None):
 
 
 def test_gateway_default_still_runs_foreground(tmp_path):
-    app, _runtime, _service, calls, _prepare_calls = _test_app(tmp_path)
+    app, fake_runtime, _service, calls, _prepare_calls = _test_app(tmp_path)
+    fake_runtime.status_value = GatewayStatus(
+        running=False,
+        pid=None,
+        state_path=tmp_path / "gateway.json",
+        log_path=tmp_path / "gateway.log",
+    )
 
     result = runner.invoke(app, ["gateway", "--port", "18791"])
 
@@ -129,6 +141,23 @@ def test_gateway_default_still_runs_foreground(tmp_path):
     assert len(calls) == 1
     assert calls[0][1] == 18791
     assert calls[0][2] == "warn"
+
+
+def test_gateway_foreground_ignores_state_matching_own_pid(tmp_path):
+    app, fake_runtime, _service, calls, _prepare_calls = _test_app(tmp_path)
+    fake_runtime.status_value = GatewayStatus(
+        running=True,
+        pid=os.getpid(),
+        state_path=tmp_path / "gateway.json",
+        log_path=tmp_path / "gateway.log",
+        port=18790,
+        reason="running",
+    )
+
+    result = runner.invoke(app, ["gateway", "--port", "18791"])
+
+    assert result.exit_code == 0
+    assert len(calls) == 1
 
 
 def test_gateway_background_starts_detached_runtime(tmp_path):
