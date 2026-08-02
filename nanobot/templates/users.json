@@ -1,0 +1,23 @@
+{
+  "//": "Single source of truth for identities. Third-party data (personal contacts, group members, communities) does NOT go in USER.md or MEMORY.md. Only the operator lives in USER.md. This file is readable from all workspaces.",
+  "operator": {
+    "handle": "",
+    "name": "",
+    "phone": "",
+    "role": "operator",
+    "authorized": true
+  },
+  "personal_contacts": {
+    "//": "Personal contacts in DMs. NOT members of any WhatsApp group."
+  },
+  "groups": {
+    "//": "Each WhatsApp group has its own members nested under it. Never mix members across groups.",
+    "example_group": {
+      "whatsapp_group_id": "",
+      "members": {}
+    }
+  },
+  "communities": {
+    "//": "External communities/projects. Neither personal contacts nor group members."
+  }
+}

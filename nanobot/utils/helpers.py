@@ -844,6 +844,7 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
     for item in tpl.iterdir():
         if item.name.endswith(".md") and not item.name.startswith("."):
             _write(item, workspace / item.name)
+    _write(tpl / "users.json", workspace / "users.json")
     _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
     _write(tpl / "prompts" / "README.md", workspace / "prompts" / "README.md")
     _write(None, workspace / "memory" / "history.jsonl")
