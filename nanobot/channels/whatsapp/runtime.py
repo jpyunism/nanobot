@@ -763,6 +763,11 @@ class WhatsAppChannel(BaseChannel):
         allow_set = {str(item).strip() for item in allow if str(item).strip()}
         if bare in allow_set or chat_id in allow_set:
             return
+        if "@lid" in chat_id:
+            lid_bare = chat_id.split("@", 1)[0]
+            phone = self._lid_to_phone.get(lid_bare)
+            if phone and phone in allow_set:
+                return
         self.logger.warning(
             "WhatsApp outbound allowlist blocked send to {} "
             "(not in allow_send_to: {}). "
