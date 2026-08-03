@@ -1,9 +1,7 @@
 import {
   Children,
   isValidElement,
-  useEffect,
   useMemo,
-  useState,
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -16,10 +14,6 @@ import { Streamdown, type Components, type StreamdownProps } from "streamdown";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CodeBlock } from "@/components/CodeBlock";
-import {
-  useFilePreviewAvailabilityResolver,
-  type FilePreviewAvailabilityResolver,
-} from "@/components/FilePreviewAvailabilityContext";
 import {
   FileReferenceChip,
   isFilePatternReference,
@@ -58,12 +52,6 @@ type InlineLinkPreview = {
   title: string;
 };
 
-type AvailabilityResult = {
-  available: boolean;
-  path: string;
-  resolve: FilePreviewAvailabilityResolver;
-};
-
 function InferredFileReferenceChip({
   path,
   onOpen,
@@ -71,33 +59,10 @@ function InferredFileReferenceChip({
   path: string;
   onOpen?: (path: string) => void;
 }) {
-  const resolve = useFilePreviewAvailabilityResolver();
-  const [result, setResult] = useState<AvailabilityResult | null>(null);
-
-  useEffect(() => {
-    if (!resolve || !onOpen) return;
-    let cancelled = false;
-    resolve(path)
-      .then((available) => {
-        if (!cancelled) setResult({ available, path, resolve });
-      })
-      .catch(() => {
-        if (!cancelled) setResult({ available: false, path, resolve });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [onOpen, path, resolve]);
-
-  const resolvedAvailable = !resolve || (
-    result?.resolve === resolve
-    && result.path === path
-    && result.available
-  );
   return (
     <FileReferenceChip
       path={path}
-      onOpen={onOpen && resolvedAvailable ? onOpen : undefined}
+      onOpen={onOpen || undefined}
     />
   );
 }
@@ -701,6 +666,25 @@ export default function MarkdownTextRenderer({
         if (!source) return null;
         const label = typeof alt === "string" ? alt : "";
         const kind = markdownAttachmentKind(source, label);
+        if (kind === "image" && onOpenFilePreview) {
+          return (
+            <button
+              type="button"
+              onClick={() => onOpenFilePreview(source)}
+              className="not-prose block cursor-zoom-in rounded-[14px] border border-border/60 bg-muted/40 p-0 transition-transform hover:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={label || "Open image"}
+            >
+              <img
+                src={source}
+                alt={label}
+                loading="lazy"
+                decoding="async"
+                draggable={false}
+                className="block h-auto max-h-[34rem] w-full rounded-[inherit] object-contain"
+              />
+            </button>
+          );
+        }
         return (
           <AttachmentTile
             attachment={{

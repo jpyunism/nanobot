@@ -3,7 +3,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { AlertCircle, Bot, CheckCircle2, Circle, Loader2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { CodeBlock } from "@/components/CodeBlock";
+import { MarkdownText } from "@/components/MarkdownText";
 import { ApiError, fetchSubagentStatus } from "@/lib/api";
 import type {
   SubagentPhase,
@@ -106,6 +106,7 @@ export interface SubagentPanelProps {
   desktopWidth?: number;
   isClosing?: boolean;
   onResizeStart?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onOpenFilePreview?: (path: string) => void;
   onClose: () => void;
 }
 
@@ -117,6 +118,7 @@ export function SubagentPanel({
   desktopWidth = PANEL_DEFAULT_WIDTH,
   isClosing = false,
   onResizeStart,
+  onOpenFilePreview,
   onClose,
 }: SubagentPanelProps) {
   const { t } = useTranslation();
@@ -268,19 +270,23 @@ export function SubagentPanel({
               </div>
             ) : (
               <div className="flex h-full flex-col">
-                <section
-                  className="border-b border-border/60 px-4 py-3"
-                  data-testid="subagent-panel-task"
-                >
-                  <div className="text-[10.5px] uppercase tracking-wide text-muted-foreground/55">
-                    {t("subagentPanel.task", { defaultValue: "Task" })}
-                  </div>
-                  <div className="mt-1 text-[13px] leading-5 text-foreground/85">
-                    {status?.task_description ?? t("subagentPanel.loading", {
-                      defaultValue: "Loading…",
-                    })}
-                  </div>
-                </section>
+        <section
+          className="border-b border-border/60 px-4 py-3"
+          data-testid="subagent-panel-task"
+        >
+          <div className="text-[10.5px] uppercase tracking-wide text-muted-foreground/55">
+            {t("subagentPanel.task", { defaultValue: "Task" })}
+          </div>
+          <div className="markdown-content mt-1 text-[13px] leading-5 text-foreground/85">
+            {status?.task_description ? (
+              <MarkdownText className="max-w-none" onOpenFilePreview={onOpenFilePreview}>
+                {status.task_description}
+              </MarkdownText>
+            ) : (
+              t("subagentPanel.loading", { defaultValue: "Loading…" })
+            )}
+          </div>
+        </section>
 
                 <section
                   className="border-b border-border/60 px-4 py-3"
@@ -315,7 +321,7 @@ export function SubagentPanel({
                 </section>
 
                 <section
-                  className="min-h-0 flex-1 px-4 py-3"
+                  className="min-h-0 flex-1 px-4 py-3 pb-6"
                   data-testid="subagent-panel-result"
                 >
                   <div className="text-[10.5px] uppercase tracking-wide text-muted-foreground/55">
@@ -326,14 +332,10 @@ export function SubagentPanel({
                       {status.error}
                     </div>
                   ) : status?.result ? (
-                    <div className="mt-2 rounded-md border border-border/60 bg-muted/30">
-                      <CodeBlock
-                        language="markdown"
-                        code={status.result}
-                        chrome="none"
-                        wrapLongLines
-                        className="max-h-[60vh]"
-                      />
+                    <div className="markdown-content mt-2">
+                      <MarkdownText className="max-w-none" preserveStreamingLayout onOpenFilePreview={onOpenFilePreview}>
+                        {status.result}
+                      </MarkdownText>
                     </div>
                   ) : (
                     <div className="mt-2 text-[12.5px] text-muted-foreground/65">

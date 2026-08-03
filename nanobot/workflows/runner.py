@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 from nanobot.bus.events import InboundMessage
+from nanobot.bus.outbound_events import WorkflowUpdateEvent, outbound_message_for_event
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
@@ -89,6 +90,12 @@ class WorkflowContext:
         self._phases.append({"name": phase, "started_at": _iso(now), "ended_at": None})
         self._phase = phase
         logger.info("Workflow [%s] entering phase: %s", self._run_id, phase)
+        self._runner._publish_update(
+            run_id=self._run_id,
+            workflow=self._runner._name_for(self._run_id),
+            phase=phase,
+            status="running",
+        )
 
     async def agent(
         self,
@@ -147,6 +154,34 @@ class WorkflowRunner:
         self.workspace = workspace
         self._running: dict[str, asyncio.Task] = {}
         self._session_tasks: dict[str, set[str]] = {}
+        self._run_names: dict[str, str] = {}
+
+    def _name_for(self, run_id: str) -> str:
+        return self._run_names.get(run_id, "?")
+
+    async def _publish_update(
+        self,
+        run_id: str,
+        workflow: str,
+        phase: str | None = None,
+        status: str = "running",
+        error: str | None = None,
+        result_preview: str | None = None,
+    ) -> None:
+        await self.bus.publish_outbound(
+            outbound_message_for_event(
+                channel="websocket",
+                chat_id="*",
+                event=WorkflowUpdateEvent(
+                    run_id=run_id,
+                    workflow=workflow,
+                    phase=phase,
+                    status=status,
+                    error=error,
+                    result_preview=result_preview,
+                ),
+            )
+        )
 
     def list_workflows(self) -> list[dict[str, str]]:
         return self.loader.list_workflows()
@@ -189,11 +224,13 @@ class WorkflowRunner:
             )
         )
         self._running[run_id] = task
+        self._run_names[run_id] = name
         if session_key:
             self._session_tasks.setdefault(session_key, set()).add(run_id)
 
         def _cleanup(_: asyncio.Task) -> None:
             self._running.pop(run_id, None)
+            self._run_names.pop(run_id, None)
             if session_key and (ids := self._session_tasks.get(session_key)):
                 ids.discard(run_id)
                 if not ids:
@@ -201,6 +238,9 @@ class WorkflowRunner:
 
         task.add_done_callback(_cleanup)
         logger.info("Started workflow '%s' (run: %s)", name, run_id)
+        asyncio.create_task(
+            self._publish_update(run_id=run_id, workflow=name, status="running")
+        )
         return run_id
 
     async def _run(
@@ -238,6 +278,7 @@ class WorkflowRunner:
             status = "completed"
         except asyncio.CancelledError:
             status = "cancelled"
+            result_text = "Workflow was cancelled before completion."
             raise
         except Exception as exc:
             logger.exception("Workflow '%s' (run: %s) failed", name, run_id)
@@ -246,7 +287,15 @@ class WorkflowRunner:
         finally:
             phases = ctx.phases if ctx is not None else []
             self._save_history(run_id, name, args, started, status, phases, result_text)
-        if status != "cancelled":
+            asyncio.create_task(
+                self._publish_update(
+                    run_id=run_id,
+                    workflow=name,
+                    status=status,
+                    error=result_text if status in ("cancelled", "failed") else None,
+                    result_preview=result_text[:500] if result_text else None,
+                )
+            )
             await self._announce(
                 run_id,
                 name,
@@ -273,6 +322,8 @@ class WorkflowRunner:
         status_text = (
             "completed successfully"
             if status == "completed"
+            else "was cancelled"
+            if status == "cancelled"
             else f"failed ({status})"
         )
         override = session_key or f"{channel}:{chat_id}"

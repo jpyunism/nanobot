@@ -769,19 +769,30 @@ class GatewayHTTPHandler:
         key: str,
         task_id: str,
     ) -> Response:
+        logger.debug(
+            "subagent HTTP fetch key={} task_id={}",
+            key,
+            task_id,
+        )
         if not self.check_api_token(request):
+            logger.debug("subagent HTTP fetch rejected: unauthorized")
             return _http_error(401, "Unauthorized")
         decoded_key = _decode_api_key(key)
         if decoded_key is None:
+            logger.debug("subagent HTTP fetch rejected: invalid session key")
             return _http_error(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded_key):
+            logger.debug("subagent HTTP fetch rejected: not a websocket session")
             return _http_error(404, "session not found")
         manager = getattr(self, "subagent_manager", None)
         if manager is None:
+            logger.debug("subagent HTTP fetch rejected: manager unavailable")
             return _http_error(503, "subagent manager unavailable")
         status = manager.get_status(task_id)
         if status is None:
+            logger.debug("subagent HTTP fetch rejected: task_id={} not found", task_id)
             return _http_error(404, "subagent not found")
+        logger.debug("subagent HTTP fetch returned task_id={} phase={}", task_id, status.phase)
         return _http_json_response(status.to_payload())
 
     def _handle_session_automations(self, request: WsRequest, key: str) -> Response:

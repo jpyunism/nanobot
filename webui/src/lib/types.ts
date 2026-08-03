@@ -1232,6 +1232,25 @@ export type InboundEvent =
       result: string | null;
       subagent_event?: SubagentLifecycleEvent;
     }
+  | {
+      event: "automation_update";
+      chat_id: string;
+      kind: string;
+      label: string | null;
+      turn_id: string | null;
+      status: string;
+      error?: string;
+    }
+  | {
+      event: "workflow_update";
+      chat_id: string;
+      run_id: string;
+      workflow: string;
+      phase: string | null;
+      status: string;
+      error?: string;
+      result_preview?: string;
+    }
   | { event: "error"; chat_id?: string; detail?: string; reason?: string; project_id?: string; request_id?: string };
 
 /** Base64-encoded file attached to an outbound ``message`` envelope.
@@ -1328,6 +1347,16 @@ export interface SubagentStatusPayload {
   error: string | null;
   result: string | null;
   chat_id?: string | null;
+}
+
+/** Live status for a workflow run, pushed over WS. */
+export interface WorkflowStatusPayload {
+  run_id: string;
+  workflow: string;
+  phase: string | null;
+  status: "running" | "completed" | "cancelled" | "failed";
+  error: string | null;
+  result_preview: string | null;
 }
 
 /** Optional event-level metadata for subagent_update frames. */

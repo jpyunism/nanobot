@@ -88,6 +88,29 @@ class TurnModelUpdatedEvent(OutboundEvent):
     model: str
 
 
+@dataclass(frozen=True)
+class AutomationUpdateEvent(OutboundEvent):
+    """Live status for an automation (cron / local trigger) turn."""
+
+    kind: str
+    label: str | None = None
+    turn_id: str | None = None
+    status: str = "running"
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class WorkflowUpdateEvent(OutboundEvent):
+    """Live status for a workflow run."""
+
+    run_id: str
+    workflow: str
+    phase: str | None = None
+    status: str = "running"
+    error: str | None = None
+    result_preview: str | None = None
+
+
 def outbound_message_for_event(
     *,
     channel: str,

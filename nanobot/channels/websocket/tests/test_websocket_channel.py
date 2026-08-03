@@ -3684,3 +3684,91 @@ def test_handle_session_subagent_returns_404_when_missing(tmp_path: Path) -> Non
     resp = gateway.http._handle_session_subagent(req, enc, "missing")
 
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_subscribe_subagent_pushes_current_snapshot(bus) -> None:
+    from nanobot.agent.subagent import SubagentManager, SubagentStatus
+    from nanobot.config.schema import AgentDefaults
+
+    manager = SubagentManager(
+        workspace=Path.cwd(),
+        bus=bus,
+        max_tool_result_chars=AgentDefaults().max_tool_result_chars,
+    )
+    status = SubagentStatus(
+        task_id="task-1",
+        label="Refactor",
+        task_description="do the thing",
+        started_at=0.0,
+        phase="done",
+        iteration=2,
+        result="all done",
+    )
+    status.chat_id = "chat-1"
+    manager._task_statuses["task-1"] = status
+
+    channel = _ch(bus, workspace_path=Path.cwd())
+    channel.gateway.http.subagent_manager = manager
+    channel._webui_connections.add(channel)  # fake connection
+
+    fake_connection = AsyncMock()
+    channel._server_task = asyncio.create_task(asyncio.sleep(3600))
+    try:
+        await channel._dispatch_envelope(
+            fake_connection,
+            "client-1",
+            {"type": "subscribe_subagent", "task_id": "task-1"},
+        )
+    finally:
+        channel._server_task.cancel()
+        try:
+            await channel._server_task
+        except asyncio.CancelledError:
+            pass
+
+    calls = fake_connection.send.call_args_list
+    assert any(
+        "subagent_subscribed" in c.args[0] for c in calls
+    )
+    update_calls = [c for c in calls if "subagent_update" in c.args[0]]
+    assert len(update_calls) == 1
+    payload = json.loads(update_calls[0].args[0])
+    assert payload["event"] == "subagent_update"
+    assert payload["task_id"] == "task-1"
+    assert payload["phase"] == "done"
+    assert payload["result"] == "all done"
+    assert payload["chat_id"] == "chat-1"
+
+
+@pytest.mark.asyncio
+async def test_subscribe_subagent_is_quiet_when_subagent_missing(bus) -> None:
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.config.schema import AgentDefaults
+
+    manager = SubagentManager(
+        workspace=Path.cwd(),
+        bus=bus,
+        max_tool_result_chars=AgentDefaults().max_tool_result_chars,
+    )
+
+    channel = _ch(bus, workspace_path=Path.cwd())
+    channel.gateway.http.subagent_manager = manager
+    fake_connection = AsyncMock()
+    channel._server_task = asyncio.create_task(asyncio.sleep(3600))
+    try:
+        await channel._dispatch_envelope(
+            fake_connection,
+            "client-1",
+            {"type": "subscribe_subagent", "task_id": "missing"},
+        )
+    finally:
+        channel._server_task.cancel()
+        try:
+            await channel._server_task
+        except asyncio.CancelledError:
+            pass
+
+    calls = fake_connection.send.call_args_list
+    assert any("subagent_subscribed" in c.args[0] for c in calls)
+    assert not any("subagent_update" in c.args[0] for c in calls)

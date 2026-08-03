@@ -24,7 +24,10 @@ interface FilePreviewPanelProps {
 type PreviewState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; payload: FilePreviewPayload };
+  | { status: "ready"; payload: FilePreviewPayload }
+  | { status: "media"; url: string; name: string };
+
+const MEDIA_URL_RE = /^\/api\/media\//;
 
 export function FilePreviewPanel({
   sessionKey,
@@ -49,6 +52,11 @@ export function FilePreviewPanel({
   useEffect(() => {
     let cancelled = false;
     setState({ status: "loading" });
+    if (MEDIA_URL_RE.test(path)) {
+      const name = path.split("/").pop() ?? "image";
+      if (!cancelled) setState({ status: "media", url: path, name });
+      return;
+    }
     fetchFilePreview(token, sessionKey, path)
       .then((payload) => {
         if (!cancelled) setState({ status: "ready", payload });
@@ -69,7 +77,7 @@ export function FilePreviewPanel({
     };
   }, [path, sessionKey, t, token]);
 
-  const displayPath = state.status === "ready" ? state.payload.display_path : path;
+  const displayPath = state.status === "ready" ? state.payload.display_path : state.status === "media" ? state.name : path;
   const previewPath = state.status === "ready" ? state.payload.path : displayPath;
   const normalizedPreviewPath = previewPath.replace(/\\/g, "/");
   const hasRootPrefix = normalizedPreviewPath.startsWith("/");
@@ -266,6 +274,14 @@ export function FilePreviewPanel({
                   />
                   <p>{state.message}</p>
                 </div>
+              </div>
+            ) : state.status === "media" ? (
+              <div className="flex h-full items-center justify-center p-4">
+                <img
+                  src={state.url}
+                  alt={state.name}
+                  className="block h-auto max-h-full max-w-full rounded-lg object-contain"
+                />
               </div>
             ) : (
               <div className="min-h-full">

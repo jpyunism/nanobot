@@ -555,6 +555,25 @@ class AgentLoop:
             self.sessions.save(session)
             return self.llm_runtime()
 
+    def _resolve_runtime_for_resume(self, session_key: str | None) -> LLMRuntime | None:
+        """Return a runtime for resuming a subagent after restart.
+
+        Falls back to the default runtime when the session is missing or has no
+        preset. This lets long-running subagents continue even if the session
+        record was not flushed before shutdown.
+        """
+        try:
+            session = self.sessions.get_or_create(session_key) if session_key else None
+        except Exception:
+            session = None
+        try:
+            if session is None:
+                return self.llm_runtime()
+            return self.runtime_for_session(session)
+        except Exception:
+            logger.exception("Could not resolve runtime for resumed subagent")
+            return None
+
     def set_session_model_preset(
         self,
         session_key: str,
@@ -1086,6 +1105,16 @@ class AgentLoop:
         try:
             await self._connect_mcp()
             logger.info("Agent loop started")
+            # Re-launch subagents that were running before a gateway restart.
+            # The subagent manager persists pending records; we resolve the
+            # runtime from the session so the resumed work uses the same preset.
+            resume_pending = getattr(self.subagents, "resume_pending", None)
+            if resume_pending is not None and asyncio.iscoroutinefunction(resume_pending):
+                resumed = await resume_pending(
+                    lambda session_key: self._resolve_runtime_for_resume(session_key),
+                )
+                if resumed:
+                    logger.info("Resumed {} subagent(s) after restart", resumed)
 
             while self._running:
                 try:

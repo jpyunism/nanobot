@@ -2,10 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 
+import { AutomationChips } from "@/components/AutomationChips";
+import { AutomationPanelHost } from "@/components/AutomationPanelHost";
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { SubagentPanelHost } from "@/components/SubagentPanelHost";
 import { SubagentSpawnChips } from "@/components/SubagentSpawnChips";
+import { WorkflowPanelHost } from "@/components/WorkflowPanelHost";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { extractSubagentSpawns } from "@/components/thread/activity/subagent-model";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
@@ -1142,19 +1145,28 @@ export function ThreadShell({
           onClose={handleCloseFilePreview}
         />
       ) : null}
-      {subagentSpawns.length > 0 ? (
-        <div
-          className="pointer-events-none absolute bottom-4 left-4 z-20 flex max-w-[min(420px,calc(100vw-2rem))] flex-col gap-1 [&>*]:pointer-events-auto"
-          data-testid="subagent-spawn-chips"
-        >
-          <SubagentSpawnChips
-            chatId={chatId}
-            seeds={subagentSpawns}
-            isTurnActive={turnActive}
-          />
-        </div>
-      ) : null}
-      <SubagentPanelHost chatId={chatId} sessionKey={historyKey} />
+      <WorkflowPanelHost chatId={chatId} onOpenFilePreview={handleOpenFilePreview}>
+        <SubagentPanelHost chatId={chatId} sessionKey={historyKey} onOpenFilePreview={handleOpenFilePreview}>
+          <AutomationPanelHost chatId={chatId}>
+            <div
+              className="pointer-events-none absolute bottom-4 left-4 z-20 flex max-w-[min(420px,calc(100vw-2rem))] flex-col gap-1 [&>*]:pointer-events-auto"
+              data-testid="agent-chips"
+            >
+              {subagentSpawns.length > 0 ? (
+                <SubagentSpawnChips
+                  chatId={chatId}
+                  seeds={subagentSpawns}
+                  isTurnActive={turnActive}
+                />
+              ) : null}
+              <AutomationChips
+                chatId={chatId}
+                isTurnActive={turnActive}
+              />
+            </div>
+          </AutomationPanelHost>
+        </SubagentPanelHost>
+      </WorkflowPanelHost>
     </section>
   );
 }

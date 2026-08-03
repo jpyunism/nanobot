@@ -1,6 +1,7 @@
 """Subagent manager for background task execution."""
 
 import asyncio
+import base64
 import json
 import time
 import uuid
@@ -35,6 +36,7 @@ from nanobot.security.workspace_access import (
     reset_workspace_scope,
     workspace_sandbox_status,
 )
+
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 
@@ -56,6 +58,7 @@ class SubagentStatus:
     result: str | None = None
     finished_at: float | None = None
     chat_id: str | None = None
+    persisted_at: float | None = None
 
     def to_payload(self) -> dict[str, Any]:
         """Serialize for WS / HTTP transport."""
@@ -71,12 +74,197 @@ class SubagentStatus:
             "error": self.error,
             "result": self.result,
             "chat_id": self.chat_id,
+            "persisted_at": self.persisted_at,
         }
 
 
 #: How long a finished subagent keeps its status snapshot for HTTP fetch.
-#: ponytail: 60s window — covers panel open time without leaking forever.
-SUBAGENT_STATUS_TTL_S = 60.0
+#: ponytail: 24h window — enough to reopen the panel after the user comes back,
+#: without keeping finished snapshots forever.
+SUBAGENT_STATUS_TTL_S = 86400.0
+
+
+def _storage_key(key: str) -> str:
+    """Collision-resistant encoding for subagent snapshot subdirectories."""
+    return base64.urlsafe_b64encode(key.encode()).decode().rstrip("=")
+
+
+def _subagent_snapshot_dir(workspace: Path, session_key: str | None) -> Path:
+    """Return the directory where a session's subagent snapshots live."""
+    base = workspace / "subagents"
+    if session_key:
+        return base / _storage_key(session_key)
+    return base / "_unknown_"
+
+
+def _persist_subagent_status(
+    workspace: Path,
+    session_key: str | None,
+    status: SubagentStatus,
+) -> None:
+    """Persist a subagent snapshot so it survives gateway restarts."""
+    if status.phase not in ("done", "error"):
+        # ponytail: only finished snapshots are persisted. Running subagents
+        # would need task-reconstruction; that is left for a future phase.
+        return
+    directory = _subagent_snapshot_dir(workspace, session_key)
+    directory.mkdir(parents=True, exist_ok=True)
+    status.persisted_at = time.time()
+    path = directory / f"{status.task_id}.json"
+    try:
+        path.write_text(json.dumps(status.to_payload(), ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        logger.exception("Failed to persist subagent status for {}", status.task_id)
+
+
+def _subagent_status_from_payload(payload: dict[str, Any]) -> SubagentStatus | None:
+    """Reconstruct a SubagentStatus from a persisted payload."""
+    try:
+        return SubagentStatus(
+            task_id=payload["task_id"],
+            label=payload.get("label", ""),
+            task_description=payload.get("task_description", ""),
+            started_at=payload.get("started_at", 0.0),
+            phase=payload.get("phase", "done"),
+            iteration=payload.get("iteration", 0),
+            tool_events=list(payload.get("tool_events", [])),
+            usage=dict(payload.get("usage", {})),
+            stop_reason=payload.get("stop_reason"),
+            error=payload.get("error"),
+            result=payload.get("result"),
+            finished_at=payload.get("finished_at"),
+            chat_id=payload.get("chat_id"),
+        )
+    except Exception:
+        logger.warning("Skipping malformed subagent snapshot: {}", payload)
+        return None
+
+
+def _load_persisted_subagent_statuses(
+    workspace: Path,
+    ttl_s: float = SUBAGENT_STATUS_TTL_S,
+) -> dict[str, SubagentStatus]:
+    """Load non-expired finished subagent snapshots from disk.
+
+    Removes expired snapshot files while scanning.
+    """
+    base = workspace / "subagents"
+    if not base.exists():
+        return {}
+    now = time.time()
+    loaded: dict[str, SubagentStatus] = {}
+    for session_dir in base.iterdir():
+        if not session_dir.is_dir():
+            continue
+        for path in session_dir.glob("*.json"):
+            if path.suffixes == [".pending", ".json"]:
+                # Pending records are handled by resume_pending, not here.
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                logger.warning("Could not read subagent snapshot {}", path)
+                continue
+            persisted_at = payload.get("persisted_at")
+            if not isinstance(persisted_at, (int, float)) or now - persisted_at > ttl_s:
+                try:
+                    path.unlink()
+                except Exception:
+                    pass
+                continue
+            status = _subagent_status_from_payload(payload)
+            if status is not None:
+                status.persisted_at = persisted_at
+                loaded[status.task_id] = status
+        # Remove empty session directories to keep the workspace tidy.
+        try:
+            if not any(session_dir.iterdir()):
+                session_dir.rmdir()
+        except Exception:
+            pass
+    return loaded
+
+
+def _pending_path(workspace: Path, session_key: str | None, task_id: str) -> Path:
+    """Path for a subagent pending record."""
+    return _subagent_snapshot_dir(workspace, session_key) / f"{task_id}.pending.json"
+
+
+def _persist_subagent_pending(
+    workspace: Path,
+    task_id: str,
+    task: str,
+    label: str | None,
+    origin_channel: str,
+    origin_chat_id: str,
+    session_key: str | None,
+    origin_message_id: str | None,
+    temperature: float | None,
+    workspace_scope: WorkspaceScope | None,
+) -> None:
+    """Persist a pending subagent record so it can be relaunched after restart."""
+    directory = _subagent_snapshot_dir(workspace, session_key)
+    directory.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {
+        "task_id": task_id,
+        "task": task,
+        "label": label,
+        "origin_channel": origin_channel,
+        "origin_chat_id": origin_chat_id,
+        "session_key": session_key,
+        "origin_message_id": origin_message_id,
+        "temperature": temperature,
+        "workspace_scope": workspace_scope.to_dict() if workspace_scope is not None else None,
+        "persisted_at": time.time(),
+    }
+    path = _pending_path(workspace, session_key, task_id)
+    try:
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        logger.exception("Failed to persist subagent pending record for {}", task_id)
+
+
+def _delete_subagent_pending(
+    workspace: Path,
+    session_key: str | None,
+    task_id: str,
+) -> None:
+    """Remove a pending subagent record once it finishes."""
+    path = _pending_path(workspace, session_key, task_id)
+    try:
+        path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _load_subagent_pendings(workspace: Path) -> list[dict[str, Any]]:
+    """Load all pending subagent records from disk.
+
+    Removes expired pending records while scanning.
+    """
+    base = workspace / "subagents"
+    if not base.exists():
+        return []
+    now = time.time()
+    loaded: list[dict[str, Any]] = []
+    for session_dir in base.iterdir():
+        if not session_dir.is_dir():
+            continue
+        for path in session_dir.glob("*.pending.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                logger.warning("Could not read subagent pending record {}", path)
+                continue
+            persisted_at = payload.get("persisted_at")
+            if not isinstance(persisted_at, (int, float)) or now - persisted_at > SUBAGENT_STATUS_TTL_S:
+                try:
+                    path.unlink()
+                except Exception:
+                    pass
+                continue
+            loaded.append(payload)
+    return loaded
 
 
 SubagentEventCallback = Callable[[dict[str, Any]], Awaitable[None]]
@@ -177,13 +365,79 @@ class SubagentManager:
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
         self._running_tasks: dict[str, asyncio.Task[str]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
-        self._finished_statuses: dict[str, SubagentStatus] = {}  # kept past _cleanup for HTTP fetch
+        # Restored from disk on startup so finished subagent panels still work
+        # after a gateway restart. In-memory dict also keeps recent snapshots.
+        self._finished_statuses: dict[str, SubagentStatus] = _load_persisted_subagent_statuses(
+            self.workspace, SUBAGENT_STATUS_TTL_S,
+        )
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
         self._event_callback: SubagentEventCallback | None = None
+        # Pending records loaded on startup and relaunched via resume_pending.
+        self._pending_records: list[dict[str, Any]] = _load_subagent_pendings(self.workspace)
 
     def set_event_callback(self, callback: SubagentEventCallback | None) -> None:
         """Register an async callback invoked with each status update."""
         self._event_callback = callback
+
+    async def resume_pending(
+        self,
+        resolve_runtime: Callable[[str | None], Awaitable[LLMRuntime | None] | LLMRuntime | None],
+    ) -> list[str]:
+        """Relaunch subagents that were running when the gateway shut down.
+
+        Returns the list of task_ids that were resumed.
+        """
+        if not self._pending_records:
+            return []
+        records = self._pending_records
+        self._pending_records = []
+        resumed: list[str] = []
+        for record in records:
+            task_id = record.get("task_id")
+            if not isinstance(task_id, str):
+                continue
+            # If a finished snapshot already exists, the subagent completed
+            # before shutdown; just clean up the pending record.
+            if task_id in self._finished_statuses:
+                _delete_subagent_pending(
+                    self.workspace,
+                    record.get("session_key"),
+                    task_id,
+                )
+                continue
+            runtime = resolve_runtime(record.get("session_key"))
+            if asyncio.iscoroutine(runtime):
+                runtime = await runtime
+            if runtime is None:
+                # Keep the record for a future resume attempt if a runtime
+                # becomes available later.
+                self._pending_records.append(record)
+                continue
+            ws_scope = None
+            raw_scope = record.get("workspace_scope")
+            if isinstance(raw_scope, dict):
+                try:
+                    ws_scope = WorkspaceScope.from_dict(raw_scope)
+                except Exception:
+                    logger.warning("Could not restore workspace scope for {}", task_id)
+            try:
+                await self.spawn(
+                    task=record.get("task", ""),
+                    label=record.get("label"),
+                    origin_channel=record.get("origin_channel", "cli"),
+                    origin_chat_id=record.get("origin_chat_id", "direct"),
+                    session_key=record.get("session_key"),
+                    origin_message_id=record.get("origin_message_id"),
+                    temperature=record.get("temperature"),
+                    workspace_scope=ws_scope,
+                    runtime=runtime,
+                    task_id=task_id,
+                )
+                resumed.append(task_id)
+            except Exception:
+                logger.exception("Failed to resume subagent {}", task_id)
+                self._pending_records.append(record)
+        return resumed
 
     def get_status(self, task_id: str) -> SubagentStatus | None:
         """Return the current status snapshot for ``task_id``.
@@ -279,13 +533,14 @@ class SubagentManager:
         workspace_scope: WorkspaceScope | None = None,
         *,
         runtime: LLMRuntime | None = None,
+        task_id: str | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         if runtime is None:
             runtime = self._compat_spawn_runtime()
         if temperature is not None:
             runtime = runtime.with_generation_overrides(temperature=temperature)
-        task_id = str(uuid.uuid4())[:8]
+        task_id = task_id or str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin = {"channel": origin_channel, "chat_id": origin_chat_id, "session_key": session_key}
 
@@ -294,8 +549,21 @@ class SubagentManager:
             label=display_label,
             task_description=task,
             started_at=time.monotonic(),
+            chat_id=origin_chat_id,
         )
         self._task_statuses[task_id] = status
+        _persist_subagent_pending(
+            self.workspace,
+            task_id,
+            task,
+            label,
+            origin_channel,
+            origin_chat_id,
+            session_key,
+            origin_message_id,
+            temperature,
+            workspace_scope,
+        )
 
         bg_task = asyncio.create_task(
             self._run_subagent(
@@ -321,6 +589,8 @@ class SubagentManager:
             finished = self._task_statuses.pop(task_id, None)
             if finished is not None and finished.phase in ("done", "error"):
                 self._finished_statuses[task_id] = finished
+                _persist_subagent_status(self.workspace, session_key, finished)
+                _delete_subagent_pending(self.workspace, session_key, task_id)
             if session_key and (ids := self._session_tasks.get(session_key)):
                 ids.discard(task_id)
                 if not ids:
@@ -361,6 +631,7 @@ class SubagentManager:
             label=display_label,
             task_description=task,
             started_at=time.monotonic(),
+            chat_id=origin_chat_id,
         )
         self._task_statuses[task_id] = status
         logger.info("Running inline subagent [{}]: {}", task_id, display_label)
@@ -390,6 +661,7 @@ class SubagentManager:
             finished = self._task_statuses.pop(task_id, None)
             if finished is not None and finished.phase in ("done", "error"):
                 self._finished_statuses[task_id] = finished
+                _persist_subagent_status(self.workspace, session_key, finished)
             if session_key and (ids := self._session_tasks.get(session_key)):
                 ids.discard(task_id)
                 if not ids:
@@ -481,6 +753,8 @@ class SubagentManager:
             status.result = final_result
             status.chat_id = origin.get("chat_id")
             status.finished_at = time.monotonic()
+            self._finished_statuses[task_id] = status
+            _persist_subagent_status(self.workspace, origin.get("session_key"), status)
             await self._emit_event(status, "done")
             if announce:
                 await self._announce_result(
@@ -502,6 +776,8 @@ class SubagentManager:
             status.finished_at = time.monotonic()
             logger.exception("Subagent [{}] failed", task_id)
             final_result = f"Error: {e}"
+            self._finished_statuses[task_id] = status
+            _persist_subagent_status(self.workspace, origin.get("session_key"), status)
             await self._emit_event(status, "error")
             if announce:
                 await self._announce_result(

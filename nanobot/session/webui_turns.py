@@ -16,6 +16,7 @@ from nanobot.agent.turn_delivery import TurnRoute
 from nanobot.bus import progress as bus_progress
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import (
+    AutomationUpdateEvent,
     GoalStateSyncEvent,
     GoalStatusEvent,
     RuntimeModelUpdatedEvent,
@@ -42,7 +43,7 @@ from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import strip_think, truncate_text
 from nanobot.utils.llm_runtime import LLMRuntime
-from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
+from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
 
 WEBUI_SESSION_METADATA_KEY = "webui"
 WEBUI_TITLE_METADATA_KEY = "title"
@@ -367,6 +368,22 @@ class WebuiTurnCoordinator:
             event.status,
             started_at=event.started_at,
         )
+        if event.status == "running":
+            source = event.context.metadata.get(WEBUI_MESSAGE_SOURCE_METADATA_KEY)
+            if isinstance(source, dict) and source.get("kind") in {"cron", "local_trigger"}:
+                await self.bus.publish_outbound(
+                    outbound_message_for_event(
+                        channel=event.context.channel,
+                        chat_id=str(event.context.chat_id or ""),
+                        event=AutomationUpdateEvent(
+                            kind=source["kind"],
+                            label=source.get("label"),
+                            turn_id=event.context.metadata.get(WEBUI_TURN_METADATA_KEY),
+                            status="running",
+                        ),
+                        metadata=event.context.metadata,
+                    ),
+                )
 
     async def _handle_turn_completed_event(self, event: TurnCompleted) -> None:
         if not self._is_websocket_event(event.context):
@@ -377,6 +394,21 @@ class WebuiTurnCoordinator:
             session_key=event.context.session_key,
             latency_ms=event.latency_ms,
         )
+        source = event.context.metadata.get(WEBUI_MESSAGE_SOURCE_METADATA_KEY)
+        if isinstance(source, dict) and source.get("kind") in {"cron", "local_trigger"}:
+            await self.bus.publish_outbound(
+                outbound_message_for_event(
+                    channel=event.context.channel,
+                    chat_id=str(event.context.chat_id or ""),
+                    event=AutomationUpdateEvent(
+                        kind=source["kind"],
+                        label=source.get("label"),
+                        turn_id=event.context.metadata.get(WEBUI_TURN_METADATA_KEY),
+                        status="done",
+                    ),
+                    metadata=event.context.metadata,
+                ),
+            )
         self._schedule_title_update_from_event(event)
 
     async def _handle_goal_state_changed(self, event: GoalStateChanged) -> None:

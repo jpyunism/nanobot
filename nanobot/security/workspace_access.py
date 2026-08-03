@@ -90,6 +90,36 @@ class WorkspaceScope:
             "sandbox_status": self.sandbox_status.as_dict(),
         }
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize for persistence across gateway restarts."""
+        return {
+            "project_path": str(self.project_path),
+            "access_mode": self.access_mode,
+            "restrict_to_workspace": self.restrict_to_workspace,
+            "sandbox_status": self.sandbox_status.as_dict(),
+            "source_channel": self.source_channel,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "WorkspaceScope":
+        """Restore from a serialized dict."""
+        sandbox = data.get("sandbox_status", {})
+        return cls(
+            project_path=Path(data["project_path"]),
+            access_mode=data.get("access_mode", "restricted"),
+            restrict_to_workspace=data.get("restrict_to_workspace", False),
+            sandbox_status=WorkspaceSandboxStatus(
+                restrict_to_workspace=sandbox.get("restrict_to_workspace", False),
+                workspace_root=sandbox.get("workspace_root", ""),
+                level=sandbox.get("level", ""),
+                enforced=sandbox.get("enforced", False),
+                provider=sandbox.get("provider", ""),
+                provider_label=sandbox.get("provider_label", ""),
+                summary=sandbox.get("summary", ""),
+            ),
+            source_channel=data.get("source_channel"),
+        )
+
 
 @dataclass(frozen=True)
 class ToolWorkspace:

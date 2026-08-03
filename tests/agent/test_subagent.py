@@ -1,5 +1,7 @@
 """Tests for SubagentManager."""
 
+import json
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -181,3 +183,160 @@ async def test_subagent_forwards_fail_on_tool_error_to_runner(tmp_path):
 
     spec = sm.runner.run.call_args.args[0]
     assert spec.fail_on_tool_error is False
+
+
+@pytest.mark.asyncio
+async def test_subagent_persists_and_reloads_finished_snapshot(tmp_path):
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test"
+    sm = SubagentManager(
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=16_000,
+    )
+    sm.runner.run = AsyncMock(
+        return_value=AgentRunResult(final_content="ok", messages=[], stop_reason="completed")
+    )
+    sm._announce_result = AsyncMock()
+
+    status = SubagentStatus(
+        task_id="t1",
+        label="label",
+        task_description="task",
+        started_at=0.0,
+        chat_id="chat-1",
+    )
+
+    await sm._run_subagent(
+        "t1",
+        "task",
+        "label",
+        {"channel": "websocket", "chat_id": "chat-1", "session_key": "websocket:chat-1"},
+        status,
+        _runtime(provider),
+    )
+
+    assert sm.get_status("t1") is status
+    snapshot_path = tmp_path / "subagents" / "d2Vic29ja2V0OmNoYXQtMQ" / "t1.json"
+    assert snapshot_path.exists()
+
+    # Simulate restart: fresh manager should load the persisted snapshot.
+    sm2 = SubagentManager(
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=16_000,
+    )
+    restored = sm2.get_status("t1")
+    assert restored is not None
+    assert restored.task_id == "t1"
+    assert restored.phase == "done"
+    assert restored.result == "ok"
+    assert restored.chat_id == "chat-1"
+
+
+@pytest.mark.asyncio
+async def test_subagent_expired_snapshot_is_not_reloaded(tmp_path):
+    from nanobot.agent import subagent as subagent_module
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test"
+    sm = SubagentManager(
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=16_000,
+    )
+    sm.runner.run = AsyncMock(
+        return_value=AgentRunResult(final_content="ok", messages=[], stop_reason="completed")
+    )
+    sm._announce_result = AsyncMock()
+
+    status = SubagentStatus(
+        task_id="t1",
+        label="label",
+        task_description="task",
+        started_at=0.0,
+        chat_id="chat-1",
+    )
+
+    await sm._run_subagent(
+        "t1",
+        "task",
+        "label",
+        {"channel": "websocket", "chat_id": "chat-1", "session_key": "websocket:chat-1"},
+        status,
+        _runtime(provider),
+    )
+
+    snapshot_path = tmp_path / "subagents" / "d2Vic29ja2V0OmNoYXQtMQ" / "t1.json"
+    assert snapshot_path.exists()
+
+    # Patch TTL to a negative value so the persisted snapshot is expired.
+    original_ttl = subagent_module.SUBAGENT_STATUS_TTL_S
+    subagent_module.SUBAGENT_STATUS_TTL_S = -1.0
+    try:
+        sm2 = SubagentManager(
+            workspace=tmp_path,
+            bus=MessageBus(),
+            max_tool_result_chars=16_000,
+        )
+        assert sm2.get_status("t1") is None
+        assert not snapshot_path.exists()
+    finally:
+        subagent_module.SUBAGENT_STATUS_TTL_S = original_ttl
+
+
+@pytest.mark.asyncio
+async def test_subagent_pending_record_is_relaunched_on_resume(tmp_path):
+    """A subagent that was running during shutdown gets relaunched on startup."""
+    from nanobot.security.workspace_access import build_workspace_scope
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test"
+    bus = MessageBus()
+
+    # Create a pending record directly (simulating an unclean shutdown).
+    pending_path = tmp_path / "subagents" / "d2Vic29ja2V0OmNoYXQtMQ" / "orphan.pending.json"
+    pending_path.parent.mkdir(parents=True)
+    scope = build_workspace_scope(tmp_path / "project", "restricted")
+    pending_path.write_text(
+        json.dumps(
+            {
+                "task_id": "orphan",
+                "task": "resume me",
+                "label": "Resume",
+                "origin_channel": "websocket",
+                "origin_chat_id": "chat-1",
+                "session_key": "websocket:chat-1",
+                "origin_message_id": None,
+                "temperature": None,
+                "workspace_scope": scope.to_dict(),
+                "persisted_at": time.time(),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    sm = SubagentManager(
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=16_000,
+    )
+    sm.runner.run = AsyncMock(
+        return_value=AgentRunResult(final_content="resumed", messages=[], stop_reason="completed")
+    )
+    sm._announce_result = AsyncMock()
+
+    runtime = _runtime(provider)
+    resumed = await sm.resume_pending(lambda _session_key: runtime)
+
+    assert "orphan" in resumed
+    # Wait for the relaunched background task to finish.
+    task = sm._running_tasks.get("orphan")
+    if task is not None:
+        await task
+    # The pending record is removed once the relaunched subagent finishes.
+    assert not pending_path.exists()
+    # And the finished snapshot is available.
+    assert sm.get_status("orphan") is not None
+    assert sm.get_status("orphan").result == "resumed"

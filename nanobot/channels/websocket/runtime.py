@@ -20,6 +20,7 @@ from websockets.http11 import Request as WsRequest
 
 from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.bus.outbound_events import (
+    AutomationUpdateEvent,
     GoalStateSyncEvent,
     GoalStatusEvent,
     ProgressEvent,
@@ -27,6 +28,7 @@ from nanobot.bus.outbound_events import (
     SessionUpdatedEvent,
     TurnEndEvent,
     TurnModelUpdatedEvent,
+    WorkflowUpdateEvent,
     outbound_event_from_message,
     outbound_message_for_event,
 )
@@ -633,6 +635,15 @@ class WebSocketChannel(BaseChannel):
                 await self._send_event(connection, "error", detail="missing task_id")
                 return
             await self._send_event(connection, "subagent_subscribed", task_id=task_id)
+            manager = getattr(self.gateway.http, "subagent_manager", None)
+            if manager is not None:
+                status = manager.get_status(task_id)
+                if status is not None:
+                    payload = dict(status.to_payload())
+                    payload.setdefault("chat_id", status.chat_id)
+                    await self._send_event(
+                        connection, "subagent_update", **payload
+                    )
             return
         if t == "message":
             cid = envelope.get("chat_id")
@@ -832,6 +843,29 @@ class WebSocketChannel(BaseChannel):
                         event.status,
                         started_at=event.started_at,
                     )
+            return
+        if isinstance(event, AutomationUpdateEvent):
+            if conns:
+                await self.send_automation_update(
+                    msg.chat_id,
+                    kind=event.kind,
+                    label=event.label,
+                    turn_id=event.turn_id,
+                    status=event.status,
+                    error=event.error,
+                )
+            return
+        if isinstance(event, WorkflowUpdateEvent):
+            if conns:
+                await self.send_workflow_update(
+                    msg.chat_id,
+                    run_id=event.run_id,
+                    workflow=event.workflow,
+                    phase=event.phase,
+                    status=event.status,
+                    error=event.error,
+                    result_preview=event.result_preview,
+                )
             return
         # Signal that the agent has fully finished processing the current turn.
         if isinstance(event, TurnEndEvent):
@@ -1084,6 +1118,63 @@ class WebSocketChannel(BaseChannel):
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" subagent_update ")
+
+    async def send_automation_update(
+        self,
+        chat_id: str,
+        kind: str,
+        label: str | None = None,
+        turn_id: str | None = None,
+        status: str = "running",
+        error: str | None = None,
+    ) -> None:
+        """Push an automation status frame to subscribers of *chat_id*."""
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
+        body: dict[str, Any] = {
+            "event": "automation_update",
+            "chat_id": chat_id,
+            "kind": kind,
+            "label": label,
+            "turn_id": turn_id,
+            "status": status,
+        }
+        if error:
+            body["error"] = error
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" automation_update ")
+
+    async def send_workflow_update(
+        self,
+        chat_id: str,
+        run_id: str,
+        workflow: str,
+        phase: str | None = None,
+        status: str = "running",
+        error: str | None = None,
+        result_preview: str | None = None,
+    ) -> None:
+        """Push a workflow status frame to subscribers of *chat_id*."""
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
+        body: dict[str, Any] = {
+            "event": "workflow_update",
+            "chat_id": chat_id,
+            "run_id": run_id,
+            "workflow": workflow,
+            "phase": phase,
+            "status": status,
+        }
+        if error:
+            body["error"] = error
+        if result_preview:
+            body["result_preview"] = result_preview
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" workflow_update ")
 
     async def send_goal_status(
         self,
