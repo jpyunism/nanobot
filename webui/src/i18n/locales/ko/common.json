@@ -56,9 +56,11 @@
     },
     "apps": "앱",
     "automations": "자동화",
+    "workspace": "작업 공간",
     "skills": {
       "title": "스킬"
-    }
+    },
+    "projects": "프로젝트"
   },
   "settings": {
     "backToChat": "채팅으로 돌아가기",

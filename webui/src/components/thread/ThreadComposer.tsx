@@ -60,6 +60,7 @@ import {
   WorkspaceAccessMenu,
   WorkspaceProjectPicker,
 } from "@/components/thread/WorkspaceControls";
+import { ComposerProjectPicker } from "@/components/thread/ComposerProjectPicker";
 import {
   ModelPresetBadge,
   type ModelPresetOption,
@@ -202,6 +203,18 @@ interface ThreadComposerProps {
   quotedContext?: string | null;
   focusRequest?: number;
   onQuotedContextChange?: (text: string | null) => void;
+  /** Project capsule id currently bound to the chat (if any). */
+  projectId?: string | null;
+  /** Session key used to bind/unbind project capsules. Null in welcome composer. */
+  sessionKey?: string | null;
+  /** Called when the bound project changes after a bind/unbind. */
+  onProjectChanged?: () => void;
+  /** Project selected for the next welcome chat (no session yet). */
+  pendingProjectId?: string | null;
+  /** Called when the user selects a project in welcome composer (no session yet). */
+  onPendingProjectChange?: (projectId: string | null) => void;
+  /** Whether to show the project capsule picker in the composer footer. */
+  showProjectCapsulePicker?: boolean;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -840,6 +853,12 @@ export function ThreadComposer({
   quotedContext = null,
   focusRequest = 0,
   onQuotedContextChange,
+  projectId = null,
+  sessionKey = null,
+  onProjectChanged,
+  pendingProjectId = null,
+  onPendingProjectChange,
+  showProjectCapsulePicker = false,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -2074,6 +2093,18 @@ export function ThreadComposer({
                 canUseFullAccess={workspaceControls?.can_use_full_access !== false}
                 isHero={isHero}
                 onChange={onWorkspaceScopeChange}
+              />
+            ) : null}
+            {showProjectCapsulePicker ? (
+              <ComposerProjectPicker
+                chatId={pendingQueueKey ?? undefined}
+                sessionKey={sessionKey}
+                projectId={sessionKey ? projectId : pendingProjectId}
+                token=""
+                isHero={isHero}
+                disabled={disabled}
+                onChanged={onProjectChanged}
+                onPendingProjectChange={onPendingProjectChange}
               />
             ) : null}
           </div>

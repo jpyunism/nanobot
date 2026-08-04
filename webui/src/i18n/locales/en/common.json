@@ -57,6 +57,7 @@
     "apps": "Apps",
     "automations": "Automations",
     "workspace": "Workspace",
+    "projects": "Projects",
     "skills": {
       "title": "Skills"
     }

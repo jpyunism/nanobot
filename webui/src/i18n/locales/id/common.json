@@ -56,9 +56,11 @@
     },
     "apps": "Aplikasi",
     "automations": "Otomasi",
+    "workspace": "Ruang kerja",
     "skills": {
       "title": "Skill"
-    }
+    },
+    "projects": "Proyek"
   },
   "settings": {
     "backToChat": "Kembali ke chat",

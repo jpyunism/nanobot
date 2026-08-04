@@ -59,36 +59,16 @@
     "workspace": "Espacio de trabajo",
     "skills": {
       "title": "Habilidades"
-    }
+    },
+    "projects": "Proyectos"
   },
   "workspace": {
-    "title": "Espacio de trabajo",
-    "subtitle": "Explora y edita archivos en el espacio de trabajo actual.",
-    "refresh": "Actualizar",
-    "root": "Espacio de trabajo",
-    "up": "Subir",
-    "empty": "Esta carpeta está vacía.",
-    "newDir": "Nueva carpeta",
-    "newDirPlaceholder": "Nombre de la nueva carpeta…",
-    "rename": "Renombrar",
-    "delete": "Eliminar",
-    "save": "Guardar",
-    "binary": "Este es un archivo binario y no se puede mostrar como texto.",
-    "loadingFile": "Cargando…",
-    "deleteConfirm": "¿Eliminar este elemento?",
-    "renamePrompt": "Renombrar a:",
-    "folder": "Carpeta",
-    "actions": "Acciones",
-    "viewMode": {
-      "list": "Vista de lista",
-      "icons": "Vista de iconos",
-      "thumbnails": "Vista de miniaturas"
-    },
-    "preview": {
-      "title": "Vista previa",
-      "close": "Cerrar vista previa",
-      "download": "Descargar archivo",
-      "empty": "Selecciona un archivo para previsualizar."
+    "dialog": {
+      "defaultProject": "Espacio de trabajo predeterminado",
+      "manual": "Pegar ruta",
+      "manualPlaceholder": "/Users/name/project",
+      "usePath": "Usar ruta",
+      "absolutePathRequired": "Introduce una ruta absoluta de carpeta en esta máquina."
     }
   },
   "settings": {
@@ -870,9 +850,9 @@
     "renameTitle": "Renombrar tema",
     "renameDescription": "Elige un nombre local de la barra lateral para este tema.",
     "renamePlaceholder": "Nombre del tema",
-    "renameProjectTitle": "Rename project",
-    "renameProjectDescription": "Choose a local sidebar name for this project.",
-    "renameProjectPlaceholder": "Project name",
+    "renameProjectTitle": "Renombrar proyecto",
+    "renameProjectDescription": "Elige un nombre local de la barra lateral para este proyecto.",
+    "renameProjectPlaceholder": "Nombre del proyecto",
     "renameSave": "Save",
     "archive": "Archive",
     "unarchive": "Unarchive",
@@ -881,18 +861,18 @@
     "delete": "Eliminar",
     "newChat": "Nuevo tema",
     "groups": {
-      "pinned": "Pinned",
+      "pinned": "Fijados",
       "all": "Temas",
-      "projects": "Projects",
-      "today": "Today",
-      "yesterday": "Yesterday",
-      "earlier": "Earlier",
-      "archived": "Archived"
+      "projects": "Proyectos",
+      "today": "Hoy",
+      "yesterday": "Ayer",
+      "earlier": "Anteriores",
+      "archived": "Archivados"
     },
-    "projectNone": "No project",
-    "projectCurrent": "current",
-    "projectUnassign": "Unassign",
-    "projectAriaLabel": "Project binding"
+    "projectNone": "Sin proyecto",
+    "projectCurrent": "actual",
+    "projectUnassign": "Desvincular",
+    "projectAriaLabel": "Vinculación de proyecto"
   },
   "deleteConfirm": {
     "title": "¿Eliminar este chat?",
@@ -1288,49 +1268,40 @@
       "body": "El gateway rechazó el proyecto o modo de acceso solicitado, así que Nanobot conservó el espacio de trabajo anterior."
     }
   },
-  "workspace": {
-    "dialog": {
-      "defaultProject": "Espacio de trabajo predeterminado",
-      "manual": "Pegar ruta",
-      "manualPlaceholder": "/Users/name/project",
-      "usePath": "Usar ruta",
-      "absolutePathRequired": "Introduce una ruta absoluta de carpeta en esta máquina."
-    }
-  },
   "projects": {
-    "title": "Projects",
-    "subtitle": "Bundle instructions and files into reusable capsules for focused chats.",
-    "new": "New project",
-    "refresh": "Refresh",
-    "empty": "No projects yet. Click 'New project' to create one.",
-    "loading": "Loading…",
-    "nameLabel": "Name",
-    "namePlaceholder": "e.g. refactor-research",
-    "instructionsLabel": "Instructions",
-    "instructionsPlaceholder": "Optional instructions prepended to the agent's context when this project is attached.",
-    "noInstructions": "No instructions yet.",
-    "fileCount": "{{count}} file",
+    "title": "Proyectos",
+    "subtitle": "Agrupa instrucciones y archivos en cápsulas reutilizables para chats enfocados.",
+    "new": "Nuevo proyecto",
+    "refresh": "Actualizar",
+    "empty": "Todavía no hay proyectos. Haz clic en 'Nuevo proyecto' para crear uno.",
+    "loading": "Cargando…",
+    "nameLabel": "Nombre",
+    "namePlaceholder": "p. ej. refactor-research",
+    "instructionsLabel": "Instrucciones",
+    "instructionsPlaceholder": "Instrucciones opcionales que se anteponen al contexto del agente cuando este proyecto está vinculado.",
+    "noInstructions": "Todavía no hay instrucciones.",
+    "fileCount": "{{count}} archivo",
     "byteCount": "{{bytes}} bytes",
-    "updated": "Updated {{date}}",
-    "create": "Create",
-    "creating": "Creating…",
-    "cancel": "Cancel",
-    "delete": "Delete",
-    "deleteConfirm": "Delete this project?",
+    "updated": "Actualizado {{date}}",
+    "create": "Crear",
+    "creating": "Creando…",
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "deleteConfirm": "¿Eliminar este proyecto?",
     "detail": {
-      "ariaLabel": "Project detail",
-      "title": "Project detail",
-      "close": "Close",
-      "save": "Save",
-      "saving": "Saving…"
+      "ariaLabel": "Detalle del proyecto",
+      "title": "Detalle del proyecto",
+      "close": "Cerrar",
+      "save": "Guardar",
+      "saving": "Guardando…"
     },
     "files": {
-      "title": "Files",
-      "upload": "Upload",
-      "uploading": "Uploading…",
-      "remove": "Remove file",
-      "empty": "No files yet."
+      "title": "Archivos",
+      "upload": "Subir",
+      "uploading": "Subiendo…",
+      "remove": "Eliminar archivo",
+      "empty": "Todavía no hay archivos."
     },
-    "bindToChat": "Bind chat to project"
+    "bindToChat": "Vincular tema al proyecto"
   }
 }

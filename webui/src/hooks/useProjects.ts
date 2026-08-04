@@ -12,6 +12,7 @@ import {
   updateProject,
   uploadProjectFile,
 } from "@/lib/projects";
+import { notifyProjectsChanged } from "@/lib/project-events";
 import type { ProjectDetail, ProjectFile, ProjectSummary } from "@/lib/types";
 
 export type ProjectsState = {
@@ -69,6 +70,7 @@ export function useProjects(
     async (name: string, instructionsMd: string) => {
       const detail = await createProject(base, token, name, instructionsMd);
       await refresh();
+      notifyProjectsChanged();
       return detail;
     },
     [base, refresh, token],
@@ -78,6 +80,7 @@ export function useProjects(
     async (projectId: string) => {
       await deleteProject(base, token, projectId);
       await refresh();
+      notifyProjectsChanged();
     },
     [base, refresh, token],
   );
@@ -97,6 +100,7 @@ export function useProjects(
         instructionsMd,
       );
       await refresh();
+      notifyProjectsChanged();
       return detail;
     },
     [base, refresh, token],
@@ -120,6 +124,7 @@ export function useProjects(
         name,
         dataUrl,
       );
+      notifyProjectsChanged();
       return created;
     },
     [base, token],
@@ -128,6 +133,7 @@ export function useProjects(
   const removeFileFn = useCallback(
     async (projectId: string, fileId: string) => {
       await deleteProjectFile(base, token, projectId, fileId);
+      notifyProjectsChanged();
     },
     [base, token],
   );

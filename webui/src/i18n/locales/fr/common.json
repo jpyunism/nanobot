@@ -56,9 +56,11 @@
     },
     "apps": "Apps",
     "automations": "Automatisations",
+    "workspace": "Espace de travail",
     "skills": {
       "title": "Compétences"
-    }
+    },
+    "projects": "Projets"
   },
   "settings": {
     "backToChat": "Retour au chat",

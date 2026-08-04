@@ -56,9 +56,11 @@
     },
     "apps": "Ứng dụng",
     "automations": "Tự động hóa",
+    "workspace": "Không gian làm việc",
     "skills": {
       "title": "Kỹ năng"
-    }
+    },
+    "projects": "Dự án"
   },
   "settings": {
     "backToChat": "Quay lại chat",

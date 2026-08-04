@@ -56,9 +56,11 @@
     },
     "apps": "应用",
     "automations": "自动任务",
+    "workspace": "工作区",
     "skills": {
       "title": "技能"
-    }
+    },
+    "projects": "项目"
   },
   "settings": {
     "backToChat": "返回聊天",

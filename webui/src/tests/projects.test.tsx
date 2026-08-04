@@ -14,6 +14,7 @@ import {
   uploadProjectFile,
 } from "@/lib/projects";
 import { useProjects } from "@/hooks/useProjects";
+import { PROJECTS_CHANGED_EVENT } from "@/lib/project-events";
 
 function mockJsonResponse(body: unknown, status: number = 200) {
   return {
@@ -273,11 +274,16 @@ describe("useProjects hook", () => {
       );
     const { result } = renderHook(() => useProjects("", "tok"));
     await waitFor(() => expect(result.current.loading).toBe(false));
+    let eventCount = 0;
+    const listener = () => { eventCount += 1; };
+    window.addEventListener(PROJECTS_CHANGED_EVENT, listener);
     await act(async () => {
       await result.current.create("Demo", "");
     });
+    window.removeEventListener(PROJECTS_CHANGED_EVENT, listener);
     await waitFor(() => expect(result.current.projects).toHaveLength(1));
     expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(eventCount).toBe(1);
   });
 
   it("remove posts and refreshes the list", async () => {
@@ -288,9 +294,67 @@ describe("useProjects hook", () => {
       .mockResolvedValueOnce(mockJsonResponse({ projects: [] }));
     const { result } = renderHook(() => useProjects("", "tok"));
     await waitFor(() => expect(result.current.loading).toBe(false));
+    let eventCount = 0;
+    const listener = () => { eventCount += 1; };
+    window.addEventListener(PROJECTS_CHANGED_EVENT, listener);
     await act(async () => {
       await result.current.remove("demo");
     });
+    window.removeEventListener(PROJECTS_CHANGED_EVENT, listener);
     expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(eventCount).toBe(1);
+  });
+
+  it("save posts and emits projects-changed", async () => {
+    const fetchSpy = vi.mocked(fetch);
+    fetchSpy
+      .mockResolvedValueOnce(mockJsonResponse({ projects: [] }))
+      .mockResolvedValueOnce(mockJsonResponse({ id: "demo", name: "New", instructions_md: "x" }))
+      .mockResolvedValueOnce(mockJsonResponse({ projects: [] }));
+    const { result } = renderHook(() => useProjects("", "tok"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    let eventCount = 0;
+    const listener = () => { eventCount += 1; };
+    window.addEventListener(PROJECTS_CHANGED_EVENT, listener);
+    await act(async () => {
+      await result.current.save("demo", "New", "x");
+    });
+    window.removeEventListener(PROJECTS_CHANGED_EVENT, listener);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(eventCount).toBe(1);
+  });
+
+  it("uploadFile emits projects-changed", async () => {
+    const fetchSpy = vi.mocked(fetch);
+    const file = new File(["a"], "x.txt", { type: "text/plain" });
+    fetchSpy
+      .mockResolvedValueOnce(mockJsonResponse({ id: "f1", name: "x.txt" }));
+    const { result } = renderHook(() => useProjects("", "tok"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    let eventCount = 0;
+    const listener = () => { eventCount += 1; };
+    window.addEventListener(PROJECTS_CHANGED_EVENT, listener);
+    await act(async () => {
+      await result.current.uploadFile("demo", "x.txt", file);
+    });
+    window.removeEventListener(PROJECTS_CHANGED_EVENT, listener);
+    expect(eventCount).toBe(1);
+  });
+
+  it("removeFile emits projects-changed", async () => {
+    const fetchSpy = vi.mocked(fetch);
+    fetchSpy
+      .mockResolvedValueOnce(mockJsonResponse({ projects: [] }))
+      .mockResolvedValueOnce(mockJsonResponse({ ok: true, id: "f1" }));
+    const { result } = renderHook(() => useProjects("", "tok"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    let eventCount = 0;
+    const listener = () => { eventCount += 1; };
+    window.addEventListener(PROJECTS_CHANGED_EVENT, listener);
+    await act(async () => {
+      await result.current.removeFile("demo", "f1");
+    });
+    window.removeEventListener(PROJECTS_CHANGED_EVENT, listener);
+    expect(eventCount).toBe(1);
   });
 });
