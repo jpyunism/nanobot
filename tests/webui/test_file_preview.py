@@ -48,7 +48,7 @@ def test_download_bytes_returns_full_file_within_scope(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     target = workspace / "README.md"
-    target.write_text("# Hello\n\nbody", encoding="utf-8")
+    target.write_text("# Hello\n\nbody", encoding="utf-8", newline="")
     scope = default_workspace_scope(workspace, restrict_to_workspace=True)
 
     data, name = file_download_bytes("README.md", scope=scope)

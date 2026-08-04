@@ -61,6 +61,10 @@ async def test_tts_tool_import_error(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="fake ffmpeg is a POSIX shell script (#!/bin/sh)",
+)
 async def test_tts_tool_reencode_pipeline(monkeypatch, tmp_path) -> None:
     """Simulates the ffmpeg re-encode pipeline and asserts the MP3 is replaced."""
     fake_media = tmp_path / "media"
