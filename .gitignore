@@ -1,6 +1,8 @@
-```python
 # Python
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
 *.py[cod]
 *$py.class
 *.so
@@ -20,6 +22,26 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.MF
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git/modules/
+*.sublime-workspace
+.pytest_cache/
+.mypy_cache/
+.hypothesis/
+
+# Environment
+.env
+.env.local
+.env.*
+.venv/
+venv/
 MANIFEST
 
 # Environment
@@ -33,9 +55,7 @@ ENV/
 .idea/
 *.swp
 *.swo
-
-# Logs
-*.log
+*.tmp
 
 # OS
 .DS_Store
