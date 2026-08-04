@@ -31,6 +31,7 @@ PLUGIN = ChannelPlugin(
     dependencies=(
         "neonize>=0.4.0,<0.5.0",
         "segno>=1.6.1,<2.0.0",
+        "static-ffmpeg>=3.0,<4.0",
     ),
     webui="webui/index.ts",
 )
