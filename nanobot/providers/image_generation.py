@@ -18,7 +18,7 @@ from nanobot.providers.registry import find_by_name
 from nanobot.utils.helpers import detect_image_mime
 
 _OPENROUTER_ATTRIBUTION_HEADERS = {
-    "HTTP-Referer": "https://github.com/HKUDS/nanobot",
+    "HTTP-Referer": "https://github.com/madkoding/nanobot",
     "X-OpenRouter-Title": "nanobot",
     "X-OpenRouter-Categories": "cli-agent,personal-agent",
 }

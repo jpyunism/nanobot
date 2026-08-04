@@ -220,7 +220,7 @@ class TestConsolidatorPromptContract:
 class TestConsolidatorArchiveErrorHandling:
     """archive() must fall back to raw_archive when the LLM returns an error
     response (finish_reason == 'error'), e.g. overloaded / quota exceeded.
-    See https://github.com/HKUDS/nanobot/issues/3244
+    See https://github.com/madkoding/nanobot/issues/3244
     """
 
     async def test_archive_falls_back_on_error_finish_reason(

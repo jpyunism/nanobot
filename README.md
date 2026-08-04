@@ -21,10 +21,10 @@
     <a href="https://pepy.tech/project/nanobot-ai"><img src="https://static.pepy.tech/badge/nanobot-ai" alt="Downloads"></a>
     <img src="https://img.shields.io/badge/python-≥3.11-blue" alt="Python">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-    <a href="https://github.com/HKUDS/nanobot/graphs/commit-activity" target="_blank">
-        <img alt="Commits last month" src="https://img.shields.io/github/commit-activity/m/HKUDS/nanobot?labelColor=%20%2332b583&color=%20%2312b76a"></a>
-    <a href="https://github.com/HKUDS/nanobot/issues?q=is%3Aissue%20is%3Aclosed" target="_blank">
-        <img alt="Issues closed" src="https://img.shields.io/github/issues-search?query=repo%3AHKUDS%2Fnanobot%20is%3Aissue%20is%3Aclosed&label=issues%20closed&labelColor=%20%237d89b0&color=%20%235d6b98"></a>
+    <a href="https://github.com/madkoding/nanobot/graphs/commit-activity" target="_blank">
+        <img alt="Commits last month" src="https://img.shields.io/github/commit-activity/m/madkoding/nanobot?labelColor=%20%2332b583&color=%20%2312b76a"></a>
+    <a href="https://github.com/madkoding/nanobot/issues?q=is%3Aissue%20is%3Aclosed" target="_blank">
+        <img alt="Issues closed" src="https://img.shields.io/github/issues-search?query=repo%3Amadkoding%2Fnanobot%20is%3Aissue%20is%3Aclosed&label=issues%20closed&labelColor=%20%237d89b0&color=%20%235d6b98"></a>
     <a href="https://twitter.com/intent/follow?screen_name=nanobot_project" target="_blank">
         <img src="https://img.shields.io/twitter/follow/nanobot_project?logo=X&color=%20%23f5f5f5" alt="follow on X(Twitter)"></a>
     <a href="https://nanobot.wiki/docs/latest/getting-started/nanobot-overview"><img src="https://img.shields.io/badge/Docs-nanobot.wiki-blue?style=flat&logo=readthedocs&logoColor=white" alt="Docs"></a>
@@ -62,7 +62,7 @@ nanobot is a self-hosted personal AI agent runtime. It can:
 
 ## Releases
 
-**Latest release: [v0.3.0 - The Agency Release](https://github.com/HKUDS/nanobot/releases/tag/v0.3.0)**
+**Latest release: [v0.3.0 - The Agency Release](https://github.com/madkoding/nanobot/releases/tag/v0.3.0)**
 
 The Agency Release turns nanobot from a durable workbench into an agent runtime that can coordinate helpers, switch models per session, and carry authorized work through to completion.
 
@@ -71,7 +71,7 @@ The Agency Release turns nanobot from a durable workbench into an agent runtime 
 - Start from a guided WebUI setup with clearer execution controls
 - Apply configuration changes live across a more reliable provider, channel, and tool runtime
 
-[Read the v0.3.0 release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.3.0)
+[Read the v0.3.0 release notes](https://github.com/madkoding/nanobot/releases/tag/v0.3.0)
 
 ## Open Source Partners
 
@@ -88,7 +88,7 @@ The Agency Release turns nanobot from a durable workbench into an agent runtime 
 - **2026-07-21** Codex fast mode, visible skill references, safer configuration saves, and sturdier task cleanup.
 - **2026-07-20** Cleaner code blocks and copy actions, self-contained channels, and steadier QQ reconnects.
 
-For older updates, see the [release archive](./docs/release-archive.md) or [GitHub releases](https://github.com/HKUDS/nanobot/releases).
+For older updates, see the [release archive](./docs/release-archive.md) or [GitHub releases](https://github.com/madkoding/nanobot/releases).
 
 ## 💡 Why nanobot
 
@@ -116,13 +116,13 @@ If terminals, API keys, or config files are new to you, use the guided zero-back
 macOS / Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/install.sh | sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/install.ps1 | iex
 ```
 
 The default command installs or upgrades `nanobot-ai` from PyPI. On a fresh local desktop, it then starts `nanobot webui` so you can configure the first provider and model in **Settings → Models**. SSH, headless, existing-config, and older-release paths keep the terminal setup wizard. The installer avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. It also prints the exact command it used to run nanobot; reuse that full command below if `nanobot` is not on `PATH`.
@@ -130,21 +130,21 @@ The default command installs or upgrades `nanobot-ai` from PyPI. On a fresh loca
 To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh -s -- --dry-run
+curl -fsSL https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/install.sh | sh -s -- --dry-run
 ```
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1))) --dry-run
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/install.ps1))) --dry-run
 ```
 
 To install the current `main` branch instead, pass `--dev`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh -s -- --dev
+curl -fsSL https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/install.sh | sh -s -- --dev
 ```
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1))) --dev
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/install.ps1))) --dev
 ```
 
 If you prefer to inspect the script first, open [`scripts/install.sh`](./scripts/install.sh) or [`scripts/install.ps1`](./scripts/install.ps1).
@@ -168,7 +168,7 @@ If pip reports `externally-managed-environment` on macOS or Linux, use the one-c
 `bun` or `npm` must be available. From an activated virtual environment:
 
 ```bash
-git clone https://github.com/HKUDS/nanobot.git
+git clone https://github.com/madkoding/nanobot.git
 cd nanobot
 python -m pip install .
 ```
@@ -325,7 +325,7 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, review, and contribution guidelines.
 
-**Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
+**Roadmap** — Pick an item and [open a PR](https://github.com/madkoding/nanobot/pulls)!
 
 - **Multi-modal** — See and hear (images, voice, video)
 - **Long-term memory** — Never forget important context
@@ -339,11 +339,11 @@ Nanobot was started by [Xubin Ren](https://github.com/re-bin) as a personal open
 
 ### Contributors
 
-<a href="https://github.com/HKUDS/nanobot/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=HKUDS/nanobot&max=100&columns=12&updated=20260210" alt="Contributors" />
+<a href="https://github.com/madkoding/nanobot/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=madkoding/nanobot&max=100&columns=12&updated=20260210" alt="Contributors" />
 </a>
 
 <p align="center">
   <em> Thanks for visiting ✨ nanobot!</em><br><br>
-  <img src="https://visitor-badge.laobi.icu/badge?page_id=HKUDS.nanobot&style=for-the-badge&color=00d4ff" alt="Views">
+  <img src="https://visitor-badge.laobi.icu/badge?page_id=madkoding.nanobot&style=for-the-badge&color=00d4ff" alt="Views">
 </p>

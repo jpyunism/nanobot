@@ -2,7 +2,7 @@
 set -eu
 
 package="nanobot-ai"
-main_source="https://github.com/HKUDS/nanobot/archive/refs/heads/main.zip"
+main_source="https://github.com/madkoding/nanobot/archive/refs/heads/main.zip"
 install_target="$package"
 install_source="PyPI"
 dry_run="0"
