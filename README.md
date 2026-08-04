@@ -1,90 +1,68 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./images/readme-cover-dark.svg">
-  <img alt="nanobot README cover" src="./images/readme-cover-light.svg">
-</picture>
-
 <div align="center">
+  <img src="images/nanobot_logo.svg" alt="nanobot" width="120">
+  <h1>nanobot</h1>
+  <p><strong>Ultra-lightweight, self-hosted personal AI agent runtime</strong></p>
   <p>
     <img src="https://img.shields.io/badge/python-≥3.11-blue" alt="Python">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-    <a href="https://github.com/madkoding/nanobot/graphs/commit-activity" target="_blank">
-        <img alt="Commits last month" src="https://img.shields.io/github/commit-activity/m/madkoding/nanobot?labelColor=%20%2332b583&color=%20%2312b76a"></a>
-    <a href="https://github.com/madkoding/nanobot/issues?q=is%3Aissue%20is%3Aclosed" target="_blank">
-        <img alt="Issues closed" src="https://img.shields.io/github/issues-search?query=repo%3Amadkoding%2Fnanobot%20is%3Aissue%20is%3Aclosed&label=issues%20closed&labelColor=%20%237d89b0&color=%20%235d6b98"></a>
+    <img src="https://img.shields.io/badge/version-0.3.0-blueviolet" alt="Version">
+    <a href="https://github.com/madkoding/nanobot/graphs/commit-activity"><img src="https://img.shields.io/github/commit-activity/m/madkoding/nanobot" alt="Commits last month"></a>
+    <a href="https://github.com/madkoding/nanobot/issues?q=is%3Aissue%20is%3Aclosed"><img src="https://img.shields.io/github/issues-search?query=repo%3Amadkoding%2Fnanobot%20is%3Aissue%20is%3Aclosed&label=issues%20closed" alt="Issues closed"></a>
   </p>
 </div>
 
-🐈 **nanobot** is an open-source, ultra-lightweight personal AI agent you can truly own. It keeps the agent core small and readable while giving you the practical pieces for real long-running work: WebUI, chat channels, tools, memory, MCP, model routing, automation, and deployment.
+**nanobot** is a self-hosted personal AI agent runtime. It keeps the agent core small and readable while providing the practical pieces for real, long-running work: a browser WebUI, chat channels, tools, memory, MCP, model routing, automation, and deployment.
 
-## Start Here
+This repository is a fork of the [nanobot](https://github.com/re-bin/nanobot) project, maintained by [madkoding](https://github.com/madkoding) with production-focused additions for WhatsApp and the WebUI.
 
-| You want to... | Go to |
-|---|---|
-| Install nanobot with no terminal/config background | [Start Without Technical Background](./docs/start-without-technical-background.md) |
-| Install quickly and get one CLI reply | [Install](#-install) and [Quick Start](#-quick-start) |
-| Open the bundled browser UI | [WebUI](#-webui) |
-| Connect Telegram, Discord, WeChat, Slack, Email, Mattermost, or another chat app | [Chat Apps](./docs/chat-apps.md) |
-| Configure providers, fallback models, Langfuse, MCP, web tools, or security | [Docs](./docs/README.md) and [Configuration](./docs/configuration.md) |
-| Understand or extend the internals | [Architecture](./docs/architecture.md) and [Development](./docs/development.md) |
-| Deploy to the cloud or keep nanobot running as a service | [Deployment](./docs/deployment.md), including [one-click Render setup](./docs/deployment.md#render) |
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [What can nanobot do?](#what-can-nanobot-do)
+- [Install](#install)
+- [Quick Start](#quick-start)
+- [WebUI](#webui)
+- [Architecture](#architecture)
+- [Documentation](#documentation)
+- [Differences from upstream](#differences-from-upstream)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+## Features
+
+- **Persistent workflows** — goals, memory, tools, and chat context survive long-running work.
+- **Chat-native reach** — WebUI, API, Telegram, Feishu, Slack, Discord, Teams, email, Mattermost, WhatsApp, and more.
+- **Model freedom** — OpenAI-compatible APIs, local LLMs, image generation, search, and fallbacks.
+- **Small core** — readable internals with MCP, memory, deployment, and automation built in.
+- **Own your stack** — inspect, customize, self-host, and extend without a giant platform.
 
 ## What can nanobot do?
 
 nanobot is a self-hosted personal AI agent runtime. It can:
 
 - run in a browser WebUI or terminal
-- connect to Telegram, Discord, Slack, WeChat, Email, Mattermost, and other chat apps
+- connect to Telegram, Discord, Slack, WeChat, Email, Mattermost, WhatsApp, and other chat apps
 - use tools such as files, shell, web search, web fetch, MCP, cron, image generation, and subagents
 - keep session history and long-term memory through Dream
 - run long-horizon goals and scheduled automations
 - expose a Python SDK and OpenAI-compatible API for integrations
 - deploy as a long-running local or server-side agent gateway
 
-## Releases
+---
 
-**Latest release: [v0.3.0 - The Agency Release](https://github.com/madkoding/nanobot/releases/tag/v0.3.0)**
-
-The Agency Release turns nanobot from a durable workbench into an agent runtime that can coordinate helpers, switch models per session, and carry authorized work through to completion.
-
-- Consult inline subagents without leaving the current task
-- Switch model presets per session directly from the composer
-- Start from a guided WebUI setup with clearer execution controls
-- Apply configuration changes live across a more reliable provider, channel, and tool runtime
-
-[Read the v0.3.0 release notes](https://github.com/madkoding/nanobot/releases/tag/v0.3.0)
-
-## Recent Updates
-
-- **2026-07-24** Guided first-run setup, inline subagents, and model switching from the composer.
-- **2026-07-23** Grok OAuth with hosted X Search, live image settings, and clearer fallback models.
-- **2026-07-22** Parallel Search, live configuration reloads, richer app discovery, and a smoother mobile WebUI.
-- **2026-07-21** Codex fast mode, visible skill references, safer configuration saves, and sturdier task cleanup.
-- **2026-07-20** Cleaner code blocks and copy actions, self-contained channels, and steadier QQ reconnects.
-
-For older updates, see the [release archive](./docs/release-archive.md) or [GitHub releases](https://github.com/madkoding/nanobot/releases).
-
-## 💡 Why nanobot
-
-- **Persistent workflows**: goals, memory, tools, and chat context survive long-running work.
-- **Chat-native reach**: WebUI, API, Telegram, Feishu, Slack, Discord, Teams, email, and Mattermost.
-- **Model freedom**: OpenAI-compatible APIs, local LLMs, image generation, search, and fallbacks.
-- **Small core**: readable internals with MCP, memory, deployment, and automation built in.
-- **Own your stack**: inspect, customize, self-host, and extend without a giant platform.
-
-## 📦 Install
+## Install
 
 > [!IMPORTANT]
-> If you want the newest features and experiments, install from source.
->
-> If you want the most stable day-to-day experience, install from PyPI or with `uv`.
+> For the newest features and experiments, install from source.
+> For the most stable day-to-day experience, install from PyPI or with `uv`.
 
-Pick **one** install method:
+**Prerequisites:** Python 3.11 or newer. Git is only needed for a source install. Published packages already include the WebUI; a current-source install needs `bun` or `npm` to build it.
 
-Prerequisites: Python 3.11 or newer. Git is only needed for a source install. Published packages already include the WebUI; a current-source install needs `bun` or `npm` to build it.
-
-If terminals, API keys, or config files are new to you, use the guided zero-background walkthrough in [Start Without Technical Background](./docs/start-without-technical-background.md) instead of this compact README path.
-
-**One-command setup**
+### One-command setup
 
 macOS / Linux:
 
@@ -98,16 +76,12 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `nanobot-ai` from PyPI. On a fresh local desktop, it then starts `nanobot webui` so you can configure the first provider and model in **Settings → Models**. SSH, headless, existing-config, and older-release paths keep the terminal setup wizard. The installer avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. It also prints the exact command it used to run nanobot; reuse that full command below if `nanobot` is not on `PATH`.
+The default command installs or upgrades `nanobot-ai` from PyPI. On a fresh local desktop, it then starts `nanobot webui` so you can configure the first provider and model in **Settings → Models**. The installer avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`.
 
-To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
+To preview the plan without changing your environment, pass `--dry-run`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/install.sh | sh -s -- --dry-run
-```
-
-```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/install.ps1))) --dry-run
 ```
 
 To install the current `main` branch instead, pass `--dev`:
@@ -116,19 +90,13 @@ To install the current `main` branch instead, pass `--dev`:
 curl -fsSL https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/install.sh | sh -s -- --dev
 ```
 
-```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/install.ps1))) --dev
-```
-
-If you prefer to inspect the script first, open [`scripts/install.sh`](./scripts/install.sh) or [`scripts/install.ps1`](./scripts/install.ps1).
-
-**Install with `uv`**
+### Install with `uv`
 
 ```bash
 uv tool install nanobot-ai
 ```
 
-**Install from PyPI with pip**
+### Install from PyPI with pip
 
 ```bash
 python -m pip install nanobot-ai
@@ -136,7 +104,7 @@ python -m pip install nanobot-ai
 
 If pip reports `externally-managed-environment` on macOS or Linux, use the one-command installer, `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or install inside a virtual environment.
 
-**Install from source**
+### Install from source
 
 `bun` or `npm` must be available. From an activated virtual environment:
 
@@ -146,17 +114,15 @@ cd nanobot
 python -m pip install .
 ```
 
-On Windows, if pip reports that it cannot launch `npm`, run `cd webui`, `npm.cmd install --package-lock=false`, `npm.cmd run build`, and `cd ..` in order, then retry the install. Contributors who need an editable checkout should follow [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`webui/README.md`](./webui/README.md).
-
 Verify the install:
 
 ```bash
 nanobot --version
 ```
 
-If `nanobot` is not on `PATH`, invoke it through the method that installed it: reuse the recommended installer's command, use `uv tool run --from nanobot-ai nanobot ...` or `pipx run --spec nanobot-ai nanobot ...`, or use the Python executable from the environment where pip installed the package.
+---
 
-## 🚀 Quick Start
+## Quick Start
 
 **Open nanobot in your browser**
 
@@ -164,7 +130,7 @@ If `nanobot` is not on `PATH`, invoke it through the method that installed it: r
 nanobot webui
 ```
 
-This is the recommended first run. The launcher creates the config and workspace when needed, safely enables the local WebSocket channel after confirmation, starts the gateway, and opens [`http://127.0.0.1:8765`](http://127.0.0.1:8765). A fresh install can open before a model is configured, so setup continues in the browser instead of beginning in a JSON file. The first-run WebUI binds to localhost by default and is not exposed to your LAN.
+This is the recommended first run. The launcher creates the config and workspace when needed, safely enables the local WebSocket channel after confirmation, starts the gateway, and opens [`http://127.0.0.1:8765`](http://127.0.0.1:8765). The first-run WebUI binds to localhost by default and is not exposed to your LAN.
 
 **Your first three steps**
 
@@ -172,15 +138,11 @@ This is the recommended first run. The launcher creates the config and workspace
 2. Start a new topic and send `Hello!` to verify the connection.
 3. Before project work, choose the intended workspace and access mode from the composer.
 
-Any normal reply means the provider, model, workspace, and browser gateway are working together.
-
 **Keep nanobot running after you close the terminal**
 
 ```bash
 nanobot webui --background
 ```
-
-This starts the same full gateway as `nanobot webui`, opens the browser, and leaves channels and automations running after the launcher exits. Complete first-time model setup with foreground `nanobot webui` before switching to background mode.
 
 ```bash
 nanobot gateway status
@@ -195,9 +157,7 @@ nanobot gateway stop
 nanobot gateway
 ```
 
-This skips WebUI setup and browser opening, then runs the same complete gateway in the current terminal. It is the familiar entry point if you are coming from OpenClaw or already operate agents as long-lived services. The WebUI remains available when its channel is configured; open it manually when needed.
-
-Use `nanobot gateway --background` for the same direct entry point without keeping the terminal attached. For automatic startup and supervision by the operating system, see [Deployment](./docs/deployment.md).
+This skips WebUI setup and browser opening, then runs the same complete gateway in the current terminal. Use `nanobot gateway --background` for the same direct entry point without keeping the terminal attached.
 
 **Prefer to work entirely in the terminal?**
 
@@ -205,26 +165,17 @@ Use `nanobot gateway --background` for the same direct entry point without keepi
 nanobot agent
 ```
 
-This opens an interactive terminal chat with the same configured model, workspace, and tools while keeping its own CLI session history. It does not open a browser or keep chat channels and automations running after you exit. Type `exit` or press `Ctrl+C` when you are done.
+This opens an interactive terminal chat with the same configured model, workspace, and tools. Type `exit` or press `Ctrl+C` when you are done.
 
-For one request and an immediate exit, use:
+For one request and an immediate exit:
 
 ```bash
 nanobot agent -m "Hello!"
 ```
 
-The one-shot form is useful for a quick provider check, shell scripts, and local automation. If you have not configured a model yet, run `nanobot webui` and open **Settings → Models** first.
+---
 
-Need manual JSON, another device on your LAN, or help with provider/model matching? Continue with [Install and Quick Start](./docs/quick-start.md), [WebUI](./docs/webui.md), or [Troubleshooting](./docs/troubleshooting.md).
-
-- Want a pasteable provider setup? See [Provider Cookbook](./docs/provider-cookbook.md)
-- Want to understand provider/model matching? See [Providers and Models](./docs/providers.md)
-- Want web search, MCP, security settings, or more config options? See [Configuration](./docs/configuration.md)
-- Want to run locally? See [Ollama](./docs/providers.md#ollama), [vLLM or another local OpenAI-compatible server](./docs/providers.md#vllm-or-other-local-openai-compatible-server), and the full [provider reference](./docs/configuration.md#providers).
-- Want to run nanobot in chat apps like Telegram, Discord, WeChat or Feishu? See [Chat Apps](./docs/chat-apps.md)
-- Want Docker or Linux service deployment? See [Deployment](./docs/deployment.md)
-
-## 🌐 WebUI
+## WebUI
 
 The WebUI ships **inside the published wheel** with no separate frontend build. It is the browser workbench for persistent topics, visible agent activity, workspace controls, Apps, Skills, Automations, and settings.
 
@@ -239,72 +190,87 @@ Use it to:
 - switch models and workspaces without leaving the conversation;
 - configure providers, chat channels, Apps, Skills, and Automations from one place.
 
-See the [WebUI guide](./docs/webui.md) for LAN access, background operation, workspace controls, and the full feature tour. Working on the frontend itself? Use [`webui/README.md`](./webui/README.md).
+---
 
-## 🏗️ Architecture
+## Architecture
 
 <p align="center">
   <img src="images/nanobot_arch.png" alt="nanobot architecture" width="800">
 </p>
 
-🐈 nanobot stays lightweight by centering everything around a small agent loop: messages come in from chat apps, the LLM decides when tools are needed, and memory or skills are pulled in only as context instead of becoming a heavy orchestration layer. That keeps the core path readable and easy to extend, while still letting you add channels, tools, memory, and deployment options without turning the system into a monolith.
+nanobot stays lightweight by centering everything around a small agent loop: messages come in from chat apps, the LLM decides when tools are needed, and memory or skills are pulled in only as context instead of becoming a heavy orchestration layer. That keeps the core path readable and easy to extend, while still letting you add channels, tools, memory, and deployment options without turning the system into a monolith.
 
-## ✨ Features
+---
 
-<table align="center">
-  <tr align="center">
-    <th><p align="center">📈 24/7 Real-Time Market Analysis</p></th>
-    <th><p align="center">🚀 Full-Stack Software Engineer</p></th>
-    <th><p align="center">📅 Smart Daily Routine Manager</p></th>
-    <th><p align="center">📚 Personal Knowledge Assistant</p></th>
-  </tr>
-  <tr>
-    <td align="center"><p align="center"><img src="case/search.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="case/code.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="case/schedule.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="case/memory.gif" width="180" height="400"></p></td>
-  </tr>
-  <tr>
-    <td align="center">Discovery • Insights • Trends</td>
-    <td align="center">Develop • Deploy • Scale</td>
-    <td align="center">Schedule • Automate • Organize</td>
-    <td align="center">Learn • Memory • Reasoning</td>
-  </tr>
-</table>
-
-## 📚 Docs
+## Documentation
 
 Browse the [repo docs](./docs/README.md) for the latest features and GitHub development version.
 
-- Use task-oriented guides: [Guides](./docs/guides/README.md)
-- Start with no technical background: [Start Without Technical Background](./docs/start-without-technical-background.md)
-- Start from zero with developer basics: [Install and Quick Start](./docs/quick-start.md)
-- Understand the runtime model: [Concepts](./docs/concepts.md)
-- Read the source-level map: [Architecture](./docs/architecture.md)
-- Choose a provider/model: [Providers and Models](./docs/providers.md)
-- Copy provider setup recipes: [Provider Cookbook](./docs/provider-cookbook.md)
-- Debug setup and runtime failures: [Troubleshooting](./docs/troubleshooting.md)
-- Talk to your nanobot with familiar chat apps: [Chat App AI Agent](./docs/guides/chat-app-ai-agent.md) · [Chat Apps](./docs/chat-apps.md)
-- Schedule or trigger agent work: [Automations](./docs/automations.md)
-- Configure providers, web search, MCP, and runtime behavior: [Configuration](./docs/configuration.md)
-- Integrate nanobot with local tools and automations: [OpenAI-Compatible API](./docs/openai-api.md) · [Python SDK](./docs/python-sdk.md)
-- Run nanobot with Docker or as a Linux service: [Deployment](./docs/deployment.md)
+- [Guides](./docs/guides/README.md) — task-oriented guides
+- [Start Without Technical Background](./docs/start-without-technical-background.md)
+- [Install and Quick Start](./docs/quick-start.md)
+- [Concepts](./docs/concepts.md)
+- [Architecture](./docs/architecture.md)
+- [Providers and Models](./docs/providers.md)
+- [Provider Cookbook](./docs/provider-cookbook.md)
+- [Troubleshooting](./docs/troubleshooting.md)
+- [Chat Apps](./docs/chat-apps.md)
+- [Automations](./docs/automations.md)
+- [Configuration](./docs/configuration.md)
+- [OpenAI-Compatible API](./docs/openai-api.md) · [Python SDK](./docs/python-sdk.md)
+- [Deployment](./docs/deployment.md)
 
-## 🤝 Contribute & Roadmap
+---
+
+## Differences from upstream
+
+This fork builds on the upstream [nanobot](https://github.com/re-bin/nanobot) project and adds production-focused changes:
+
+**WhatsApp**
+- Per-group / per-sender context isolation with turn queuing and safe mentions
+- Sender identity injection into agent context for group turns
+- Contact display-name persistence and recall per chat
+- Outbound allowlist to prevent bans when messaging unknown numbers
+- Circuit-breaker for the WhatsApp 463 throttle with configurable cooldown
+- Removed auto-reconnect — manual re-link only
+- Outage prevention ("live but silent") with locks, watchdog, and persistence
+- Typing indicator on the correct chat JID
+- LID JID resolution in the outbound allowlist check
+
+**WebUI**
+- Live subagent panel (event hook + status TTL + HTTP/WS fan-out)
+- Subagent spawn chips that open the live panel
+- Live workflow panel + automation chips + clickable markdown media
+- Projects CRUD with chat binding and context injection
+- Responsive layout for mobile (full-screen sidebar on phones, drawer on tablets, support ≤380px)
+
+**Core / tools**
+- Generic background workflow engine + `/workflow` command
+- Text-to-speech tool using edge-tts
+- Native Gemma 4 tool-call and thinking-tag parsing
+- Identity-separation guardrails + `users.json` template
+- Gateway fix: foreground startup no longer aborts on its own pid
+
+**Docs / install**
+- Linux installer script and updated documentation links
+
+---
+
+## Contributing
 
 PRs welcome! The codebase is intentionally small and readable. 🤗
 
-### Contribution Flow
-
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, review, and contribution guidelines.
 
-**Roadmap** — Pick an item and [open a PR](https://github.com/madkoding/nanobot/pulls)!
+**Roadmap** — pick an item and [open a PR](https://github.com/madkoding/nanobot/pulls)!
 
-- **Multi-modal** — See and hear (images, voice, video)
-- **Long-term memory** — Never forget important context
-- **Better reasoning** — Multi-step planning and reflection
-- **More integrations** — Calendar and more
-- **Self-improvement** — Learn from feedback and mistakes
+- **Multi-modal** — see and hear (images, voice, video)
+- **Long-term memory** — never forget important context
+- **Better reasoning** — multi-step planning and reflection
+- **More integrations** — calendar and more
+- **Self-improvement** — learn from feedback and mistakes
+
+---
 
 ## License
 
