@@ -656,12 +656,12 @@ def test_fetch_skill_content_allows_cli_anything_raw_skill_url(
 
     content = manager._fetch_skill_content({
         "name": "gimp",
-        "skill_md": "https://raw.githubusercontent.com/HKUDS/CLI-Anything/main/skills/cli-anything-gimp/SKILL.md",
+        "skill_md": "https://raw.githubusercontent.com/madkoding/CLI-Anything/main/skills/cli-anything-gimp/SKILL.md",
     })
 
     assert content and "# Test" in content
     assert seen == [
-        "https://raw.githubusercontent.com/HKUDS/CLI-Anything/main/skills/cli-anything-gimp/SKILL.md"
+        "https://raw.githubusercontent.com/madkoding/CLI-Anything/main/skills/cli-anything-gimp/SKILL.md"
     ]
 
 

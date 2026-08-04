@@ -773,7 +773,7 @@ String and secret fields default to `""`, list fields to `[]`, and boolean field
 ## Local Development
 
 ```bash
-git clone https://github.com/HKUDS/nanobot.git
+git clone https://github.com/madkoding/nanobot.git
 cd nanobot
 python -m pip install -e .
 nanobot plugins list    # should show the package as "webhook"

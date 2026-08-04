@@ -55,7 +55,7 @@ _ALNUM = string.ascii_letters + string.digits
 _STANDARD_TC_KEYS = frozenset({"id", "type", "index", "function"})
 _STANDARD_FN_KEYS = frozenset({"name", "arguments"})
 _DEFAULT_OPENROUTER_HEADERS = {
-    "HTTP-Referer": "https://github.com/HKUDS/nanobot",
+    "HTTP-Referer": "https://github.com/madkoding/nanobot",
     "X-OpenRouter-Title": "nanobot",
     "X-OpenRouter-Categories": "cli-agent,personal-agent",
 }

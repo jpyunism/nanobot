@@ -21,13 +21,13 @@ The recommended installer keeps nanobot out of the system Python environment. On
 **macOS / Linux**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/install.sh | sh
 ```
 
 **Windows PowerShell**
 
 ```powershell
-irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/install.ps1 | iex
 ```
 
 The installer chooses an active virtual environment, `uv`, `pipx`, or a managed environment under `~/.nanobot/venv`. It installs the stable PyPI release unless you explicitly pass `--dev`. At the end it prints the exact command it used to run nanobot; if `nanobot` is not on `PATH`, reuse that full command in the examples below.
@@ -153,7 +153,7 @@ If pip reports `externally-managed-environment`, use the recommended installer, 
 `bun` or `npm` must be available. Activate a virtual environment first, then run:
 
 ```bash
-git clone https://github.com/HKUDS/nanobot.git
+git clone https://github.com/madkoding/nanobot.git
 cd nanobot
 python -m pip install .
 nanobot webui
@@ -209,7 +209,7 @@ Upgrade with the same method you used to install:
 
 ```bash
 # Recommended installer
-curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/install.sh | sh
 
 # Or one of these
 uv tool upgrade nanobot-ai
