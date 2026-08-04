@@ -338,6 +338,7 @@ export interface WorkspaceEntry {
   size: number;
   modified_at: number;
   created_at: number;
+  protected?: boolean;
 }
 
 export interface WorkspaceListPayload {

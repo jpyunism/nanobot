@@ -33,6 +33,26 @@ SENSITIVE_PATTERNS = {
     "Thumbs.db",
 }
 
+# Nanobot runtime paths that must remain intact for the agent to keep working.
+# These are shown in the workspace browser marked in red, but any mutating
+# operation (write, rename, move, delete, create) is blocked. They are only
+# treated as protected when they live at the root of the workspace.
+NANOBOT_RUNTIME_PROTECTED = {
+    "sessions",
+    "memory",
+    "cron",
+    "bus",
+    "logs",
+    "subagents",
+    "skills",
+    "triggers",
+    "users.json",
+    "AGENTS.md",
+    "SOUL.md",
+    "USER.md",
+    "HEARTBEAT.md",
+}
+
 
 def is_sensitive_path(path: Path, workspace_root: Path) -> bool:
     """Check if a path is sensitive and should be protected."""
@@ -62,9 +82,35 @@ def is_sensitive_path(path: Path, workspace_root: Path) -> bool:
     return False
 
 
+def _is_workspace_root_path(path: Path, workspace_root: Path) -> bool:
+    """Return True if path is a direct child of the workspace root."""
+    try:
+        rel_path = path.resolve(strict=False).relative_to(workspace_root.resolve(strict=False))
+    except (ValueError, OSError):
+        return False
+    return len(rel_path.parts) == 1
+
+
+def is_protected_runtime_path(path: Path, workspace_root: Path) -> bool:
+    """Check if a path is a nanobot runtime-critical entry (only at workspace root)."""
+    if not _is_workspace_root_path(path, workspace_root):
+        return False
+    try:
+        rel_path = path.resolve(strict=False).relative_to(workspace_root.resolve(strict=False))
+        name = rel_path.parts[0]
+    except (ValueError, OSError):
+        return False
+    return name in NANOBOT_RUNTIME_PROTECTED
+
+
 def _workspace_root(scope: WorkspaceScope) -> Path:
     """Return the effective workspace root for a scope."""
     return scope.project_path
+
+
+def _protected_runtime_message(name: str, action: str) -> str:
+    """Return a user-friendly error message for a blocked mutating action."""
+    return f"Cannot {action} '{name}': required for nanobot to function"
 
 
 def _resolve_scope_path(
@@ -135,7 +181,7 @@ def workspace_list_files(
     files = []
     try:
         for entry in sorted(target_path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
-            # Skip sensitive files/directories
+            # Skip sensitive files/directories entirely; they remain hidden.
             if is_sensitive_path(entry, workspace_root):
                 continue
 
@@ -148,6 +194,7 @@ def workspace_list_files(
                     "size": stat.st_size if entry.is_file() else 0,
                     "modified_at": stat.st_mtime,
                     "created_at": stat.st_ctime,
+                    "protected": is_protected_runtime_path(entry, workspace_root),
                 })
             except (OSError, PermissionError):
                 continue
@@ -211,8 +258,11 @@ def workspace_write_file(
     except ValueError as e:
         return {"error": str(e)}
 
-    if full_path.exists() and is_sensitive_path(full_path, workspace_root):
-        return {"error": f"Cannot modify restricted file: {path}"}
+    if full_path.exists():
+        if is_sensitive_path(full_path, workspace_root):
+            return {"error": f"Cannot modify restricted file: {path}"}
+        if is_protected_runtime_path(full_path, workspace_root):
+            return {"error": _protected_runtime_message(full_path.name, "modify")}
 
     try:
         full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -245,10 +295,16 @@ def workspace_rename(
     if ".." in new_name or "/" in new_name or "\\" in new_name:
         return {"error": "Invalid new name"}
 
+    if is_protected_runtime_path(old_full_path, workspace_root):
+        return {"error": _protected_runtime_message(old_full_path.name, "rename")}
+
     new_full_path = old_full_path.parent / new_name
 
     if is_sensitive_path(new_full_path, workspace_root):
         return {"error": "Cannot rename to restricted name"}
+
+    if is_protected_runtime_path(new_full_path, workspace_root):
+        return {"error": _protected_runtime_message(new_full_path.name, "rename to")}
 
     if new_full_path.exists():
         return {"error": "Destination already exists"}
@@ -282,8 +338,14 @@ def workspace_move(
     except ValueError as e:
         return {"error": f"Destination: {e}"}
 
+    if is_protected_runtime_path(source_full, workspace_root):
+        return {"error": _protected_runtime_message(source_full.name, "move")}
+
     if is_sensitive_path(dest_full, workspace_root):
         return {"error": "Cannot move to restricted location"}
+
+    if is_protected_runtime_path(dest_full, workspace_root):
+        return {"error": _protected_runtime_message(dest_full.name, "move to")}
 
     if dest_full.is_dir():
         dest_full = dest_full / source_full.name
@@ -313,6 +375,9 @@ def workspace_delete(
 
     if is_sensitive_path(full_path, workspace_root):
         return {"error": "Cannot delete restricted path"}
+
+    if is_protected_runtime_path(full_path, workspace_root):
+        return {"error": _protected_runtime_message(full_path.name, "delete")}
 
     try:
         if full_path.is_dir():
@@ -345,6 +410,9 @@ def workspace_create_directory(
     if is_sensitive_path(full_path, workspace_root):
         return {"error": "Cannot create restricted directory"}
 
+    if is_protected_runtime_path(full_path, workspace_root):
+        return {"error": _protected_runtime_message(full_path.name, "create")}
+
     try:
         full_path.mkdir(parents=True, exist_ok=True)
         return {
@@ -373,8 +441,14 @@ def workspace_copy(
     except ValueError as e:
         return {"error": f"Destination: {e}"}
 
+    if is_protected_runtime_path(source_full, workspace_root):
+        return {"error": _protected_runtime_message(source_full.name, "copy")}
+
     if is_sensitive_path(dest_full, workspace_root):
         return {"error": "Cannot copy to restricted location"}
+
+    if is_protected_runtime_path(dest_full, workspace_root):
+        return {"error": _protected_runtime_message(dest_full.name, "copy to")}
 
     if dest_full.is_dir():
         dest_full = dest_full / source_full.name

@@ -201,6 +201,7 @@ def _persist_subagent_pending(
     temperature: float | None,
     workspace_scope: WorkspaceScope | None,
     model_preset: str | None = None,
+    checkpoint: dict[str, Any] | None = None,
 ) -> None:
     """Persist a pending subagent record so it can be relaunched after restart."""
     directory = _subagent_snapshot_dir(workspace, session_key)
@@ -218,6 +219,8 @@ def _persist_subagent_pending(
         "model_preset": model_preset,
         "persisted_at": time.time(),
     }
+    if checkpoint is not None:
+        payload["checkpoint"] = checkpoint
     path = _pending_path(workspace, session_key, task_id)
     try:
         path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -427,6 +430,12 @@ class SubagentManager:
                     ws_scope = WorkspaceScope.from_dict(raw_scope)
                 except Exception:
                     logger.warning("Could not restore workspace scope for {}", task_id)
+            checkpoint = record.get("checkpoint")
+            initial_messages = None
+            if isinstance(checkpoint, dict):
+                initial_messages = checkpoint.get("messages")
+            if not isinstance(initial_messages, list) or not initial_messages:
+                initial_messages = None
             try:
                 await self.spawn(
                     task=record.get("task", ""),
@@ -440,7 +449,14 @@ class SubagentManager:
                     workspace_scope=ws_scope,
                     runtime=runtime,
                     task_id=task_id,
+                    initial_messages=initial_messages,
                 )
+                if initial_messages is not None:
+                    logger.info(
+                        "Resumed subagent {} from checkpoint at iteration {}",
+                        task_id,
+                        checkpoint.get("iteration", 0),
+                    )
                 resumed.append(task_id)
             except Exception:
                 logger.exception("Failed to resume subagent {}", task_id)
@@ -566,6 +582,7 @@ class SubagentManager:
         runtime: LLMRuntime | None = None,
         task_id: str | None = None,
         model_preset: str | None = None,
+        initial_messages: list[dict[str, Any]] | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         if runtime is None:
@@ -610,6 +627,7 @@ class SubagentManager:
                 runtime,
                 origin_message_id,
                 workspace_scope,
+                initial_messages=initial_messages,
             )
         )
         self._running_tasks[task_id] = bg_task
@@ -717,13 +735,46 @@ class SubagentManager:
         workspace_scope: WorkspaceScope | None = None,
         *,
         announce: bool = True,
+        initial_messages: list[dict[str, Any]] | None = None,
     ) -> str:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
 
+        _last_checkpoint_time = [time.monotonic()]
+
         async def _on_checkpoint(payload: dict) -> None:
             status.phase = payload.get("phase", status.phase)
             status.iteration = payload.get("iteration", status.iteration)
+            now = time.monotonic()
+            messages = payload.get("messages")
+            if not isinstance(messages, list) or not messages:
+                return
+            # Throttle: persist every 5 iterations or 30 seconds, whichever comes first.
+            throttle = (
+                status.iteration % 5 == 0
+                or now - _last_checkpoint_time[0] >= 30
+            )
+            if not throttle:
+                return
+            _last_checkpoint_time[0] = now
+            _persist_subagent_pending(
+                self.workspace,
+                task_id,
+                task,
+                label,
+                origin["channel"],
+                origin["chat_id"],
+                origin.get("session_key"),
+                origin_message_id,
+                None,
+                workspace_scope,
+                runtime.model_preset,
+                checkpoint={
+                    "phase": status.phase,
+                    "iteration": status.iteration,
+                    "messages": messages,
+                },
+            )
 
         try:
             root = workspace_scope.project_path if workspace_scope is not None else self.workspace
@@ -734,10 +785,19 @@ class SubagentManager:
             # Construct from the agent workspace; the bound scope below supplies the project cwd.
             tools = self._build_tools(tools_config=cfg)
             system_prompt = self._build_subagent_prompt(workspace=root)
-            messages: list[dict[str, Any]] = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": task},
-            ]
+            initial_system_prompt = system_prompt
+            if initial_messages:
+                messages = list(initial_messages)
+                # Ensure the first system message uses the current subagent prompt,
+                # so resumed subagents pick up any workspace/template changes.
+                if messages and messages[0].get("role") == "system":
+                    messages[0] = dict(messages[0])
+                    messages[0]["content"] = initial_system_prompt
+            else:
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": task},
+                ]
 
             sess_key = origin.get("session_key")
             llm_timeout = (
@@ -775,6 +835,7 @@ class SubagentManager:
                     reset_workspace_scope(token)
                 reset_request_context(request_token)
             status.phase = "done"
+            status.stop_reason = result.stop_reason
             status.stop_reason = result.stop_reason
 
             if result.stop_reason == "tool_error":

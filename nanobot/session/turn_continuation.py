@@ -26,6 +26,8 @@ SKIP_USER_PERSIST_META = "_skip_user_persist"
 
 _GOAL_CONTINUATION_KIND = "sustained_goal"
 _GOAL_CONTINUATION_SENDER = "system:continuation"
+_GATEWAY_RESUME_KIND = "gateway_resume"
+_GATEWAY_RESUME_SENDER = "system:resume"
 _GOAL_CONTINUATION_ROUNDS_KEY = "_sustained_goal_continuation_rounds"
 _MAX_GOAL_CONTINUATION_ROUNDS = 12
 _STRIPPED_INBOUND_META_KEYS = {
@@ -38,6 +40,15 @@ _STRIPPED_INBOUND_META_KEYS = {
 def internal_continuation_inbound(metadata: Mapping[str, Any] | None) -> bool:
     """True for an inbound message created by an internal continuation policy."""
     return bool(metadata and metadata.get(INTERNAL_CONTINUATION_META) is True)
+
+
+def gateway_resume_inbound(metadata: Mapping[str, Any] | None) -> bool:
+    """True for a gateway-restart resume message."""
+    if not metadata:
+        return False
+    if metadata.get(INTERNAL_CONTINUATION_META) is not True:
+        return False
+    return metadata.get(INTERNAL_CONTINUATION_KIND_META) == _GATEWAY_RESUME_KIND
 
 
 def internal_continuation_pending(metadata: Mapping[str, Any] | None) -> bool:
@@ -198,6 +209,31 @@ def _save_skip_for_turn(
     return initial_message_count
 
 
+def gateway_resume_metadata(
+    *,
+    original_channel: str,
+    original_chat_id: str,
+    run_started_at: float | None = None,
+) -> dict[str, Any]:
+    """Build metadata for a gateway-restart resume message.
+
+    The message looks like an internal continuation so it is not persisted as a
+    new user message, but its kind is distinct so callers can recognise it.
+    """
+    metadata: dict[str, Any] = {
+        INTERNAL_CONTINUATION_META: True,
+        INTERNAL_CONTINUATION_KIND_META: _GATEWAY_RESUME_KIND,
+        "gateway_resume": True,
+        "original_channel": original_channel,
+        "original_chat_id": original_chat_id,
+    }
+    if run_started_at is not None:
+        metadata[INTERNAL_CONTINUATION_RUN_STARTED_AT_META] = float(run_started_at)
+    for key in _STRIPPED_INBOUND_META_KEYS:
+        metadata.pop(key, None)
+    return metadata
+
+
 def _goal_continuation_available(
     session_metadata: Mapping[str, Any] | None,
     *,
@@ -236,6 +272,16 @@ def _internal_continuation_metadata(
     for key in _STRIPPED_INBOUND_META_KEYS:
         metadata.pop(key, None)
     return metadata
+
+
+def gateway_resume_prompt() -> str:
+    """Prompt injected after a gateway restart to continue an interrupted turn."""
+    return (
+        "The gateway was restarted while this turn was still running. "
+        "Continue from the saved context. Re-emit any pending tool calls only if "
+        "they are still necessary; otherwise continue with the next step. Do not "
+        "mention the restart to the user."
+    )
 
 
 def _goal_continuation_prompt(metadata: Mapping[str, Any] | None) -> str:

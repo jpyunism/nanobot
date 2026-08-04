@@ -1136,13 +1136,14 @@ export async function fetchWorkspaceRead(
   token: string,
   path: string,
   base: string = "",
+  signal?: AbortSignal,
 ): Promise<WorkspaceReadPayload> {
   const query = new URLSearchParams();
   query.set("path", path);
   return request<WorkspaceReadPayload>(
     `${base}/api/workspace-browser/read?${query}`,
     token,
-    undefined,
+    { signal },
     API_READ_TIMEOUT_MS,
   );
 }
@@ -1157,7 +1158,7 @@ export async function writeWorkspaceFile(
     `${base}/api/workspace-browser/write`,
     token,
     {
-      method: "POST",
+      method: "GET",
       headers: {
         [WORKSPACE_BROWSER_DATA_HEADER]: JSON.stringify({ path, content }),
       },
@@ -1176,7 +1177,7 @@ export async function renameWorkspaceEntry(
     `${base}/api/workspace-browser/rename`,
     token,
     {
-      method: "POST",
+      method: "GET",
       headers: {
         [WORKSPACE_BROWSER_DATA_HEADER]: JSON.stringify({ old_path: oldPath, new_name: newName }),
       },
@@ -1195,7 +1196,7 @@ export async function moveWorkspaceEntry(
     `${base}/api/workspace-browser/move`,
     token,
     {
-      method: "POST",
+      method: "GET",
       headers: {
         [WORKSPACE_BROWSER_DATA_HEADER]: JSON.stringify({ source_path: sourcePath, dest_path: destPath }),
       },
@@ -1213,7 +1214,7 @@ export async function deleteWorkspaceEntry(
     `${base}/api/workspace-browser/delete`,
     token,
     {
-      method: "POST",
+      method: "GET",
       headers: {
         [WORKSPACE_BROWSER_DATA_HEADER]: JSON.stringify({ path }),
       },
@@ -1231,7 +1232,7 @@ export async function createWorkspaceDirectory(
     `${base}/api/workspace-browser/mkdir`,
     token,
     {
-      method: "POST",
+      method: "GET",
       headers: {
         [WORKSPACE_BROWSER_DATA_HEADER]: JSON.stringify({ path }),
       },
@@ -1250,7 +1251,7 @@ export async function copyWorkspaceEntry(
     `${base}/api/workspace-browser/copy`,
     token,
     {
-      method: "POST",
+      method: "GET",
       headers: {
         [WORKSPACE_BROWSER_DATA_HEADER]: JSON.stringify({ source_path: sourcePath, dest_path: destPath }),
       },
@@ -1263,6 +1264,7 @@ export async function fetchWorkspaceFileBlob(
   token: string,
   path: string,
   base: string = "",
+  signal?: AbortSignal,
 ): Promise<Blob> {
   const query = new URLSearchParams();
   query.set("path", path);
@@ -1272,6 +1274,7 @@ export async function fetchWorkspaceFileBlob(
     {
       headers: { Authorization: `Bearer ${token}` },
       credentials: "same-origin",
+      signal,
     },
     API_READ_TIMEOUT_MS,
   );

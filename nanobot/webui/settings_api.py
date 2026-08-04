@@ -1354,7 +1354,7 @@ def ollama_usage_payload() -> dict[str, Any]:
             "activity": None,
             "limits": None,
         }
-    except (httpx.HTTPError, ValueError) as exc:
+    except (httpx.HTTPError, ValueError):
         return {
             "configured": True,
             "error": "network",

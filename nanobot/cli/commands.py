@@ -1676,7 +1676,7 @@ def _run_gateway(
         webui_static_dist=webui_static_dist,
     )
     sync_workspace_templates(config.workspace_path)
-    bus = MessageBus()
+    bus = MessageBus(workspace=config.workspace_path)
     runtime_events = RuntimeEventBus()
     fallback_model_observer = build_webui_fallback_model_observer(bus)
 

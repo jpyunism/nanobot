@@ -1861,7 +1861,10 @@ def _patch_cli_command_runtime(
     _patch_gateway_ports_free(monkeypatch)
 
     if message_bus is not None:
-        monkeypatch.setattr("nanobot.bus.queue.MessageBus", message_bus)
+        def _make_bus(*_args, **_kwargs):
+            return message_bus()
+
+        monkeypatch.setattr("nanobot.bus.queue.MessageBus", _make_bus)
     if session_manager is not None:
         monkeypatch.setattr("nanobot.session.manager.SessionManager", session_manager)
     if cron_service is not None:
@@ -2548,7 +2551,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
         "nanobot.providers.factory.load_provider_snapshot",
         lambda _config_path=None: _test_provider_snapshot(provider, config),
     )
-    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: bus)
+    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda *_args, **_kwargs: bus)
 
     class _FakeSession:
         def __init__(self) -> None:
@@ -2675,7 +2678,10 @@ def test_gateway_bound_cron_runs_as_session_turn(
         "nanobot.providers.factory.load_provider_snapshot",
         lambda _config_path=None: _test_provider_snapshot(provider, config),
     )
-    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: bus)
+    def _make_bus(*_args, **_kwargs):
+        return bus
+
+    monkeypatch.setattr("nanobot.bus.queue.MessageBus", _make_bus)
 
     class _FakeSessionManager:
         def __init__(self, _workspace: Path) -> None:

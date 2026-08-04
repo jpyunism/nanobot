@@ -58,6 +58,7 @@ export function sameWorkspacePath(
 export type WorkspaceViewMode = "list" | "icons" | "thumbnails";
 
 const WORKSPACE_VIEW_MODE_KEY = "nanobot.workspace.viewMode";
+const WORKSPACE_SHOW_PROTECTED_KEY = "nanobot.workspace.showProtected";
 
 const IMAGE_EXTENSIONS = new Set([
   "png",
@@ -85,5 +86,18 @@ export function loadWorkspaceViewMode(): WorkspaceViewMode {
 export function saveWorkspaceViewMode(mode: WorkspaceViewMode): void {
   if (typeof window !== "undefined") {
     localStorage.setItem(WORKSPACE_VIEW_MODE_KEY, mode);
+  }
+}
+
+export function loadWorkspaceShowProtected(): boolean {
+  const raw = typeof window !== "undefined" ? localStorage.getItem(WORKSPACE_SHOW_PROTECTED_KEY) : null;
+  if (raw === "false") return false;
+  if (raw === "true") return true;
+  return true;
+}
+
+export function saveWorkspaceShowProtected(show: boolean): void {
+  if (typeof window !== "undefined") {
+    localStorage.setItem(WORKSPACE_SHOW_PROTECTED_KEY, show ? "true" : "false");
   }
 }

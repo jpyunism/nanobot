@@ -1036,6 +1036,7 @@ export function ThreadShell({
           sessionKey={historyKey}
           onProjectChanged={onTurnEnd}
           showProjectCapsulePicker
+          token={token}
         />
       ) : (
         <ThreadComposer

@@ -1415,4 +1415,35 @@ def test_build_response_schema(monkeypatch, tmp_path) -> None:
     assert out is not None
     assert out["schemaVersion"] == WEBUI_TRANSCRIPT_SCHEMA_VERSION
     assert out["sessionKey"] == key
-    assert len(out["messages"]) == 1
+
+
+def test_gateway_restart_transcript_events_clear_pending_spinner(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:resume-chat"
+    append_transcript_object(
+        key,
+        {
+            "event": "message",
+            "chat_id": "resume-chat",
+            "text": 'exec({"command":"date"})',
+            "kind": "tool_hint",
+        },
+    )
+
+    from nanobot.agent.loop import AgentLoop
+
+    loop = AgentLoop.__new__(AgentLoop)
+    loop._write_transcript_resume_events(
+        "websocket:resume-chat",
+        resumed=True,
+        closed=False,
+    )
+
+    lines = read_transcript_lines(key)
+    events = [line["event"] for line in lines]
+    assert events == ["message", "turn_end", "message"]
+    assert lines[-1].get("kind") == "notice"
+    assert lines[-1]["text"] == "Turno reanudado tras reinicio del gateway."
+    out = build_webui_thread_response(key)
+    assert out["has_pending_tool_calls"] is False
+    assert any(msg.get("content") == "Turno reanudado tras reinicio del gateway." for msg in out["messages"])

@@ -48,6 +48,7 @@ _FORK_VOLATILE_METADATA_KEYS = {
     "goal_state",
     "pending_user_turn",
     "runtime_checkpoint",
+    "_pending_injections",
     "thread_goal",
     "title",
     "title_user_edited",
@@ -978,6 +979,8 @@ class SessionManager:
                                     fallback_preview = text
                             preview = preview or fallback_preview
                             fallback_time = datetime.fromtimestamp(path.stat().st_mtime).isoformat()
+                            has_checkpoint = bool(metadata.get("runtime_checkpoint"))
+                            has_pending_user = bool(metadata.get("pending_user_turn"))
                             sessions.append(
                                 {
                                     "key": key,
@@ -986,6 +989,9 @@ class SessionManager:
                                     "title": title,
                                     "preview": preview,
                                     "path": str(path),
+                                    "runtime_checkpoint": has_checkpoint,
+                                    "pending_user_turn": has_pending_user,
+                                    "interrupted": has_checkpoint or has_pending_user,
                                 }
                             )
             except FileNotFoundError:
@@ -993,6 +999,8 @@ class SessionManager:
             except _SESSION_DATA_ERRORS:
                 repaired = self._repair(fallback_key, path=path)
                 if repaired is not None:
+                    repaired_checkpoint = bool(repaired.metadata.get("runtime_checkpoint"))
+                    repaired_pending = bool(repaired.metadata.get("pending_user_turn"))
                     sessions.append(
                         {
                             "key": repaired.key,
@@ -1008,6 +1016,9 @@ class SessionManager:
                                 "",
                             ),
                             "path": str(path),
+                            "runtime_checkpoint": repaired_checkpoint,
+                            "pending_user_turn": repaired_pending,
+                            "interrupted": repaired_checkpoint or repaired_pending,
                         }
                     )
                 continue

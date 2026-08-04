@@ -1117,6 +1117,12 @@ class AgentLoop:
                 if resumed:
                     logger.info("Resumed {} subagent(s) after restart", resumed)
 
+            restored = await self._restore_interrupted_sessions()
+            if restored:
+                logger.info("Restored {} interrupted session(s) after restart", restored)
+
+            await self.bus.recover()
+
             while self._running:
                 try:
                     msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
@@ -1192,6 +1198,16 @@ class AgentLoop:
                             effective_key,
                         )
                     else:
+                        try:
+                            session = self.sessions.get_or_create(effective_key)
+                            self._append_pending_injection(session, pending_msg)
+                            self.sessions.save(session)
+                        except Exception:
+                            logger.debug(
+                                "Could not persist pending injection for session {}",
+                                effective_key,
+                                exc_info=True,
+                            )
                         logger.info(
                             "Routed follow-up message to pending queue for session {}",
                             effective_key,
@@ -1221,6 +1237,7 @@ class AgentLoop:
 
         delivery = self.turn_delivery_factory.unrouted(msg, session_key)
         pending: asyncio.Queue | None = None
+        task_success = False
         try:
             async with lock, gate:
                 # Only the task that owns the session lock may publish the
@@ -1247,6 +1264,7 @@ class AgentLoop:
                     )
                     for _, coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, response=response)
+                    task_success = True
                 except asyncio.CancelledError:
                     for _, coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, error=asyncio.CancelledError())
@@ -1309,9 +1327,27 @@ class AgentLoop:
                                 "Re-published {} leftover message(s) to bus for session {}",
                                 leftover, session_key,
                             )
+                    try:
+                        session = self.sessions.get_or_create(session_key)
+                        self._clear_pending_injections(session)
+                        self.sessions.save(session)
+                    except Exception:
+                        logger.debug(
+                            "Could not clear pending injections for session {}",
+                            session_key,
+                            exc_info=True,
+                        )
                     if not turn_continuation.internal_continuation_pending(msg.metadata):
                         await delivery.idle()
                     await self._publish_next_deferred_automation_turn(session_key)
+            # ACK/NACK the message once the dispatch completes. For durable
+            # queues this removes the message from processing or re-queues it.
+            # On clean shutdown we leave processing files to be recovered at
+            # the next startup so the turn-resume logic can take over.
+            if task_success:
+                await self.bus.ack_inbound(msg)
+            elif self._running:
+                await self.bus.nack_inbound(msg)
         finally:
             if pending is None:
                 await delivery.idle()
@@ -1922,11 +1958,34 @@ class AgentLoop:
         session.metadata[self._RUNTIME_CHECKPOINT_KEY] = payload
         self.sessions.save(session)
 
+    _PENDING_INJECTIONS_KEY = "_pending_injections"
+
     def _mark_pending_user_turn(self, session: Session) -> None:
         session.metadata[self._PENDING_USER_TURN_KEY] = True
 
     def _clear_pending_user_turn(self, session: Session) -> None:
         session.metadata.pop(self._PENDING_USER_TURN_KEY, None)
+
+    def _append_pending_injection(self, session: Session, msg: InboundMessage) -> None:
+        payload = {
+            "channel": msg.channel,
+            "sender_id": msg.sender_id,
+            "chat_id": msg.chat_id,
+            "content": msg.content,
+            "media": list(msg.media or []),
+            "metadata": dict(msg.metadata or {}),
+            "session_key_override": msg.session_key_override,
+        }
+        session.metadata.setdefault(self._PENDING_INJECTIONS_KEY, []).append(payload)
+
+    def _clear_pending_injections(self, session: Session) -> None:
+        session.metadata.pop(self._PENDING_INJECTIONS_KEY, None)
+
+    def _pending_injections(self, session: Session) -> list[dict[str, Any]]:
+        value = session.metadata.get(self._PENDING_INJECTIONS_KEY)
+        if isinstance(value, list):
+            return value
+        return []
 
     def _clear_runtime_checkpoint(self, session: Session) -> None:
         if self._RUNTIME_CHECKPOINT_KEY in session.metadata:
@@ -1944,13 +2003,24 @@ class AgentLoop:
             message.get("thinking_blocks"),
         )
 
-    def _restore_runtime_checkpoint(self, session: Session) -> bool:
-        """Materialize an unfinished turn into session history before a new request."""
+    def _materialize_runtime_checkpoint(
+        self,
+        session: Session,
+        *,
+        synthesize_missing: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Build the message list that restores an unfinished turn.
+
+        When ``synthesize_missing`` is True, pending tool calls are closed with
+        an error placeholder (used on the next user turn or after /stop). When
+        False, the checkpoint is materialized without placeholders so the turn
+        can be resumed by re-injecting a system resume message.
+        """
         from datetime import datetime
 
         checkpoint = session.metadata.get(self._RUNTIME_CHECKPOINT_KEY)
         if not isinstance(checkpoint, dict):
-            return False
+            return []
 
         assistant_message = checkpoint.get("assistant_message")
         completed_tool_results = checkpoint.get("completed_tool_results") or []
@@ -1976,11 +2046,23 @@ class AgentLoop:
                     "role": "tool",
                     "tool_call_id": tool_id,
                     "name": name,
-                    "content": "Error: Task interrupted before this tool finished.",
+                    "content": (
+                        "Error: Task interrupted before this tool finished."
+                        if synthesize_missing
+                        else "The gateway restarted before this tool call completed. "
+                             "Re-emit only if still necessary."
+                    ),
                     "timestamp": datetime.now().isoformat(),
                 }
             )
+        return restored_messages
 
+    def _append_checkpoint_messages(
+        self,
+        session: Session,
+        restored_messages: list[dict[str, Any]],
+    ) -> None:
+        """Append checkpoint materialization to session history, avoiding duplication."""
         overlap = 0
         max_overlap = min(len(session.messages), len(restored_messages))
         for size in range(max_overlap, 0, -1):
@@ -1994,6 +2076,20 @@ class AgentLoop:
                 break
         session.messages.extend(restored_messages[overlap:])
 
+    def _restore_runtime_checkpoint(
+        self,
+        session: Session,
+        *,
+        synthesize_missing: bool = True,
+    ) -> bool:
+        """Materialize an unfinished turn into session history before a new request."""
+        restored_messages = self._materialize_runtime_checkpoint(
+            session,
+            synthesize_missing=synthesize_missing,
+        )
+        if not restored_messages:
+            return False
+        self._append_checkpoint_messages(session, restored_messages)
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
         return True
@@ -2017,6 +2113,173 @@ class AgentLoop:
 
         self._clear_pending_user_turn(session)
         return True
+
+    @staticmethod
+    def _reconstruct_pending_injection(payload: dict[str, Any]) -> InboundMessage | None:
+        try:
+            return InboundMessage(
+                channel=payload.get("channel", "cli"),
+                sender_id=payload.get("sender_id", "user"),
+                chat_id=payload.get("chat_id", "direct"),
+                content=payload.get("content", ""),
+                media=list(payload.get("media") or []),
+                metadata=dict(payload.get("metadata") or {}),
+                session_key_override=payload.get("session_key_override"),
+            )
+        except Exception:
+            logger.warning("Skipping malformed pending injection: {}", payload)
+            return None
+
+    @staticmethod
+    def _channel_chat_id_from_session_key(session_key: str) -> tuple[str, str]:
+        """Return a sensible (channel, chat_id) pair derived from a session key."""
+        if session_key == UNIFIED_SESSION_KEY:
+            return ("cli", "direct")
+        if ":" in session_key:
+            channel, chat_id = session_key.split(":", 1)
+            return (channel, chat_id)
+        return ("cli", session_key)
+
+    def _webui_session_key(self, session_key: str) -> str:
+        """Map a session key to the websocket transcript namespace."""
+        if session_key.startswith("websocket:"):
+            return session_key
+        _, chat_id = self._channel_chat_id_from_session_key(session_key)
+        return f"websocket:{chat_id}"
+
+    def _write_transcript_resume_events(
+        self,
+        session_key: str,
+        *,
+        resumed: bool,
+        closed: bool,
+    ) -> None:
+        """Write synthetic transcript events to clear phantom spinners."""
+        try:
+            from nanobot.webui.transcript import append_transcript_object
+        except Exception:
+            return
+        webui_key = self._webui_session_key(session_key)
+        _, chat_id = self._channel_chat_id_from_session_key(session_key)
+        now_ms = int(time.time() * 1000)
+        append_transcript_object(
+            webui_key,
+            {
+                "event": "turn_end",
+                "chat_id": chat_id,
+                "reason": "gateway_restart",
+                "created_at_ms": now_ms,
+            },
+        )
+        if resumed:
+            append_transcript_object(
+                webui_key,
+                {
+                    "event": "message",
+                    "chat_id": chat_id,
+                    "role": "system",
+                    "text": "Turno reanudado tras reinicio del gateway.",
+                    "kind": "notice",
+                    "created_at_ms": now_ms,
+                },
+            )
+        elif closed:
+            append_transcript_object(
+                webui_key,
+                {
+                    "event": "message",
+                    "chat_id": chat_id,
+                    "role": "system",
+                    "text": "El gateway se reinició; el turno anterior se cerró.",
+                    "kind": "notice",
+                    "created_at_ms": now_ms,
+                },
+            )
+
+    async def _restore_interrupted_sessions(self) -> int:
+        """Resume sessions whose last turn was interrupted by a gateway restart.
+
+        Finds sessions with ``runtime_checkpoint`` or ``pending_user_turn`` flags,
+        materializes the checkpoint into session history, and re-injects a resume
+        message so the agent loop continues the interrupted turn. Sessions that
+        only have a pending user turn are closed without a retry.
+        """
+        count = 0
+        for info in self.sessions.list_sessions():
+            if not info.get("interrupted"):
+                continue
+            session_key = info["key"]
+            try:
+                session = self.sessions.get_or_create(session_key)
+            except Exception:
+                logger.exception("Could not load session {} for restart resume", session_key)
+                continue
+            try:
+                checkpoint = session.metadata.get(self._RUNTIME_CHECKPOINT_KEY)
+                has_checkpoint = isinstance(checkpoint, dict)
+                if has_checkpoint:
+                    # Materialize the checkpoint *without* error placeholders so the
+                    # resumed turn can continue the LLM's pending tool calls.
+                    checkpoint_messages = self._materialize_runtime_checkpoint(
+                        session,
+                        synthesize_missing=False,
+                    )
+                    if checkpoint_messages:
+                        self._append_checkpoint_messages(session, checkpoint_messages)
+                        # Clear the flags now so the subsequent resume message is
+                        # processed as a fresh turn and does not re-synthesize
+                        # placeholder tool errors.
+                        self._clear_runtime_checkpoint(session)
+                        self._clear_pending_user_turn(session)
+                        self.sessions.save(session)
+                        channel, chat_id = self._channel_chat_id_from_session_key(session_key)
+                        resumed_msg = InboundMessage(
+                            channel="system",
+                            sender_id=turn_continuation._GATEWAY_RESUME_SENDER,
+                            chat_id=f"{channel}:{chat_id}",
+                            content=turn_continuation.gateway_resume_prompt(),
+                            metadata=turn_continuation.gateway_resume_metadata(
+                                original_channel=channel,
+                                original_chat_id=chat_id,
+                            ),
+                            session_key_override=session_key,
+                        )
+                    await self.bus.publish_inbound(resumed_msg)
+                    for payload in self._pending_injections(session):
+                        injection = self._reconstruct_pending_injection(payload)
+                        if injection is not None:
+                            await self.bus.publish_inbound(injection)
+                    self._clear_pending_injections(session)
+                    self.sessions.save(session)
+                    self._write_transcript_resume_events(
+                        session_key,
+                        resumed=True,
+                        closed=False,
+                    )
+                    count += 1
+                    continue
+
+                if self._restore_pending_user_turn(session):
+                    self.sessions.save(session)
+                    await self._runtime_events().run_status_changed(
+                        InboundMessage(
+                            channel="cli",
+                            sender_id="system",
+                            chat_id="direct",
+                            content="",
+                        ),
+                        session_key,
+                        "idle",
+                    )
+                    self._write_transcript_resume_events(
+                        session_key,
+                        resumed=False,
+                        closed=True,
+                    )
+                    count += 1
+            except Exception:
+                logger.exception("Failed to restore interrupted session {}", session_key)
+        return count
 
     async def process_direct(
         self,

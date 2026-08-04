@@ -340,3 +340,78 @@ async def test_subagent_pending_record_is_relaunched_on_resume(tmp_path):
     # And the finished snapshot is available.
     assert sm.get_status("orphan") is not None
     assert sm.get_status("orphan").result == "resumed"
+
+
+@pytest.mark.asyncio
+async def test_subagent_resume_continues_from_checkpoint_messages(tmp_path):
+    """A pending record with a checkpoint resumes from the saved messages."""
+    from nanobot.security.workspace_access import build_workspace_scope
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test"
+    bus = MessageBus()
+
+    pending_path = tmp_path / "subagents" / "d2Vic29ja2V0OmNoYXQtMQ" / "checkpointed.pending.json"
+    pending_path.parent.mkdir(parents=True)
+    scope = build_workspace_scope(tmp_path / "project", "restricted")
+    checkpoint_messages = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "original task"},
+        {"role": "assistant", "content": "progress so far"},
+    ]
+    pending_path.write_text(
+        json.dumps(
+            {
+                "task_id": "checkpointed",
+                "task": "resume me",
+                "label": "Resume",
+                "origin_channel": "websocket",
+                "origin_chat_id": "chat-1",
+                "session_key": "websocket:chat-1",
+                "origin_message_id": None,
+                "temperature": None,
+                "workspace_scope": scope.to_dict(),
+                "persisted_at": time.time(),
+                "checkpoint": {
+                    "phase": "awaiting_tools",
+                    "iteration": 3,
+                    "messages": checkpoint_messages,
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    sm = SubagentManager(
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=16_000,
+    )
+    captured: list[dict] = []
+
+    async def _capture_run(spec):
+        captured.append({"initial_messages": spec.initial_messages})
+        return AgentRunResult(
+            final_content="resumed from checkpoint",
+            messages=spec.initial_messages,
+            stop_reason="completed",
+        )
+
+    sm.runner.run = _capture_run
+    sm._announce_result = AsyncMock()
+
+    runtime = _runtime(provider)
+    resumed = await sm.resume_pending(lambda _session_key: runtime)
+
+    assert "checkpointed" in resumed
+    task = sm._running_tasks.get("checkpointed")
+    if task is not None:
+        await task
+
+    assert len(captured) == 1
+    assert [m.get("role") for m in captured[0]["initial_messages"][:3]] == ["system", "user", "assistant"]
+    assert captured[0]["initial_messages"][1]["content"] == "original task"
+    assert captured[0]["initial_messages"][2]["content"] == "progress so far"
+    # The resumed subagent refreshes the system prompt with the current template.
+    assert "Subagent" in captured[0]["initial_messages"][0]["content"]

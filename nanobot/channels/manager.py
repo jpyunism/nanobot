@@ -816,10 +816,17 @@ class ChannelManager:
                 else:
                     logger.warning("Unknown channel: {}", msg.channel)
 
+                # Acknowledge successfully dispatched outbound messages so the
+                # durable queue can remove them from disk.
+                await self.bus.ack_outbound(msg)
+
             except asyncio.TimeoutError:
                 continue
             except asyncio.CancelledError:
                 break
+            except Exception:
+                logger.exception("Failed to dispatch outbound message to {}:{}", msg.channel, msg.chat_id)
+                await self.bus.nack_outbound(msg)
 
     @staticmethod
     async def _send_reasoning_delta(

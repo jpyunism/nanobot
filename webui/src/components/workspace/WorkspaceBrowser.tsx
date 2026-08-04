@@ -4,6 +4,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  Edit3,
+  Eye,
+  EyeOff,
   File,
   FileCode,
   FileText,
@@ -12,6 +15,7 @@ import {
   Image,
   LayoutGrid,
   List,
+  Lock,
   MoreVertical,
   RefreshCw,
   Trash2,
@@ -25,6 +29,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { MarkdownText } from "@/components/MarkdownText";
 import { useClient } from "@/providers/ClientProvider";
 import {
   createWorkspaceDirectory,
@@ -32,13 +37,16 @@ import {
   fetchWorkspaceFileBlob,
   fetchWorkspaceList,
   fetchWorkspaceRead,
+  moveWorkspaceEntry,
   renameWorkspaceEntry,
   writeWorkspaceFile,
 } from "@/lib/api";
 import type { WorkspaceEntry, WorkspaceListPayload } from "@/lib/types";
 import {
   isImageFile,
+  loadWorkspaceShowProtected,
   loadWorkspaceViewMode,
+  saveWorkspaceShowProtected,
   saveWorkspaceViewMode,
   type WorkspaceViewMode,
 } from "@/lib/workspace";
@@ -87,19 +95,42 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<WorkspaceViewMode>(() => loadWorkspaceViewMode());
+  const [showProtected, setShowProtected] = useState<boolean>(() => loadWorkspaceShowProtected());
+
+  const visibleEntries = useMemo(
+    () => entries.filter((entry) => showProtected || !entry.protected),
+    [entries, showProtected],
+  );
   const [selected, setSelected] = useState<WorkspaceEntry | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [fileIsBinary, setFileIsBinary] = useState(false);
   const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null);
+  const [markdownPreview, setMarkdownPreview] = useState(true);
   const [newDirName, setNewDirName] = useState("");
   const [creatingDir, setCreatingDir] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [draggedEntry, setDraggedEntry] = useState<WorkspaceEntry | null>(null);
+  const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
   const objectUrls = useRef<string[]>([]);
+  const previewAbortController = useRef<AbortController | null>(null);
+
+  const selectedIsMarkdown = useMemo(() => {
+    if (!selected || selected.is_directory) return false;
+    return selected.name.toLowerCase().endsWith(".md");
+  }, [selected]);
 
   const changeViewMode = useCallback((mode: WorkspaceViewMode) => {
     setViewMode(mode);
     saveWorkspaceViewMode(mode);
+  }, []);
+
+  const toggleShowProtected = useCallback(() => {
+    setShowProtected((prev) => {
+      const next = !prev;
+      saveWorkspaceShowProtected(next);
+      return next;
+    });
   }, []);
 
   const revokeObjectUrls = useCallback(() => {
@@ -137,12 +168,17 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
   useEffect(() => {
     void load("");
     return () => {
+      previewAbortController.current?.abort();
       revokeObjectUrls();
     };
   }, [load, revokeObjectUrls]);
 
   const loadPreview = useCallback(
     async (entry: WorkspaceEntry) => {
+      previewAbortController.current?.abort();
+      const controller = new AbortController();
+      previewAbortController.current = controller;
+
       setFileContent(null);
       setFileIsBinary(false);
       setSelectedImageUrl(null);
@@ -150,18 +186,21 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
 
       if (isImageFile(entry.name)) {
         try {
-          const blob = await fetchWorkspaceFileBlob(token, entry.path, base);
+          const blob = await fetchWorkspaceFileBlob(token, entry.path, base, controller.signal);
+          if (controller.signal.aborted) return;
           const url = URL.createObjectURL(blob);
           objectUrls.current.push(url);
           setSelectedImageUrl(url);
         } catch (err) {
+          if (controller.signal.aborted) return;
           setError(err instanceof Error ? err.message : String(err));
         }
         return;
       }
 
       try {
-        const payload = await fetchWorkspaceRead(token, entry.path, base);
+        const payload = await fetchWorkspaceRead(token, entry.path, base, controller.signal);
+        if (controller.signal.aborted) return;
         if (payload.error) {
           setError(payload.error);
           return;
@@ -172,6 +211,7 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
         }
         setFileContent(payload.content ?? "");
       } catch (err) {
+        if (controller.signal.aborted) return;
         setError(err instanceof Error ? err.message : String(err));
       }
     },
@@ -192,6 +232,8 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
   );
 
   const closePreview = useCallback(() => {
+    previewAbortController.current?.abort();
+    previewAbortController.current = null;
     setPreviewOpen(false);
     setSelected(null);
     setFileContent(null);
@@ -229,6 +271,14 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
 
   const onDelete = useCallback(
     async (entry: WorkspaceEntry) => {
+      if (entry.protected) {
+        setError(
+          t("workspace.protectedCannotDelete", {
+            defaultValue: `Cannot delete "${entry.name}": required for nanobot to function`,
+          }),
+        );
+        return;
+      }
       if (!confirm(t("workspace.deleteConfirm", { defaultValue: `Delete "${entry.name}"?` }))) {
         return;
       }
@@ -252,6 +302,14 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
 
   const onRename = useCallback(
     async (entry: WorkspaceEntry) => {
+      if (entry.protected) {
+        setError(
+          t("workspace.protectedCannotRename", {
+            defaultValue: `Cannot rename "${entry.name}": required for nanobot to function`,
+          }),
+        );
+        return;
+      }
       const newName = prompt(
         t("workspace.renamePrompt", { defaultValue: `Rename "${entry.name}" to:` }),
         entry.name,
@@ -272,8 +330,48 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
     [token, currentPath, load, t],
   );
 
+  const onMove = useCallback(
+    async (source: WorkspaceEntry, targetPath: string) => {
+      if (source.protected) {
+        setError(
+          t("workspace.protectedCannotMove", {
+            defaultValue: `Cannot move "${source.name}": required for nanobot to function`,
+          }),
+        );
+        return;
+      }
+      if (!targetPath) return;
+      if (source.is_directory && targetPath.startsWith(`${source.path}/`)) {
+        setError(
+          t("workspace.moveIntoSelf", { defaultValue: "Cannot move a folder into itself or its children" }),
+        );
+        return;
+      }
+      setError(null);
+      try {
+        const result = await moveWorkspaceEntry(token, source.path, targetPath, base);
+        if (result.error) {
+          setError(result.error);
+          return;
+        }
+        void load(currentPath);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [token, currentPath, load, t],
+  );
+
   const onSaveFile = useCallback(async () => {
     if (!selected || fileContent === null) return;
+    if (selected.protected) {
+      setError(
+        t("workspace.protectedCannotModify", {
+          defaultValue: `Cannot modify "${selected.name}": required for nanobot to function`,
+        }),
+      );
+      return;
+    }
     setError(null);
     try {
       const result = await writeWorkspaceFile(token, selected.path, fileContent, base);
@@ -285,7 +383,7 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [selected, fileContent, token, currentPath, load]);
+  }, [selected, fileContent, token, currentPath, load, t]);
 
   const onDownload = useCallback(async () => {
     if (!selected) return;
@@ -371,6 +469,26 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
             >
               <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
             </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(!showProtected && "text-destructive hover:text-destructive")}
+              onClick={toggleShowProtected}
+              aria-label={t(
+                showProtected ? "workspace.hideProtected" : "workspace.showProtected",
+                { defaultValue: showProtected ? "Hide protected" : "Show protected" },
+              )}
+              title={t(
+                showProtected ? "workspace.hideProtected" : "workspace.showProtected",
+                { defaultValue: showProtected ? "Hide protected" : "Show protected" },
+              )}
+            >
+              {showProtected ? (
+                <Eye className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <EyeOff className="h-4 w-4" aria-hidden="true" />
+              )}
+            </Button>
           </div>
         </header>
 
@@ -431,7 +549,23 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
         </div>
 
         {/* Main browser area */}
-        <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border/60 bg-muted/10">
+        <div
+          className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border/60 bg-muted/10"
+          onDragOver={(e) => {
+            if (draggedEntry && currentPath) {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            if (draggedEntry && currentPath) {
+              void onMove(draggedEntry, currentPath);
+            }
+            setDraggedEntry(null);
+            setDropTargetPath(null);
+          }}
+        >
           <div className="h-full overflow-auto p-3">
             {currentPath ? (
               <button
@@ -443,62 +577,102 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
                 {t("workspace.up", { defaultValue: "Up" })}
               </button>
             ) : null}
-            {entries.length === 0 && !loading ? (
+            {visibleEntries.length === 0 && !loading ? (
               <div className="px-3 py-12 text-center text-sm text-muted-foreground">
                 {t("workspace.empty", { defaultValue: "This folder is empty." })}
               </div>
             ) : viewMode === "list" ? (
               <div className="overflow-hidden rounded-md border border-border/40">
-                {entries.map((entry) => (
-                  <div
-                    key={entry.path}
-                    className={cn(
-                      "flex w-full items-center gap-2 border-t border-border/40 px-3 py-2 text-sm transition-colors first:border-t-0",
-                      selected?.path === entry.path && !entry.is_directory
-                        ? "bg-muted/40"
-                        : "hover:bg-muted/30",
-                    )}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => void openEntry(entry)}
-                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                    >
-                      {entry.is_directory ? (
-                        <Folder className="h-4 w-4 shrink-0 text-amber-500" aria-hidden />
-                      ) : (
-                        <File className="h-4 w-4 shrink-0 text-sky-500" aria-hidden />
+                {visibleEntries.map((entry) => {
+                  const isDropTarget = dropTargetPath === entry.path && entry.is_directory;
+                  return (
+                    <div
+                      key={entry.path}
+                      draggable={!entry.protected}
+                      onDragStart={(e) => {
+                        if (entry.protected) {
+                          e.preventDefault();
+                          return;
+                        }
+                        setDraggedEntry(entry);
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData("text/plain", entry.path);
+                      }}
+                      onDragOver={(e) => {
+                        if (entry.is_directory && draggedEntry && draggedEntry.path !== entry.path) {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "move";
+                          setDropTargetPath(entry.path);
+                        }
+                      }}
+                      onDragLeave={() => setDropTargetPath(null)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setDropTargetPath(null);
+                        if (draggedEntry && entry.is_directory && draggedEntry.path !== entry.path) {
+                          void onMove(draggedEntry, entry.path);
+                        }
+                        setDraggedEntry(null);
+                      }}
+                      className={cn(
+                        "flex w-full items-center gap-2 border-t border-border/40 px-3 py-2 text-sm transition-colors first:border-t-0",
+                        selected?.path === entry.path && !entry.is_directory
+                          ? "bg-muted/40"
+                          : "hover:bg-muted/30",
+                        entry.protected && "bg-destructive/5",
+                        isDropTarget && "ring-2 ring-inset ring-primary/50 bg-primary/5",
                       )}
-                      <span className="truncate font-medium text-foreground">{entry.name}</span>
-                    </button>
-                    <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
-                      {entry.is_directory ? "—" : formatBytes(entry.size)}
-                    </span>
-                    <span className="hidden shrink-0 text-xs text-muted-foreground md:inline">
-                      {formatDate(entry.modified_at)}
-                    </span>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => void onRename(entry)}
-                        aria-label={t("workspace.rename", { defaultValue: "Rename" })}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => void openEntry(entry)}
+                        className="flex min-w-0 flex-1 items-center gap-2 text-left"
                       >
-                        <File className="h-3.5 w-3.5" aria-hidden />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-destructive hover:text-destructive"
-                        onClick={() => void onDelete(entry)}
-                        aria-label={t("workspace.delete", { defaultValue: "Delete" })}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                      </Button>
+                        {entry.is_directory ? (
+                          <Folder className={cn("h-4 w-4 shrink-0", entry.protected ? "text-destructive" : "text-amber-500")} aria-hidden />
+                        ) : (
+                          <File className={cn("h-4 w-4 shrink-0", entry.protected ? "text-destructive" : "text-sky-500")} aria-hidden />
+                        )}
+                        <span className={cn("truncate font-medium", entry.protected ? "text-destructive" : "text-foreground")}>
+                          {entry.name}
+                        </span>
+                        {entry.protected ? (
+                          <Lock className="h-3 w-3 shrink-0 text-destructive" aria-hidden />
+                        ) : null}
+                      </button>
+                      <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+                        {entry.is_directory ? "—" : formatBytes(entry.size)}
+                      </span>
+                      <span className="hidden shrink-0 text-xs text-muted-foreground md:inline">
+                        {formatDate(entry.modified_at)}
+                      </span>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => void onRename(entry)}
+                          disabled={entry.protected}
+                          aria-label={t("workspace.rename", { defaultValue: "Rename" })}
+                          title={entry.protected ? t("workspace.protected", { defaultValue: "Protected" }) : t("workspace.rename", { defaultValue: "Rename" })}
+                        >
+                          <File className="h-3.5 w-3.5" aria-hidden />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive disabled:opacity-40"
+                          onClick={() => void onDelete(entry)}
+                          disabled={entry.protected}
+                          aria-label={t("workspace.delete", { defaultValue: "Delete" })}
+                          title={entry.protected ? t("workspace.protected", { defaultValue: "Protected" }) : t("workspace.delete", { defaultValue: "Delete" })}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div
@@ -509,20 +683,54 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
                     : "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6",
                 )}
               >
-                {entries.map((entry) => {
+                {visibleEntries.map((entry) => {
                   const EntryIcon = entry.is_directory ? Folder : fileIconFor(entry.name);
                   const isSelected = selected?.path === entry.path;
+                  const isDropTarget = dropTargetPath === entry.path && entry.is_directory;
                   return (
                     <button
                       key={entry.path}
                       type="button"
+                      draggable={!entry.protected}
+                      onDragStart={(e) => {
+                        if (entry.protected) {
+                          e.preventDefault();
+                          return;
+                        }
+                        setDraggedEntry(entry);
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData("text/plain", entry.path);
+                      }}
+                      onDragOver={(e) => {
+                        if (entry.is_directory && draggedEntry && draggedEntry.path !== entry.path) {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "move";
+                          setDropTargetPath(entry.path);
+                        }
+                      }}
+                      onDragLeave={() => setDropTargetPath(null)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setDropTargetPath(null);
+                        if (draggedEntry && entry.is_directory && draggedEntry.path !== entry.path) {
+                          void onMove(draggedEntry, entry.path);
+                        }
+                        setDraggedEntry(null);
+                      }}
                       onClick={() => void openEntry(entry)}
                       onDoubleClick={() => entry.is_directory && void load(entry.path)}
                       className={cn(
                         "group relative flex flex-col items-center overflow-hidden rounded-lg border border-border/50 bg-background p-3 text-center transition-colors hover:border-border hover:bg-muted/40",
                         isSelected && !entry.is_directory && "border-primary/40 bg-primary/5",
+                        entry.protected && "border-destructive/30 bg-destructive/5",
+                        isDropTarget && "ring-2 ring-inset ring-primary/50 bg-primary/5",
                       )}
                     >
+                      {entry.protected ? (
+                        <div className="absolute right-1 top-1 z-10 rounded-full bg-destructive/10 p-0.5">
+                          <Lock className="h-3 w-3 text-destructive" aria-hidden />
+                        </div>
+                      ) : null}
                       <div className="absolute right-1 top-1 opacity-0 transition-opacity group-hover:opacity-100">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -537,12 +745,16 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => void onRename(entry)}>
+                            <DropdownMenuItem
+                              onClick={() => void onRename(entry)}
+                              disabled={entry.protected}
+                            >
                               {t("workspace.rename", { defaultValue: "Rename" })}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-destructive focus:text-destructive"
                               onClick={() => void onDelete(entry)}
+                              disabled={entry.protected}
                             >
                               {t("workspace.delete", { defaultValue: "Delete" })}
                             </DropdownMenuItem>
@@ -556,13 +768,15 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
                           <EntryIcon
                             className={cn(
                               "h-12 w-12 shrink-0",
-                              entry.is_directory ? "text-amber-500" : "text-sky-500",
+                              entry.is_directory
+                                ? entry.protected ? "text-destructive" : "text-amber-500"
+                                : entry.protected ? "text-destructive" : "text-sky-500",
                             )}
                             aria-hidden
                           />
                         )}
                       </div>
-                      <span className="w-full truncate text-xs font-medium text-foreground">
+                      <span className={cn("w-full truncate text-xs font-medium", entry.protected ? "text-destructive" : "text-foreground")}>
                         {entry.name}
                       </span>
                       <span className="mt-0.5 w-full truncate text-[10px] text-muted-foreground">
@@ -592,6 +806,30 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
               {selected?.name}
             </span>
           </div>
+          {selectedIsMarkdown ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0"
+              onClick={() => setMarkdownPreview((prev) => !prev)}
+              aria-label={
+                markdownPreview
+                  ? t("workspace.preview.edit", { defaultValue: "Edit" })
+                  : t("workspace.preview.preview", { defaultValue: "Preview" })
+              }
+              title={
+                markdownPreview
+                  ? t("workspace.preview.edit", { defaultValue: "Edit" })
+                  : t("workspace.preview.preview", { defaultValue: "Preview" })
+              }
+            >
+              {markdownPreview ? (
+                <Edit3 className="h-4 w-4" aria-hidden />
+              ) : (
+                <Eye className="h-4 w-4" aria-hidden />
+              )}
+            </Button>
+          ) : null}
           <Button
             variant="ghost"
             size="icon"
@@ -640,17 +878,34 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
             </div>
           ) : fileContent !== null ? (
             <div className="flex h-full flex-col gap-2">
-              <div className="flex justify-end">
+              <div className="flex justify-end gap-2">
+                {selectedIsMarkdown ? (
+                  <Button
+                    size="sm"
+                    variant={markdownPreview ? "outline" : "default"}
+                    onClick={() => setMarkdownPreview((prev) => !prev)}
+                  >
+                    {markdownPreview
+                      ? t("workspace.preview.edit", { defaultValue: "Edit" })
+                      : t("workspace.preview.preview", { defaultValue: "Preview" })}
+                  </Button>
+                ) : null}
                 <Button size="sm" onClick={() => void onSaveFile()}>
                   {t("workspace.save", { defaultValue: "Save" })}
                 </Button>
               </div>
-              <textarea
-                value={fileContent}
-                onChange={(e) => setFileContent(e.target.value)}
-                spellCheck={false}
-                className="min-h-[16rem] flex-1 resize-y rounded-md border border-border/60 bg-background p-3 font-mono text-xs text-foreground outline-none focus:border-primary/50"
-              />
+              {selectedIsMarkdown && markdownPreview ? (
+                <div className="prose prose-sm dark:prose-invert max-w-none flex-1 overflow-auto rounded-md border border-border/60 bg-background p-3">
+                  <MarkdownText>{fileContent}</MarkdownText>
+                </div>
+              ) : (
+                <textarea
+                  value={fileContent}
+                  onChange={(e) => setFileContent(e.target.value)}
+                  spellCheck={false}
+                  className="min-h-[16rem] flex-1 resize-y rounded-md border border-border/60 bg-background p-3 font-mono text-xs text-foreground outline-none focus:border-primary/50"
+                />
+              )}
             </div>
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">

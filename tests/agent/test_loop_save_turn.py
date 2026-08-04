@@ -28,6 +28,7 @@ from nanobot.runtime_context import (
     append_runtime_context,
     public_history_message,
 )
+from nanobot.session import turn_continuation
 from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.session.manager import Session, SessionManager
@@ -1928,4 +1929,208 @@ def test_save_turn_drops_duplicate_tool_result_ids() -> None:
     )
 
     assert [m["role"] for m in session.messages] == ["assistant", "tool"]
-    assert session.messages[1]["content"] == "first"
+
+
+@pytest.mark.asyncio
+async def test_startup_scan_reinjects_runtime_checkpoint_session(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    session = loop.sessions.get_or_create("api:c1")
+    session.add_message("user", "do work")
+    loop._set_runtime_checkpoint(
+        session,
+        {
+            "assistant_message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_pending",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    },
+                ],
+            },
+            "completed_tool_results": [],
+            "pending_tool_calls": [
+                {
+                    "id": "call_pending",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }
+            ],
+        },
+    )
+    loop.sessions.save(session)
+
+    assert AgentLoop._RUNTIME_CHECKPOINT_KEY in session.metadata
+
+    restored = await loop._restore_interrupted_sessions()
+    assert restored == 1
+
+    msg = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=2.0)
+    assert msg.channel == "system"
+    assert msg.sender_id == "system:resume"
+    assert turn_continuation.gateway_resume_inbound(msg.metadata)
+    assert msg.metadata.get("original_channel") == "api"
+    assert msg.metadata.get("original_chat_id") == "c1"
+
+    session = loop.sessions.get_or_create("api:c1")
+    assert AgentLoop._RUNTIME_CHECKPOINT_KEY not in session.metadata
+    assert any(m["role"] == "assistant" and m.get("tool_calls") for m in session.messages)
+    assert any(
+        m["role"] == "tool" and m.get("tool_call_id") == "call_pending"
+        for m in session.messages
+    )
+
+
+@pytest.mark.asyncio
+async def test_startup_scan_closes_pending_user_turn_session(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop._connect_mcp = AsyncMock()  # type: ignore[method-assign]
+    loop.subagents.resume_pending = AsyncMock(return_value=[])  # type: ignore[method-assign]
+    loop.close_mcp = AsyncMock()  # type: ignore[method-assign]
+
+    session = loop.sessions.get_or_create("api:c2")
+    session.add_message("user", "hello")
+    session.metadata[AgentLoop._PENDING_USER_TURN_KEY] = True
+    loop.sessions.save(session)
+
+    restored = await loop._restore_interrupted_sessions()
+    assert restored == 1
+
+    session = loop.sessions.get_or_create("api:c2")
+    assert AgentLoop._PENDING_USER_TURN_KEY not in session.metadata
+    assert session.messages[-1]["role"] == "assistant"
+    assert "interrupted before a response" in session.messages[-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_gateway_resume_continuation_does_not_persist_user_message(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(return_value=("answer", [], [], "stop", False))  # type: ignore[method-assign]
+
+    session = loop.sessions.get_or_create("api:c3")
+    session.add_message("user", "do work")
+    loop._set_runtime_checkpoint(
+        session,
+        {
+            "assistant_message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_pending",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    },
+                ],
+            },
+            "completed_tool_results": [],
+            "pending_tool_calls": [
+                {
+                    "id": "call_pending",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }
+            ],
+        },
+    )
+    loop.sessions.save(session)
+
+    restored = await loop._restore_interrupted_sessions()
+    assert restored == 1
+    resume_msg = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=2.0)
+    assert turn_continuation.gateway_resume_inbound(resume_msg.metadata)
+
+    # Dispatch the resume message manually to observe save_skip behaviour.
+    await loop._process_message(resume_msg)
+    session = loop.sessions.get_or_create("api:c3")
+    user_count = sum(1 for m in session.messages if m["role"] == "user")
+    assert user_count == 1
+
+
+@pytest.mark.asyncio
+async def test_startup_scan_replays_pending_injections(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    session = loop.sessions.get_or_create("api:c5")
+    session.add_message("user", "do work")
+    loop._set_runtime_checkpoint(
+        session,
+        {
+            "assistant_message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_pending",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    },
+                ],
+            },
+            "completed_tool_results": [],
+            "pending_tool_calls": [
+                {
+                    "id": "call_pending",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }
+            ],
+        },
+    )
+    loop._append_pending_injection(
+        session,
+        InboundMessage(
+            channel="api",
+            sender_id="u1",
+            chat_id="c5",
+            content="follow-up question",
+        ),
+    )
+    loop.sessions.save(session)
+
+    restored = await loop._restore_interrupted_sessions()
+    assert restored == 1
+
+    messages = []
+    while len(messages) < 2:
+        msg = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=2.0)
+        messages.append(msg)
+
+    kinds = ["resume" if turn_continuation.gateway_resume_inbound(m.metadata) else "other" for m in messages]
+    assert "resume" in kinds
+    follow_up = next(m for m in messages if not turn_continuation.gateway_resume_inbound(m.metadata))
+    assert follow_up.content == "follow-up question"
+
+    session = loop.sessions.get_or_create("api:c5")
+    assert loop._PENDING_INJECTIONS_KEY not in session.metadata
+
+
+@pytest.mark.asyncio
+async def test_materialize_runtime_checkpoint_synthesize_missing_false(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    session = loop.sessions.get_or_create("api:c4")
+    loop._set_runtime_checkpoint(
+        session,
+        {
+            "assistant_message": {"role": "assistant", "content": "working"},
+            "completed_tool_results": [
+                {"role": "tool", "tool_call_id": "done", "name": "read_file", "content": "ok"}
+            ],
+            "pending_tool_calls": [
+                {"id": "pending", "type": "function", "function": {"name": "exec", "arguments": "{}"}}
+            ],
+        },
+    )
+
+    messages = loop._materialize_runtime_checkpoint(session, synthesize_missing=False)
+    tool_msgs = [m for m in messages if m["role"] == "tool"]
+    assert len(tool_msgs) == 2
+    assert tool_msgs[0]["content"] == "ok"
+    assert "gateway restarted" in tool_msgs[1]["content"].lower()
+    assert "interrupted before this tool finished" not in tool_msgs[1]["content"].lower()

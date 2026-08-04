@@ -215,6 +215,8 @@ interface ThreadComposerProps {
   onPendingProjectChange?: (projectId: string | null) => void;
   /** Whether to show the project capsule picker in the composer footer. */
   showProjectCapsulePicker?: boolean;
+  /** Auth token used for project capsule bind/unbind. */
+  token?: string;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -859,6 +861,7 @@ export function ThreadComposer({
   pendingProjectId = null,
   onPendingProjectChange,
   showProjectCapsulePicker = false,
+  token = "",
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -2100,7 +2103,7 @@ export function ThreadComposer({
                 chatId={pendingQueueKey ?? undefined}
                 sessionKey={sessionKey}
                 projectId={sessionKey ? projectId : pendingProjectId}
-                token=""
+                token={token}
                 isHero={isHero}
                 disabled={disabled}
                 onChanged={onProjectChanged}
