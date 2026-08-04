@@ -54,3 +54,36 @@ export function sameWorkspacePath(
   if (!a || !b) return false;
   return normalizeWorkspacePath(a) === normalizeWorkspacePath(b);
 }
+
+export type WorkspaceViewMode = "list" | "icons" | "thumbnails";
+
+const WORKSPACE_VIEW_MODE_KEY = "nanobot.workspace.viewMode";
+
+const IMAGE_EXTENSIONS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+  "ico",
+  "svg",
+  "avif",
+]);
+
+export function isImageFile(name: string): boolean {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  return IMAGE_EXTENSIONS.has(ext);
+}
+
+export function loadWorkspaceViewMode(): WorkspaceViewMode {
+  const raw = typeof window !== "undefined" ? localStorage.getItem(WORKSPACE_VIEW_MODE_KEY) : null;
+  if (raw === "list" || raw === "icons" || raw === "thumbnails") return raw;
+  return "list";
+}
+
+export function saveWorkspaceViewMode(mode: WorkspaceViewMode): void {
+  if (typeof window !== "undefined") {
+    localStorage.setItem(WORKSPACE_VIEW_MODE_KEY, mode);
+  }
+}

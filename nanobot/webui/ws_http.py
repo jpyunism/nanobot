@@ -27,6 +27,7 @@ from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
 from nanobot.runtime_context import public_history_messages
+from nanobot.security.workspace_access import WorkspaceScope
 from nanobot.triggers.local_types import LocalTrigger
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
 from nanobot.webui.file_preview import (
@@ -36,16 +37,6 @@ from nanobot.webui.file_preview import (
     file_preview_payload,
 )
 from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
-from nanobot.webui.workspace_browser_api import (
-    workspace_copy,
-    workspace_create_directory,
-    workspace_delete,
-    workspace_list_files,
-    workspace_move,
-    workspace_read_file,
-    workspace_rename,
-    workspace_write_file,
-)
 from nanobot.webui.http_utils import (
     case_insensitive_header as _case_insensitive_header,
 )
@@ -115,8 +106,18 @@ from nanobot.webui.sidebar_state import (
 from nanobot.webui.skills_api import webui_skill_detail_payload, webui_skills_payload
 from nanobot.webui.thread_disk import delete_webui_thread
 from nanobot.webui.transcript import build_webui_thread_response
+from nanobot.webui.workspace_browser_api import (
+    workspace_copy,
+    workspace_create_directory,
+    workspace_delete,
+    workspace_file_bytes,
+    workspace_list_files,
+    workspace_move,
+    workspace_read_file,
+    workspace_rename,
+    workspace_write_file,
+)
 from nanobot.webui.workspaces import WebUIWorkspaceController
-from nanobot.security.workspace_access import WorkspaceScope
 
 _SLOW_WEBUI_HTTP_LOG_MS = 1_000
 _AUTOMATION_VALUES_HEADER = "X-Nanobot-Automation-Values"
@@ -660,6 +661,8 @@ class GatewayHTTPHandler:
             return self._handle_workspace_browser_mkdir(request)
         if got == "/api/workspace-browser/copy":
             return self._handle_workspace_browser_copy(request)
+        if got == "/api/workspace-browser/raw":
+            return self._handle_workspace_browser_raw(request)
         return None
 
     def _workspace_browser_scope(self, request: WsRequest) -> WorkspaceScope:
@@ -787,6 +790,23 @@ class GatewayHTTPHandler:
         if payload.get("error"):
             return _http_error(400, payload["error"])
         return _http_json_response(payload)
+
+    def _handle_workspace_browser_raw(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        path = _query_first(query, "path") or ""
+        scope = self._workspace_browser_scope(request)
+        payload = workspace_file_bytes(path, scope=scope)
+        if payload.get("error"):
+            return _http_error(400, payload["error"])
+        return _http_response(
+            payload["data"],
+            content_type=payload["mime_type"],
+            extra_headers=[
+                ("Content-Disposition", f"inline; filename*=UTF-8''{quote(payload['name'])}"),
+            ],
+        )
 
     async def _handle_sessions_list(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):

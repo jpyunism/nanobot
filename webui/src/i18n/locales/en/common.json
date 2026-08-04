@@ -76,7 +76,20 @@
     "binary": "This is a binary file and cannot be displayed as text.",
     "loadingFile": "Loading…",
     "deleteConfirm": "Delete this item?",
-    "renamePrompt": "Rename to:"
+    "renamePrompt": "Rename to:",
+    "folder": "Folder",
+    "actions": "Actions",
+    "viewMode": {
+      "list": "List view",
+      "icons": "Icon view",
+      "thumbnails": "Thumbnail view"
+    },
+    "preview": {
+      "title": "Preview",
+      "close": "Close preview",
+      "download": "Download file",
+      "empty": "Select a file to preview."
+    }
   },
   "projects": {
     "title": "Projects",

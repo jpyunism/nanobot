@@ -1258,3 +1258,26 @@ export async function copyWorkspaceEntry(
     API_READ_TIMEOUT_MS,
   );
 }
+
+export async function fetchWorkspaceFileBlob(
+  token: string,
+  path: string,
+  base: string = "",
+): Promise<Blob> {
+  const query = new URLSearchParams();
+  query.set("path", path);
+  const url = `${base}/api/workspace-browser/raw?${query}`;
+  const res = await fetchWithTimeout(
+    url,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      credentials: "same-origin",
+    },
+    API_READ_TIMEOUT_MS,
+  );
+  if (!res.ok) {
+    const text = (await res.text().catch(() => "")).trim();
+    throw new ApiError(res.status, text || `HTTP ${res.status}`);
+  }
+  return res.blob();
+}

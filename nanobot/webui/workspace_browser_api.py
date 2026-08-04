@@ -6,7 +6,7 @@ respecting workspace security policies and protecting sensitive files.
 
 from __future__ import annotations
 
-import os
+import mimetypes
 import shutil
 from pathlib import Path
 from typing import Any
@@ -166,8 +166,6 @@ def workspace_read_file(
     scope: WorkspaceScope,
 ) -> dict[str, Any]:
     """Read the contents of a file in the workspace."""
-    workspace_root = _workspace_root(scope)
-
     try:
         full_path = _resolve_scope_path(path, scope)
     except ValueError as e:
@@ -393,3 +391,35 @@ def workspace_copy(
         }
     except (OSError, PermissionError) as e:
         return {"error": f"Cannot copy: {e}"}
+
+
+def workspace_file_bytes(
+    path: str,
+    scope: WorkspaceScope,
+) -> dict[str, Any]:
+    """Return raw file contents with guessed MIME type for the workspace browser.
+
+    This is used for image thumbnails/preview for files that are not text.
+    Respects the same workspace scope and sensitive-path protections as read."""
+    try:
+        full_path = _resolve_scope_path(path, scope)
+    except ValueError as e:
+        return {"error": str(e)}
+
+    if not full_path.is_file():
+        return {"error": "Path is not a file"}
+
+    content_type, _ = mimetypes.guess_type(full_path.name)
+    if not content_type:
+        content_type = "application/octet-stream"
+
+    try:
+        data = full_path.read_bytes()
+    except (OSError, PermissionError) as e:
+        return {"error": f"Cannot read file: {e}"}
+
+    return {
+        "data": data,
+        "mime_type": content_type,
+        "name": full_path.name,
+    }

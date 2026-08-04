@@ -76,7 +76,20 @@
     "binary": "Este es un archivo binario y no se puede mostrar como texto.",
     "loadingFile": "Cargando…",
     "deleteConfirm": "¿Eliminar este elemento?",
-    "renamePrompt": "Renombrar a:"
+    "renamePrompt": "Renombrar a:",
+    "folder": "Carpeta",
+    "actions": "Acciones",
+    "viewMode": {
+      "list": "Vista de lista",
+      "icons": "Vista de iconos",
+      "thumbnails": "Vista de miniaturas"
+    },
+    "preview": {
+      "title": "Vista previa",
+      "close": "Cerrar vista previa",
+      "download": "Descargar archivo",
+      "empty": "Selecciona un archivo para previsualizar."
+    }
   },
   "settings": {
     "backToChat": "Volver al chat",
