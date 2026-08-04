@@ -41,6 +41,7 @@ def default_token_usage_state() -> dict[str, Any]:
         "schema_version": TOKEN_USAGE_SCHEMA_VERSION,
         "days": {},
         "updated_at": None,
+        "provider_tokens_by_provider": {},
     }
 
 
@@ -225,6 +226,7 @@ def record_token_usage(
     source: str = "user",
     timezone_name: str | None = None,
     now: datetime | None = None,
+    provider: str | None = None,
 ) -> dict[str, Any]:
     normalized = _normalize_usage(usage)
     if not normalized:
@@ -241,6 +243,15 @@ def record_token_usage(
             row["estimated_requests"] = _clean_int(row.get("estimated_requests")) + 1
         else:
             row["provider_requests"] = _clean_int(row.get("provider_requests")) + 1
+
+        # Track tokens by provider
+        if provider and normalized.get("provider_tokens", 0) > 0:
+            provider_tokens_by_provider = dict(row.get("provider_tokens_by_provider") or {})
+            provider_tokens_by_provider[provider] = (
+                _clean_int(provider_tokens_by_provider.get(provider))
+                + normalized.get("provider_tokens", 0)
+            )
+            row["provider_tokens_by_provider"] = provider_tokens_by_provider
 
         source_key = _clean_source(source)
         sources = dict(row.get("sources") or {})
@@ -325,6 +336,16 @@ def token_usage_payload(
         longest_streak = max(longest_streak, running_streak)
 
     all_rows = list(state["days"].values())
+
+    # Aggregate provider tokens by provider across all days
+    provider_totals: dict[str, int] = {}
+    for row in all_rows:
+        provider_tokens_by_provider = row.get("provider_tokens_by_provider") or {}
+        for provider_name, tokens in provider_tokens_by_provider.items():
+            provider_totals[provider_name] = (
+                provider_totals.get(provider_name, 0) + _clean_int(tokens)
+            )
+
     return {
         "days": day_rows,
         "total_tokens": sum(_clean_int(row.get("total_tokens")) for row in all_rows),
@@ -336,6 +357,7 @@ def token_usage_payload(
         "active_days_30d": sum(1 for row in last_30 if _clean_int(row.get("total_tokens")) > 0),
         "requests_30d": sum(_clean_int(row.get("requests")) for row in last_30),
         "updated_at": state.get("updated_at"),
+        "provider_tokens_by_provider": provider_totals,
     }
 
 
