@@ -477,7 +477,7 @@ export function ThreadShell({
   const filePreviewWidthRef = useRef(filePreviewWidth);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
-  const pendingProjectIdRef = useRef<string | null>(null);
+  const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
   const [pendingFirstTargetChatId, setPendingFirstTargetChatId] = useState<string | null>(null);
   const viewportRef = useRef<ThreadViewportHandle | null>(null);
   const activeViewportTurnByChatIdRef = useRef<Map<string, string>>(new Map());
@@ -847,28 +847,28 @@ export function ThreadShell({
       const newId = await onCreateChat?.(workspaceScope);
       if (!newId) {
         pendingFirstRef.current = null;
-        pendingProjectIdRef.current = null;
+        setPendingProjectId(null);
         setPendingFirstTargetChatId(null);
         setBooting(false);
         return;
       }
       const sessionKey = `websocket:${newId}`;
-      if (pendingProjectIdRef.current) {
+      if (pendingProjectId) {
         try {
-          await bindChatProject(token, sessionKey, pendingProjectIdRef.current);
+          await bindChatProject(token, sessionKey, pendingProjectId);
           notifyProjectsChanged();
         } catch {
           // If the bind fails, the chat is still created; the user can retry
           // from the header chip or the composer picker once the session loads.
         }
-        pendingProjectIdRef.current = null;
+        setPendingProjectId(null);
       }
       if (localModelPreset) {
         await client.sendSystemCommand(newId, `/model ${localModelPreset}`).catch(() => {});
       }
       setPendingFirstTargetChatId(newId);
     },
-    [booting, client, localModelPreset, onCreateChat, withWorkspaceScope, workspaceScope, token],
+    [booting, client, localModelPreset, onCreateChat, withWorkspaceScope, workspaceScope, token, pendingProjectId],
   );
 
   const handleThreadSend = useCallback(
@@ -1074,9 +1074,9 @@ export function ThreadShell({
           onWorkspaceScopeChange={onWorkspaceScopeChange}
           transcriptionProvider={settingsSnapshot?.transcription?.provider}
           ingressLimits={ingressLimits}
-          projectId={pendingProjectIdRef.current}
+          projectId={pendingProjectId}
           onPendingProjectChange={(id) => {
-            pendingProjectIdRef.current = id;
+            setPendingProjectId(id);
           }}
           showProjectCapsulePicker
         />
