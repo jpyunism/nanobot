@@ -5,32 +5,12 @@
 
 <div align="center">
   <p>
-    <a href="https://nanobot.wiki/docs/latest/getting-started/nanobot-overview">English</a> |
-    <a href="https://nanobot.wiki/cn/docs/latest/getting-started/nanobot-overview">简体中文</a> |
-    <a href="https://nanobot.wiki/zh-Hant/docs/latest/getting-started/nanobot-overview">繁體中文</a> |
-    <a href="https://nanobot.wiki/es/docs/latest/getting-started/nanobot-overview">Español</a> |
-    <a href="https://nanobot.wiki/fr/docs/latest/getting-started/nanobot-overview">Français</a> |
-    <a href="https://nanobot.wiki/id/docs/latest/getting-started/nanobot-overview">Bahasa Indonesia</a> |
-    <a href="https://nanobot.wiki/ja/docs/latest/getting-started/nanobot-overview">日本語</a> |
-    <a href="https://nanobot.wiki/ko/docs/latest/getting-started/nanobot-overview">한국어</a> |
-    <a href="https://nanobot.wiki/ru/docs/latest/getting-started/nanobot-overview">Русский</a> |
-    <a href="https://nanobot.wiki/vi/docs/latest/getting-started/nanobot-overview">Tiếng Việt</a>
-  </p>
-  <p>
-    <a href="https://pypi.org/project/nanobot-ai/"><img src="https://img.shields.io/pypi/v/nanobot-ai" alt="PyPI"></a>
-    <a href="https://pepy.tech/project/nanobot-ai"><img src="https://static.pepy.tech/badge/nanobot-ai" alt="Downloads"></a>
     <img src="https://img.shields.io/badge/python-≥3.11-blue" alt="Python">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
     <a href="https://github.com/madkoding/nanobot/graphs/commit-activity" target="_blank">
         <img alt="Commits last month" src="https://img.shields.io/github/commit-activity/m/madkoding/nanobot?labelColor=%20%2332b583&color=%20%2312b76a"></a>
     <a href="https://github.com/madkoding/nanobot/issues?q=is%3Aissue%20is%3Aclosed" target="_blank">
         <img alt="Issues closed" src="https://img.shields.io/github/issues-search?query=repo%3Amadkoding%2Fnanobot%20is%3Aissue%20is%3Aclosed&label=issues%20closed&labelColor=%20%237d89b0&color=%20%235d6b98"></a>
-    <a href="https://twitter.com/intent/follow?screen_name=nanobot_project" target="_blank">
-        <img src="https://img.shields.io/twitter/follow/nanobot_project?logo=X&color=%20%23f5f5f5" alt="follow on X(Twitter)"></a>
-    <a href="https://nanobot.wiki/docs/latest/getting-started/nanobot-overview"><img src="https://img.shields.io/badge/Docs-nanobot.wiki-blue?style=flat&logo=readthedocs&logoColor=white" alt="Docs"></a>
-    <a href="./COMMUNICATION.md"><img src="https://img.shields.io/badge/Feishu-Group-E9DBFC?style=flat&logo=feishu&logoColor=white" alt="Feishu"></a>
-    <a href="./COMMUNICATION.md"><img src="https://img.shields.io/badge/WeChat-Group-C5EAB4?style=flat&logo=wechat&logoColor=white" alt="WeChat"></a>
-    <a href="https://discord.gg/MnCvHqpUGB"><img src="https://img.shields.io/badge/Discord-Community-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
   </p>
 </div>
 
@@ -72,13 +52,6 @@ The Agency Release turns nanobot from a durable workbench into an agent runtime 
 - Apply configuration changes live across a more reliable provider, channel, and tool runtime
 
 [Read the v0.3.0 release notes](https://github.com/madkoding/nanobot/releases/tag/v0.3.0)
-
-## Open Source Partners
-
-<p align="center">
-  <a href="https://platform.kimi.com?aff=nanobot"><picture><source media="(prefers-color-scheme: dark)" srcset="https://kimi-file.moonshot.cn/prod-chat-kimi/kfs/4/1/2026-06-05/1d8h69mt3v89kkekg24gg"><img alt="Kimi Open Source Friends" height="44" src="https://kimi-file.moonshot.cn/prod-chat-kimi/kfs/4/1/2026-06-05/1d8h69fudcmosb3pipls0"></picture></a>
-  <a href="https://platform.minimaxi.com/subscribe/token-plan?code=GILTJpMTqZ&source=link"><img alt="MiniMax" height="40" src="https://mintcdn.com/minimax-zh/1UjvBcdoC6r0UeyA/logo/light.svg?fit=max&auto=format&n=1UjvBcdoC6r0UeyA&q=85&s=672d724b639b2d88d0702fae329ea4f8"></a>
-</p>
 
 ## Recent Updates
 
@@ -301,7 +274,7 @@ See the [WebUI guide](./docs/webui.md) for LAN access, background operation, wor
 
 ## 📚 Docs
 
-Browse the [repo docs](./docs/README.md) for the latest features and GitHub development version, or visit [nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview) for the stable release documentation.
+Browse the [repo docs](./docs/README.md) for the latest features and GitHub development version.
 
 - Use task-oriented guides: [Guides](./docs/guides/README.md)
 - Start with no technical background: [Start Without Technical Background](./docs/start-without-technical-background.md)
@@ -333,17 +306,12 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, review, and contribution gui
 - **More integrations** — Calendar and more
 - **Self-improvement** — Learn from feedback and mistakes
 
-## Contact
+## License
 
-Nanobot was started by [Xubin Ren](https://github.com/re-bin) as a personal open-source project and is now maintained collaboratively with contributors from the open-source community. Feel free to contact [xubinrencs@gmail.com](mailto:xubinrencs@gmail.com) for questions, ideas, or collaboration.
+nanobot is released under the [MIT License](./LICENSE). Third-party notices are listed in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
 
 ### Contributors
 
 <a href="https://github.com/madkoding/nanobot/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=madkoding/nanobot&max=100&columns=12&updated=20260210" alt="Contributors" />
 </a>
-
-<p align="center">
-  <em> Thanks for visiting ✨ nanobot!</em><br><br>
-  <img src="https://visitor-badge.laobi.icu/badge?page_id=madkoding.nanobot&style=for-the-badge&color=00d4ff" alt="Views">
-</p>
