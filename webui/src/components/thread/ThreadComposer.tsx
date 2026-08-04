@@ -203,14 +203,12 @@ interface ThreadComposerProps {
   quotedContext?: string | null;
   focusRequest?: number;
   onQuotedContextChange?: (text: string | null) => void;
-  /** Project capsule id currently bound to the chat (if any). */
+  /** Project capsule id bound to the chat, or selected for the next welcome chat. */
   projectId?: string | null;
   /** Session key used to bind/unbind project capsules. Null in welcome composer. */
   sessionKey?: string | null;
   /** Called when the bound project changes after a bind/unbind. */
   onProjectChanged?: () => void;
-  /** Project selected for the next welcome chat (no session yet). */
-  pendingProjectId?: string | null;
   /** Called when the user selects a project in welcome composer (no session yet). */
   onPendingProjectChange?: (projectId: string | null) => void;
   /** Whether to show the project capsule picker in the composer footer. */
@@ -858,7 +856,6 @@ export function ThreadComposer({
   projectId = null,
   sessionKey = null,
   onProjectChanged,
-  pendingProjectId = null,
   onPendingProjectChange,
   showProjectCapsulePicker = false,
   token = "",
@@ -2102,7 +2099,7 @@ export function ThreadComposer({
               <ComposerProjectPicker
                 chatId={pendingQueueKey ?? undefined}
                 sessionKey={sessionKey}
-                projectId={sessionKey ? projectId : pendingProjectId}
+                projectId={projectId}
                 token={token}
                 isHero={isHero}
                 disabled={disabled}

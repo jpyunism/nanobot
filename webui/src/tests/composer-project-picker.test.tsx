@@ -45,7 +45,7 @@ vi.mock("@/hooks/useChatProject", () => ({
     sessionKey: string | null,
     initialProjectId: string | null | undefined,
   ) => ({
-    projectId: sessionKey ? initialProjectId ?? null : null,
+    projectId: initialProjectId ?? null,
     loading: false,
     error: null,
     refresh: vi.fn(),
@@ -174,6 +174,43 @@ describe("ComposerProjectPicker", () => {
     await waitFor(() => {
       expect(onPendingProjectChange).toHaveBeenCalledWith("proj-b");
       expect(mockBind).not.toHaveBeenCalled();
+    });
+  });
+
+  it("reflects a pending project selection in welcome mode", async () => {
+    const user = userEvent.setup();
+    const onPendingProjectChange = vi.fn();
+    const { rerender } = render(
+      <ComposerProjectPicker
+        chatId="chat-1"
+        sessionKey={null}
+        projectId={null}
+        token="tok"
+        onPendingProjectChange={onPendingProjectChange}
+      />,
+    );
+
+    await user.click(screen.getByTestId("composer-project-picker"));
+    const menu = await screen.findByRole("menu");
+    await user.click(within(menu).getByText("Project B"));
+
+    await waitFor(() => {
+      expect(onPendingProjectChange).toHaveBeenCalledWith("proj-b");
+    });
+
+    // Simulate the parent (e.g. ThreadShell) updating projectId after selection.
+    rerender(
+      <ComposerProjectPicker
+        chatId="chat-1"
+        sessionKey={null}
+        projectId="proj-b"
+        token="tok"
+        onPendingProjectChange={onPendingProjectChange}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("composer-project-picker").textContent).toContain("Project B");
     });
   });
 
