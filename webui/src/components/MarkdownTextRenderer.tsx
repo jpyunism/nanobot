@@ -1,6 +1,8 @@
 import {
   Children,
   isValidElement,
+  useEffect,
+  useState,
   useMemo,
   type ReactNode,
 } from "react";
@@ -19,6 +21,7 @@ import {
   isFilePatternReference,
   isLikelyFilePath,
 } from "@/components/FileReferenceChip";
+import { useFilePreviewAvailabilityResolver } from "@/components/FilePreviewAvailabilityContext";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { inferMediaKind } from "@/lib/media";
 import { browserSafeFaviconUrls } from "@/lib/provider-brand";
@@ -59,10 +62,32 @@ function InferredFileReferenceChip({
   path: string;
   onOpen?: (path: string) => void;
 }) {
+  const resolveAvailability = useFilePreviewAvailabilityResolver();
+  const [available, setAvailable] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!resolveAvailability) {
+      setAvailable(true);
+      return;
+    }
+    let cancelled = false;
+    resolveAvailability(path)
+      .then((result) => {
+        if (!cancelled) setAvailable(result);
+      })
+      .catch(() => {
+        if (!cancelled) setAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [path, resolveAvailability]);
+
+  const interactive = available === true && Boolean(onOpen);
   return (
     <FileReferenceChip
       path={path}
-      onOpen={onOpen || undefined}
+      onOpen={interactive ? onOpen : undefined}
     />
   );
 }

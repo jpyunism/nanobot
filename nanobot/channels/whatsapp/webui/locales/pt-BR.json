@@ -24,6 +24,10 @@
           "open": "Todas as mensagens",
           "allowlist": "Lista de permissão"
         }
+      },
+      "allowSendTo": {
+        "label": "Destinatários permitidos",
+        "placeholder": "Números ou IDs do WhatsApp"
       }
     }
   }

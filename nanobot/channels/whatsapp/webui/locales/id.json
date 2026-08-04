@@ -24,6 +24,10 @@
           "open": "Semua pesan",
           "allowlist": "Daftar izin"
         }
+      },
+      "allowSendTo": {
+        "label": "Penerima yang diizinkan",
+        "placeholder": "Nomor telepon atau ID WhatsApp"
       }
     }
   }

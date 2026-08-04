@@ -24,6 +24,10 @@
           "open": "すべてのメッセージ",
           "allowlist": "許可リスト"
         }
+      },
+      "allowSendTo": {
+        "label": "許可する受信者",
+        "placeholder": "電話番号または WhatsApp ID"
       }
     }
   }

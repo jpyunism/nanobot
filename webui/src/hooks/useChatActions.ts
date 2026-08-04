@@ -116,7 +116,6 @@ export function useChatActions(args: UseChatActionsArgs): ActionsApi {
     setDraftWorkspaceScope,
     setUpdatedChatIds,
     workspaces,
-    loadSettingsView: _loadSettingsView,
     dialogs,
     normalizeWorkspaceScope,
   } = args;

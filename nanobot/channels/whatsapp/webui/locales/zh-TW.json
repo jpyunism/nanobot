@@ -24,6 +24,10 @@
           "open": "所有訊息",
           "allowlist": "允許清單"
         }
+      },
+      "allowSendTo": {
+        "label": "允許的收件人",
+        "placeholder": "電話號碼或 WhatsApp ID"
       }
     }
   }

@@ -31,10 +31,11 @@ export function webuiManualChunk(id: string): string | undefined {
     return;
   }
   // Refractor reaches this HAST helper through hastscript. Keeping it with
-  // the markdown vendor chunk avoids a circular dependency.
+  // the syntax highlighting chunk avoids a circular dependency.
   if (
     id.includes("node_modules/react-syntax-highlighter")
     || id.includes("node_modules/refractor/core")
+    || id.includes("node_modules/hast-util-parse-selector")
   ) {
     return "syntax-highlight";
   }

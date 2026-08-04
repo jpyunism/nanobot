@@ -24,6 +24,10 @@
           "open": "所有消息",
           "allowlist": "白名单"
         }
+      },
+      "allowSendTo": {
+        "label": "允许的收件人",
+        "placeholder": "电话号码或 WhatsApp ID"
       }
     }
   }
