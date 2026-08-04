@@ -36,6 +36,16 @@ from nanobot.webui.file_preview import (
     file_preview_payload,
 )
 from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
+from nanobot.webui.workspace_browser_api import (
+    workspace_copy,
+    workspace_create_directory,
+    workspace_delete,
+    workspace_list_files,
+    workspace_move,
+    workspace_read_file,
+    workspace_rename,
+    workspace_write_file,
+)
 from nanobot.webui.http_utils import (
     case_insensitive_header as _case_insensitive_header,
 )
@@ -106,6 +116,7 @@ from nanobot.webui.skills_api import webui_skill_detail_payload, webui_skills_pa
 from nanobot.webui.thread_disk import delete_webui_thread
 from nanobot.webui.transcript import build_webui_thread_response
 from nanobot.webui.workspaces import WebUIWorkspaceController
+from nanobot.security.workspace_access import WorkspaceScope
 
 _SLOW_WEBUI_HTTP_LOG_MS = 1_000
 _AUTOMATION_VALUES_HEADER = "X-Nanobot-Automation-Values"
@@ -113,6 +124,8 @@ _PROJECT_DATA_HEADER = "X-Nanobot-Project-Data"
 _PROJECT_FILE_HEADER = "X-Nanobot-Project-File"
 _PROJECT_DATA_HEADER_MAX_BYTES = 256 * 1024
 _PROJECT_FILE_HEADER_MAX_BYTES = 16 * 1024 * 1024
+_WORKSPACE_BROWSER_DATA_HEADER = "X-Nanobot-Workspace-Browser-Data"
+_WORKSPACE_BROWSER_DATA_MAX_BYTES = 512 * 1024
 
 if TYPE_CHECKING:
     from nanobot.bus.queue import MessageBus
@@ -275,6 +288,11 @@ class GatewayHTTPHandler:
 
         # Project routes
         response = self._dispatch_project_routes(request, got)
+        if response is not None:
+            return response
+
+        # Workspace browser routes
+        response = self._dispatch_workspace_browser_routes(request, got)
         if response is not None:
             return response
 
@@ -620,6 +638,155 @@ class GatewayHTTPHandler:
         except ProjectError as exc:
             return _http_error(404, str(exc))
         return _http_json_response({"ok": True, "id": file_id})
+
+    # -- Workspace browser routes ------------------------------------------
+
+    def _dispatch_workspace_browser_routes(
+        self, request: WsRequest, got: str
+    ) -> Response | None:
+        if got == "/api/workspace-browser/list":
+            return self._handle_workspace_browser_list(request)
+        if got == "/api/workspace-browser/read":
+            return self._handle_workspace_browser_read(request)
+        if got == "/api/workspace-browser/write":
+            return self._handle_workspace_browser_write(request)
+        if got == "/api/workspace-browser/rename":
+            return self._handle_workspace_browser_rename(request)
+        if got == "/api/workspace-browser/move":
+            return self._handle_workspace_browser_move(request)
+        if got == "/api/workspace-browser/delete":
+            return self._handle_workspace_browser_delete(request)
+        if got == "/api/workspace-browser/mkdir":
+            return self._handle_workspace_browser_mkdir(request)
+        if got == "/api/workspace-browser/copy":
+            return self._handle_workspace_browser_copy(request)
+        return None
+
+    def _workspace_browser_scope(self, request: WsRequest) -> WorkspaceScope:
+        """Resolve the workspace scope for a browser request."""
+        query = _parse_query(request.path)
+        chat_id = _query_first(query, "chat_id")
+        if chat_id:
+            scope = self.workspaces.scope_for_session_key(f"websocket:{chat_id}")
+        else:
+            scope = self.workspaces.default_scope()
+        return scope
+
+    def _handle_workspace_browser_list(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        subpath = _query_first(query, "path") or ""
+        scope = self._workspace_browser_scope(request)
+        payload = workspace_list_files(scope=scope, subpath=subpath)
+        if payload.get("error"):
+            return _http_error(400, payload["error"])
+        return _http_json_response(payload)
+
+    def _handle_workspace_browser_read(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        path = _query_first(query, "path") or ""
+        scope = self._workspace_browser_scope(request)
+        payload = workspace_read_file(path, scope=scope)
+        if payload.get("error"):
+            return _http_error(400, payload["error"])
+        return _http_json_response(payload)
+
+    def _handle_workspace_browser_write(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(
+            request, _WORKSPACE_BROWSER_DATA_HEADER, _WORKSPACE_BROWSER_DATA_MAX_BYTES
+        )
+        if err is not None:
+            return err
+        path = (body.get("path") or "") if isinstance(body, dict) else ""
+        content = (body.get("content") or "") if isinstance(body, dict) else ""
+        scope = self._workspace_browser_scope(request)
+        payload = workspace_write_file(path, content, scope=scope)
+        if payload.get("error"):
+            return _http_error(400, payload["error"])
+        return _http_json_response(payload)
+
+    def _handle_workspace_browser_rename(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(
+            request, _WORKSPACE_BROWSER_DATA_HEADER, _WORKSPACE_BROWSER_DATA_MAX_BYTES
+        )
+        if err is not None:
+            return err
+        old_path = (body.get("old_path") or "") if isinstance(body, dict) else ""
+        new_name = (body.get("new_name") or "") if isinstance(body, dict) else ""
+        scope = self._workspace_browser_scope(request)
+        payload = workspace_rename(old_path, new_name, scope=scope)
+        if payload.get("error"):
+            return _http_error(400, payload["error"])
+        return _http_json_response(payload)
+
+    def _handle_workspace_browser_move(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(
+            request, _WORKSPACE_BROWSER_DATA_HEADER, _WORKSPACE_BROWSER_DATA_MAX_BYTES
+        )
+        if err is not None:
+            return err
+        source_path = (body.get("source_path") or "") if isinstance(body, dict) else ""
+        dest_path = (body.get("dest_path") or "") if isinstance(body, dict) else ""
+        scope = self._workspace_browser_scope(request)
+        payload = workspace_move(source_path, dest_path, scope=scope)
+        if payload.get("error"):
+            return _http_error(400, payload["error"])
+        return _http_json_response(payload)
+
+    def _handle_workspace_browser_delete(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(
+            request, _WORKSPACE_BROWSER_DATA_HEADER, _WORKSPACE_BROWSER_DATA_MAX_BYTES
+        )
+        if err is not None:
+            return err
+        path = (body.get("path") or "") if isinstance(body, dict) else ""
+        scope = self._workspace_browser_scope(request)
+        payload = workspace_delete(path, scope=scope)
+        if payload.get("error"):
+            return _http_error(400, payload["error"])
+        return _http_json_response(payload)
+
+    def _handle_workspace_browser_mkdir(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(
+            request, _WORKSPACE_BROWSER_DATA_HEADER, _WORKSPACE_BROWSER_DATA_MAX_BYTES
+        )
+        if err is not None:
+            return err
+        path = (body.get("path") or "") if isinstance(body, dict) else ""
+        scope = self._workspace_browser_scope(request)
+        payload = workspace_create_directory(path, scope=scope)
+        if payload.get("error"):
+            return _http_error(400, payload["error"])
+        return _http_json_response(payload)
+
+    def _handle_workspace_browser_copy(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(
+            request, _WORKSPACE_BROWSER_DATA_HEADER, _WORKSPACE_BROWSER_DATA_MAX_BYTES
+        )
+        if err is not None:
+            return err
+        source_path = (body.get("source_path") or "") if isinstance(body, dict) else ""
+        dest_path = (body.get("dest_path") or "") if isinstance(body, dict) else ""
+        scope = self._workspace_browser_scope(request)
+        payload = workspace_copy(source_path, dest_path, scope=scope)
+        if payload.get("error"):
+            return _http_error(400, payload["error"])
+        return _http_json_response(payload)
 
     async def _handle_sessions_list(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):

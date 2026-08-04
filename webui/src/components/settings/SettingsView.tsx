@@ -67,6 +67,7 @@ import { channelUiPresentation } from "@/channel-plugins/registry";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
 import { TokenUsageHeatmap } from "@/components/settings/TokenUsageHeatmap";
+import { OllamaUsageViewer } from "@/components/settings/OllamaUsageViewer";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import {
   channelIsRunning,
@@ -2635,6 +2636,7 @@ function OverviewSettings({
     <div className="space-y-7">
       <section className="rounded-[22px] bg-settings-surface px-4 py-4 sm:px-5">
         <TokenUsageHeatmap usage={settings.usage} timeZone={settings.agent.timezone} />
+        <OllamaUsageViewer />
       </section>
 
       <section>

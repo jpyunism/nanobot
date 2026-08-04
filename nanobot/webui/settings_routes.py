@@ -58,6 +58,7 @@ from nanobot.webui.settings_api import (
     login_oauth_provider,
     logout_oauth_provider,
     migrate_model_configurations,
+    ollama_usage_payload,
     provider_models_payload,
     settings_payload,
     settings_usage_payload,
@@ -146,6 +147,8 @@ class WebUISettingsRouter:
             return self._handle_settings(request)
         if path == "/api/settings/usage":
             return self._handle_settings_usage(request)
+        if path == "/api/settings/ollama-usage":
+            return self._handle_settings_ollama_usage(request)
         if path == "/api/settings/update":
             return self._handle_settings_update(request)
         if path == "/api/settings/model-configurations/create":
@@ -330,6 +333,11 @@ class WebUISettingsRouter:
         if not self._authorized(request):
             return self._unauthorized()
         return self._json_response(settings_usage_payload())
+
+    def _handle_settings_ollama_usage(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        return self._json_response(ollama_usage_payload())
 
     def _handle_settings_pairing(self, request: WsRequest) -> Response:
         if not self._authorized(request):

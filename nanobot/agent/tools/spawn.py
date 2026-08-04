@@ -39,6 +39,12 @@ if TYPE_CHECKING:
             ),
             default=False,
         ),
+        model_preset=StringSchema(
+            description=(
+                "Optional named model preset to run the subagent with (e.g. 'kimi', "
+                "'minimax', 'qwen'). Defaults to the parent session's preset."
+            ),
+        ),
         required=["task"],
     )
 )
@@ -73,6 +79,7 @@ class SpawnTool(Tool):
         label: str | None = None,
         temperature: float | None = None,
         wait: bool = False,
+        model_preset: str | None = None,
         **kwargs: Any,
     ) -> str:
         """Spawn a subagent to execute the given task."""
@@ -100,5 +107,6 @@ class SpawnTool(Tool):
             session_key=session_key,
             origin_message_id=request_ctx.message_id,
             temperature=temperature,
+            model_preset=model_preset,
             workspace_scope=current_workspace_scope(),
         )

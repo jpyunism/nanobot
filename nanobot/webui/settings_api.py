@@ -1317,6 +1317,65 @@ def settings_usage_payload() -> dict[str, Any]:
     return token_usage_payload(timezone_name=config.agents.defaults.timezone)
 
 
+_OLLAMA_USAGE_URL = "https://ollama.com/api/usage"
+
+
+def ollama_usage_payload() -> dict[str, Any]:
+    """Return Ollama Cloud session/weekly usage quota from the official endpoint.
+
+    Uses the configured Ollama provider API key (never exposed to the browser).
+    Returns a normalized payload with a ``configured`` flag and error info so the
+    WebUI can render a graceful empty/error state.
+    """
+    config = load_config()
+    provider = getattr(config.providers, "ollama", None)
+    api_key = getattr(provider, "api_key", None) if provider is not None else None
+    if not api_key:
+        return {
+            "configured": False,
+            "error": "no_api_key",
+            "activity": None,
+            "limits": None,
+        }
+    try:
+        response = httpx.get(
+            _OLLAMA_USAGE_URL,
+            headers={"Authorization": api_key, "Accept": "application/json"},
+            timeout=10.0,
+            follow_redirects=False,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        return {
+            "configured": True,
+            "error": f"http_{status}",
+            "activity": None,
+            "limits": None,
+        }
+    except (httpx.HTTPError, ValueError) as exc:
+        return {
+            "configured": True,
+            "error": "network",
+            "activity": None,
+            "limits": None,
+        }
+    if not isinstance(data, dict):
+        return {
+            "configured": True,
+            "error": "invalid_payload",
+            "activity": None,
+            "limits": None,
+        }
+    return {
+        "configured": True,
+        "error": None,
+        "activity": data.get("activity"),
+        "limits": data.get("limits"),
+    }
+
+
 def update_agent_settings(query: QueryParams) -> dict[str, Any]:
     config = load_config()
     defaults = config.agents.defaults

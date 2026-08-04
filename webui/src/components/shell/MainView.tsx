@@ -1,6 +1,7 @@
 import { Suspense, lazy, type ReactNode } from "react";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { ProjectsSurface } from "@/components/projects/ProjectsSurface";
+import { WorkspaceBrowser } from "@/components/workspace/WorkspaceBrowser";
 import type { ChatSummary, SettingsPayload, WorkspacesPayload, WorkspaceScopePayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -17,7 +18,8 @@ export type MainView =
   | "apps"
   | "automations"
   | "skills"
-  | "projects";
+  | "projects"
+  | "workspace";
 
 type Args = {
   view: MainView;
@@ -130,6 +132,8 @@ export function MainView(props: Args) {
         <ChatSurface {...props} />
       ) : props.view === "projects" ? (
         <ProjectsSurface onBackToChat={props.onBackToChat} />
+      ) : props.view === "workspace" ? (
+        <WorkspaceBrowser onBackToChat={props.onBackToChat} />
       ) : (
         <SettingsSurface {...props} />
       )}

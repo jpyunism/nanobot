@@ -7,7 +7,7 @@ type Args = {
   sessions: ChatSummary[];
   activeKey: string | null;
   loading: boolean;
-  view: "chat" | "settings" | "apps" | "automations" | "skills" | "projects";
+  view: "chat" | "settings" | "apps" | "automations" | "skills" | "projects" | "workspace";
   sidebarState: SidebarStatePayload;
   workspaces: WorkspacesPayload | null;
   runningChatIdList: string[];
@@ -56,13 +56,15 @@ export function useSidebarProps({
       onOpenAutomations: () => onOpenUtility("automations"),
       onOpenSkills: () => onOpenUtility("skills"),
       onOpenProjects: () => onOpenUtility("projects"),
+      onOpenWorkspace: () => onOpenUtility("workspace"),
       onSettingsIntent: utility.onSettingsIntent,
       onOpenSearch: chatActions.onOpenSessionSearch,
       activeUtility:
         view === "apps" ||
         view === "automations" ||
         view === "skills" ||
-        view === "projects"
+        view === "projects" ||
+        view === "workspace"
           ? view
           : null,
       onToggleArchived: chatActions.onToggleArchived,

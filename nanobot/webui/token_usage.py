@@ -8,7 +8,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from loguru import logger
@@ -364,16 +364,29 @@ def token_usage_payload(
 class TokenUsageHook(AgentHook):
     """Persist provider-reported token usage without coupling it to chat messages."""
 
-    def __init__(self, *, timezone_name: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        timezone_name: str | None = None,
+        provider_name_provider: Callable[[], str | None] | None = None,
+    ) -> None:
         super().__init__()
         self._timezone_name = timezone_name
+        self._provider_name_provider = provider_name_provider
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         try:
+            provider = None
+            if self._provider_name_provider is not None:
+                try:
+                    provider = self._provider_name_provider()
+                except Exception:
+                    provider = None
             record_token_usage(
                 context.usage,
                 source=_source_from_session_key(context.session_key),
                 timezone_name=self._timezone_name,
+                provider=provider,
             )
         except Exception:
             logger.exception("failed to record token usage")

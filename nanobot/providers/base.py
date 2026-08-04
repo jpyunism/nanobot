@@ -273,6 +273,16 @@ class LLMProvider(ABC):
         self.api_base = api_base
         self.generation: GenerationSettings = GenerationSettings()
 
+    @property
+    def provider_name(self) -> str:
+        """Human-readable provider name for usage tracking."""
+        spec = getattr(self, "_spec", None)
+        if spec is not None:
+            name = getattr(spec, "name", None)
+            if name:
+                return str(name)
+        return type(self).__name__
+
     @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Sanitize message content: fix empty blocks, strip internal _meta fields.

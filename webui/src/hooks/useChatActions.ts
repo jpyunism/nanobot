@@ -48,7 +48,7 @@ export interface ActionsApi {
     onOpenSessionSearch: () => void;
   };
   utility: {
-    onOpen: (view: Extract<ShellView, "apps" | "automations" | "skills" | "projects">) => void;
+    onOpen: (view: Extract<ShellView, "apps" | "automations" | "skills" | "projects" | "workspace">) => void;
     onOpenSettings: (section?: SettingsSectionKey) => void;
     onOpenModelSettings: () => void;
     onSettingsIntent: () => void;
@@ -420,12 +420,12 @@ export function useChatActions(args: UseChatActionsArgs): ActionsApi {
   }, [activeKey, navigate, sessions, setMobileSidebarOpen]);
 
   const onOpenUtility = useCallback(
-    (view: Extract<ShellView, "apps" | "automations" | "skills" | "projects">) => {
+    (view: Extract<ShellView, "apps" | "automations" | "skills" | "projects" | "workspace">) => {
       dialogs.closeSessionSearch();
       navigate({
         view,
         activeKey,
-        settingsSection: view === "projects" ? "overview" : view,
+        settingsSection: view === "projects" || view === "workspace" ? "overview" : view,
       });
       setMobileSidebarOpen(false);
     },

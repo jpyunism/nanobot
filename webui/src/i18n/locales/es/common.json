@@ -56,9 +56,27 @@
     },
     "apps": "Apps",
     "automations": "Automatizaciones",
+    "workspace": "Espacio de trabajo",
     "skills": {
       "title": "Habilidades"
     }
+  },
+  "workspace": {
+    "title": "Espacio de trabajo",
+    "subtitle": "Explora y edita archivos en el espacio de trabajo actual.",
+    "refresh": "Actualizar",
+    "root": "Espacio de trabajo",
+    "up": "Subir",
+    "empty": "Esta carpeta está vacía.",
+    "newDir": "Nueva carpeta",
+    "newDirPlaceholder": "Nombre de la nueva carpeta…",
+    "rename": "Renombrar",
+    "delete": "Eliminar",
+    "save": "Guardar",
+    "binary": "Este es un archivo binario y no se puede mostrar como texto.",
+    "loadingFile": "Cargando…",
+    "deleteConfirm": "¿Eliminar este elemento?",
+    "renamePrompt": "Renombrar a:"
   },
   "settings": {
     "backToChat": "Volver al chat",

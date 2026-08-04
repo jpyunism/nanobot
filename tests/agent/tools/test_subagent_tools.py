@@ -210,6 +210,81 @@ async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_spawn_forwards_model_preset_to_run_spec(tmp_path):
+    """A model_preset passed to spawn() should resolve to a distinct runtime."""
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    mgr = SubagentManager(
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    mgr._announce_result = AsyncMock()
+
+    parent_runtime = _runtime(provider)
+    seen = {}
+
+    async def fake_run(spec):
+        seen["runtime"] = spec.runtime
+        return SimpleNamespace(
+            stop_reason="done", final_content="done", error=None, tool_events=[],
+        )
+
+    mgr.runner.run = AsyncMock(side_effect=fake_run)
+
+    # Attach a resolver that maps the preset to a distinct runtime.
+    preset_runtime = _runtime(provider, model="kimi-model")
+    mgr.set_runtime_resolver(SimpleNamespace(resolve_preset=lambda name: preset_runtime))
+
+    await mgr.spawn(
+        task="do task",
+        runtime=parent_runtime,
+        model_preset="kimi",
+    )
+    await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
+
+    assert seen["runtime"] is preset_runtime
+    assert seen["runtime"] is not parent_runtime
+
+
+@pytest.mark.asyncio
+async def test_spawn_without_model_preset_keeps_parent_runtime(tmp_path):
+    """Without model_preset, spawn() should keep the parent runtime."""
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    mgr = SubagentManager(
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    mgr._announce_result = AsyncMock()
+
+    parent_runtime = _runtime(provider)
+    seen = {}
+
+    async def fake_run(spec):
+        seen["runtime"] = spec.runtime
+        return SimpleNamespace(
+            stop_reason="done", final_content="done", error=None, tool_events=[],
+        )
+
+    mgr.runner.run = AsyncMock(side_effect=fake_run)
+
+    await mgr.spawn(task="do task", runtime=parent_runtime)
+    await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
+
+    assert seen["runtime"] is parent_runtime
+
+
+@pytest.mark.asyncio
 async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
     """SpawnTool should return an error string when the concurrency limit is reached."""
     from nanobot.agent.subagent import SubagentManager

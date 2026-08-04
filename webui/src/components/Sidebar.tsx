@@ -4,6 +4,7 @@ import {
   Brain,
   CalendarClock,
   FolderKanban,
+  FolderTree,
   Menu,
   Search,
   Settings,
@@ -39,9 +40,10 @@ interface SidebarProps {
   onOpenSkills: () => void;
   onOpenAutomations: () => void;
   onOpenProjects?: () => void;
+  onOpenWorkspace?: () => void;
   onSettingsIntent?: () => void;
   onOpenSearch: () => void;
-  activeUtility?: "apps" | "skills" | "automations" | "projects" | null;
+  activeUtility?: "apps" | "skills" | "automations" | "projects" | "workspace" | null;
   onToggleArchived: () => void;
   onCollapse: () => void;
   onExpand?: () => void;
@@ -165,6 +167,16 @@ export function Sidebar(props: SidebarProps) {
             onIntent={props.onSettingsIntent}
             active={props.activeUtility === "projects"}
             icon={<FolderKanban className="h-4 w-4" />}
+          />
+        )}
+        {props.onOpenWorkspace && (
+          <SidebarActionButton
+            collapsed={collapsed}
+            label={t("sidebar.workspace", { defaultValue: "Workspace" })}
+            onClick={props.onOpenWorkspace}
+            onIntent={props.onSettingsIntent}
+            active={props.activeUtility === "workspace"}
+            icon={<FolderTree className="h-4 w-4" />}
           />
         )}
         <SidebarActionButton

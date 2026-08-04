@@ -22,6 +22,24 @@ export function webuiManualChunk(id: string): string | undefined {
   if (id.includes("node_modules/refractor/lang/")) {
     return;
   }
+  // Isolate the React runtime into its own chunk. React-syntax-highlighter's
+  // module-level static class fields (e.g. PureComponent) evaluate React
+  // immediately. If React lives inside the markdown-vendor chunk (which also
+  // imports helpers back from syntax-highlight), React is still in the temporal
+  // dead zone when those class fields run, throwing
+  // "Cannot access 'Q' before initialization". Giving React its own chunk makes
+  // it initialize first and breaks the cycle.
+  // NOTE: "node_modules/react/" also matches react-syntax-highlighter only if
+  // there is a slash right after "react", which is never the case for
+  // react-syntax-highlighter / react-i18next / @radix-ui/react-* (they are
+  // followed by "-" or a scoped prefix). So matching the trailing slash is safe.
+  if (
+    id.includes("node_modules/react/")
+    || id.includes("node_modules/react-dom/")
+    || id.includes("node_modules/scheduler/")
+  ) {
+    return "react";
+  }
   // Streamdown lazy-loads diagrams and highlighted code. Keep those modules
   // outside the core markdown chunk so ordinary replies do not download them.
   if (

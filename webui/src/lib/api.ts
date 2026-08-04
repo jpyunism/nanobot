@@ -14,6 +14,7 @@ import type {
   ModelConfigurationCreate,
   ModelConfigurationUpdate,
   NetworkSafetySettingsUpdate,
+  OllamaUsagePayload,
   PairingPayload,
   ProviderCreationUpdate,
   ProviderModelsPayload,
@@ -33,6 +34,8 @@ import type {
   TranscriptionSettingsUpdate,
   WebSearchSettingsUpdate,
   WorkspacesPayload,
+  WorkspaceListPayload,
+  WorkspaceReadPayload,
   WebuiThreadPersistedPayload,
   WorkspaceScopePayload,
 } from "./types";
@@ -435,6 +438,18 @@ export async function fetchSettingsUsage(
 ): Promise<NonNullable<SettingsPayload["usage"]>> {
   return request<NonNullable<SettingsPayload["usage"]>>(
     `${base}/api/settings/usage`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchOllamaUsage(
+  token: string,
+  base: string = "",
+): Promise<OllamaUsagePayload> {
+  return request<OllamaUsagePayload>(
+    `${base}/api/settings/ollama-usage`,
     token,
     undefined,
     API_READ_TIMEOUT_MS,
@@ -1095,5 +1110,151 @@ export async function updateTranscriptionSettings(
   return request<SettingsPayload>(
     `${base}/api/settings/transcription/update?${query}`,
     token,
+  );
+}
+
+// -- Workspace browser ------------------------------------------------------
+
+const WORKSPACE_BROWSER_DATA_HEADER = "X-Nanobot-Workspace-Browser-Data";
+
+export async function fetchWorkspaceList(
+  token: string,
+  path: string,
+  base: string = "",
+): Promise<WorkspaceListPayload> {
+  const query = new URLSearchParams();
+  if (path) query.set("path", path);
+  return request<WorkspaceListPayload>(
+    `${base}/api/workspace-browser/list?${query}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchWorkspaceRead(
+  token: string,
+  path: string,
+  base: string = "",
+): Promise<WorkspaceReadPayload> {
+  const query = new URLSearchParams();
+  query.set("path", path);
+  return request<WorkspaceReadPayload>(
+    `${base}/api/workspace-browser/read?${query}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function writeWorkspaceFile(
+  token: string,
+  path: string,
+  content: string,
+  base: string = "",
+): Promise<{ success?: boolean; error?: string }> {
+  return request<{ success?: boolean; error?: string }>(
+    `${base}/api/workspace-browser/write`,
+    token,
+    {
+      method: "POST",
+      headers: {
+        [WORKSPACE_BROWSER_DATA_HEADER]: JSON.stringify({ path, content }),
+      },
+    },
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function renameWorkspaceEntry(
+  token: string,
+  oldPath: string,
+  newName: string,
+  base: string = "",
+): Promise<{ success?: boolean; error?: string }> {
+  return request<{ success?: boolean; error?: string }>(
+    `${base}/api/workspace-browser/rename`,
+    token,
+    {
+      method: "POST",
+      headers: {
+        [WORKSPACE_BROWSER_DATA_HEADER]: JSON.stringify({ old_path: oldPath, new_name: newName }),
+      },
+    },
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function moveWorkspaceEntry(
+  token: string,
+  sourcePath: string,
+  destPath: string,
+  base: string = "",
+): Promise<{ success?: boolean; error?: string }> {
+  return request<{ success?: boolean; error?: string }>(
+    `${base}/api/workspace-browser/move`,
+    token,
+    {
+      method: "POST",
+      headers: {
+        [WORKSPACE_BROWSER_DATA_HEADER]: JSON.stringify({ source_path: sourcePath, dest_path: destPath }),
+      },
+    },
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function deleteWorkspaceEntry(
+  token: string,
+  path: string,
+  base: string = "",
+): Promise<{ success?: boolean; error?: string }> {
+  return request<{ success?: boolean; error?: string }>(
+    `${base}/api/workspace-browser/delete`,
+    token,
+    {
+      method: "POST",
+      headers: {
+        [WORKSPACE_BROWSER_DATA_HEADER]: JSON.stringify({ path }),
+      },
+    },
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function createWorkspaceDirectory(
+  token: string,
+  path: string,
+  base: string = "",
+): Promise<{ success?: boolean; error?: string }> {
+  return request<{ success?: boolean; error?: string }>(
+    `${base}/api/workspace-browser/mkdir`,
+    token,
+    {
+      method: "POST",
+      headers: {
+        [WORKSPACE_BROWSER_DATA_HEADER]: JSON.stringify({ path }),
+      },
+    },
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function copyWorkspaceEntry(
+  token: string,
+  sourcePath: string,
+  destPath: string,
+  base: string = "",
+): Promise<{ success?: boolean; error?: string }> {
+  return request<{ success?: boolean; error?: string }>(
+    `${base}/api/workspace-browser/copy`,
+    token,
+    {
+      method: "POST",
+      headers: {
+        [WORKSPACE_BROWSER_DATA_HEADER]: JSON.stringify({ source_path: sourcePath, dest_path: destPath }),
+      },
+    },
+    API_READ_TIMEOUT_MS,
   );
 }

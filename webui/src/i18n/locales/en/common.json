@@ -56,9 +56,27 @@
     },
     "apps": "Apps",
     "automations": "Automations",
+    "workspace": "Workspace",
     "skills": {
       "title": "Skills"
     }
+  },
+  "workspace": {
+    "title": "Workspace",
+    "subtitle": "Browse and edit files in the current workspace.",
+    "refresh": "Refresh",
+    "root": "Workspace",
+    "up": "Up",
+    "empty": "This folder is empty.",
+    "newDir": "New folder",
+    "newDirPlaceholder": "New folder name…",
+    "rename": "Rename",
+    "delete": "Delete",
+    "save": "Save",
+    "binary": "This is a binary file and cannot be displayed as text.",
+    "loadingFile": "Loading…",
+    "deleteConfirm": "Delete this item?",
+    "renamePrompt": "Rename to:"
   },
   "projects": {
     "title": "Projects",

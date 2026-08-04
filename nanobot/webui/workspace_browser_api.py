@@ -11,16 +11,16 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from nanobot.config.paths import get_workspace_path
-from nanobot.security.workspace_access import (
-    WorkspaceScope,
-    current_workspace_scope,
+from nanobot.security.workspace_access import WorkspaceScope
+from nanobot.security.workspace_policy import (
+    WorkspaceBoundaryError,
+    resolve_allowed_path,
 )
 
 # Sensitive file patterns that should never be exposed or modified through the UI
 SENSITIVE_PATTERNS = {
     ".env",
-    ".env.local", 
+    ".env.local",
     ".env.production",
     ".git",
     ".gitignore",
@@ -39,7 +39,7 @@ def is_sensitive_path(path: Path, workspace_root: Path) -> bool:
     try:
         rel_path = path.resolve(strict=False).relative_to(workspace_root.resolve(strict=False))
         parts = rel_path.parts
-        
+
         # Check each part of the path against sensitive patterns
         for part in parts:
             if part in SENSITIVE_PATTERNS:
@@ -47,60 +47,98 @@ def is_sensitive_path(path: Path, workspace_root: Path) -> bool:
             # Block hidden files/directories (starting with .)
             if part.startswith("."):
                 return True
-        
+
         # Check filename patterns
-        if parts and any(parts[-1].endswith(pattern.lstrip("*")) for pattern in SENSITIVE_PATTERNS if pattern.startswith("*")):
+        if parts and any(
+            parts[-1].endswith(pattern.lstrip("*"))
+            for pattern in SENSITIVE_PATTERNS
+            if pattern.startswith("*")
+        ):
             return True
-            
+
     except (ValueError, OSError):
         return True
-    
+
     return False
 
 
-def validate_workspace_path(path: str, workspace_root: Path) -> Path:
-    """Validate that a path is within the workspace and not sensitive."""
-    full_path = (workspace_root / path).resolve(strict=False)
-    
-    # Ensure it's within workspace
+def _workspace_root(scope: WorkspaceScope) -> Path:
+    """Return the effective workspace root for a scope."""
+    return scope.project_path
+
+
+def _resolve_scope_path(
+    raw_path: str,
+    scope: WorkspaceScope,
+    *,
+    allow_missing: bool = False,
+) -> Path:
+    """Resolve a path against the scope, enforcing workspace boundaries.
+
+    Uses ``resolve_allowed_path`` (the canonical security mechanism) so that
+    ``restrict_to_workspace`` and the session scope are respected, not just the
+    global workspace root.
+    """
+    if not isinstance(raw_path, str):
+        raise ValueError("path is required")
+    if len(raw_path) > 4096:
+        raise ValueError("path is too long")
+
+    # Empty path means the workspace root itself.
+    if not raw_path.strip():
+        resolved = scope.project_path
+        if not allow_missing and not resolved.exists():
+            raise ValueError("Workspace root does not exist")
+        return resolved
+
+    workspace = scope.project_path
+    allowed_root = workspace if scope.restrict_to_workspace else None
     try:
-        full_path.relative_to(workspace_root.resolve(strict=False))
-    except ValueError:
-        raise ValueError(f"Path '{path}' is outside workspace boundary")
-    
-    # Check if sensitive
-    if is_sensitive_path(full_path, workspace_root):
-        raise ValueError(f"Access to '{path}' is restricted")
-    
-    return full_path
+        resolved = resolve_allowed_path(
+            raw_path,
+            workspace=workspace,
+            allowed_root=allowed_root,
+            strict=False,
+        )
+    except WorkspaceBoundaryError as exc:
+        raise ValueError(f"Path '{raw_path}' is outside workspace boundary") from exc
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Invalid path '{raw_path}'") from exc
+
+    if not allow_missing and not resolved.exists():
+        raise ValueError(f"Path '{raw_path}' does not exist")
+
+    if is_sensitive_path(resolved, workspace):
+        raise ValueError(f"Access to '{raw_path}' is restricted")
+
+    return resolved
 
 
 def workspace_list_files(
-    workspace_root: Path | None = None,
+    scope: WorkspaceScope,
     subpath: str = "",
 ) -> dict[str, Any]:
     """List files and directories in the workspace."""
-    if workspace_root is None:
-        workspace_root = get_workspace_path()
-    
+    workspace_root = _workspace_root(scope)
+
     try:
-        target_path = validate_workspace_path(subpath, workspace_root)
+        target_path = _resolve_scope_path(subpath, scope, allow_missing=True)
     except ValueError as e:
         return {"error": str(e), "files": []}
-    
+
     if not target_path.exists():
         return {"error": "Path does not exist", "files": []}
-    
+
     if not target_path.is_dir():
         return {"error": "Path is not a directory", "files": []}
-    
+
     files = []
     try:
         for entry in sorted(target_path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
             # Skip sensitive files/directories
             if is_sensitive_path(entry, workspace_root):
                 continue
-            
+
             try:
                 stat = entry.stat()
                 files.append({
@@ -115,7 +153,7 @@ def workspace_list_files(
                 continue
     except (OSError, PermissionError) as e:
         return {"error": f"Cannot access directory: {e}", "files": []}
-    
+
     return {
         "current_path": str(target_path.relative_to(workspace_root)),
         "parent_path": str(target_path.parent.relative_to(workspace_root)) if target_path != workspace_root else None,
@@ -125,23 +163,19 @@ def workspace_list_files(
 
 def workspace_read_file(
     path: str,
-    workspace_root: Path | None = None,
+    scope: WorkspaceScope,
 ) -> dict[str, Any]:
     """Read the contents of a file in the workspace."""
-    if workspace_root is None:
-        workspace_root = get_workspace_path()
-    
+    workspace_root = _workspace_root(scope)
+
     try:
-        full_path = validate_workspace_path(path, workspace_root)
+        full_path = _resolve_scope_path(path, scope)
     except ValueError as e:
         return {"error": str(e)}
-    
-    if not full_path.exists():
-        return {"error": "File does not exist"}
-    
+
     if not full_path.is_file():
         return {"error": "Path is not a file"}
-    
+
     try:
         with open(full_path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -169,26 +203,25 @@ def workspace_read_file(
 def workspace_write_file(
     path: str,
     content: str,
-    workspace_root: Path | None = None,
+    scope: WorkspaceScope,
 ) -> dict[str, Any]:
     """Write content to a file in the workspace."""
-    if workspace_root is None:
-        workspace_root = get_workspace_path()
-    
+    workspace_root = _workspace_root(scope)
+
     try:
-        full_path = validate_workspace_path(path, workspace_root)
+        full_path = _resolve_scope_path(path, scope, allow_missing=True)
     except ValueError as e:
         return {"error": str(e)}
-    
+
     if full_path.exists() and is_sensitive_path(full_path, workspace_root):
         return {"error": f"Cannot modify restricted file: {path}"}
-    
+
     try:
         full_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         with open(full_path, "w", encoding="utf-8") as f:
             f.write(content)
-        
+
         return {
             "success": True,
             "path": path,
@@ -201,31 +234,27 @@ def workspace_write_file(
 def workspace_rename(
     old_path: str,
     new_name: str,
-    workspace_root: Path | None = None,
+    scope: WorkspaceScope,
 ) -> dict[str, Any]:
     """Rename a file or directory in the workspace."""
-    if workspace_root is None:
-        workspace_root = get_workspace_path()
-    
+    workspace_root = _workspace_root(scope)
+
     try:
-        old_full_path = validate_workspace_path(old_path, workspace_root)
+        old_full_path = _resolve_scope_path(old_path, scope)
     except ValueError as e:
         return {"error": str(e)}
-    
-    if not old_full_path.exists():
-        return {"error": "Source path does not exist"}
-    
+
     if ".." in new_name or "/" in new_name or "\\" in new_name:
         return {"error": "Invalid new name"}
-    
+
     new_full_path = old_full_path.parent / new_name
-    
+
     if is_sensitive_path(new_full_path, workspace_root):
         return {"error": "Cannot rename to restricted name"}
-    
+
     if new_full_path.exists():
         return {"error": "Destination already exists"}
-    
+
     try:
         old_full_path.rename(new_full_path)
         return {
@@ -240,31 +269,27 @@ def workspace_rename(
 def workspace_move(
     source_path: str,
     dest_path: str,
-    workspace_root: Path | None = None,
+    scope: WorkspaceScope,
 ) -> dict[str, Any]:
     """Move a file or directory within the workspace."""
-    if workspace_root is None:
-        workspace_root = get_workspace_path()
-    
+    workspace_root = _workspace_root(scope)
+
     try:
-        source_full = validate_workspace_path(source_path, workspace_root)
+        source_full = _resolve_scope_path(source_path, scope)
     except ValueError as e:
         return {"error": f"Source: {e}"}
-    
+
     try:
-        dest_full = validate_workspace_path(dest_path, workspace_root)
+        dest_full = _resolve_scope_path(dest_path, scope, allow_missing=True)
     except ValueError as e:
         return {"error": f"Destination: {e}"}
-    
-    if not source_full.exists():
-        return {"error": "Source path does not exist"}
-    
+
     if is_sensitive_path(dest_full, workspace_root):
         return {"error": "Cannot move to restricted location"}
-    
+
     if dest_full.is_dir():
         dest_full = dest_full / source_full.name
-    
+
     try:
         shutil.move(str(source_full), str(dest_full))
         return {
@@ -278,23 +303,19 @@ def workspace_move(
 
 def workspace_delete(
     path: str,
-    workspace_root: Path | None = None,
+    scope: WorkspaceScope,
 ) -> dict[str, Any]:
     """Delete a file or directory from the workspace."""
-    if workspace_root is None:
-        workspace_root = get_workspace_path()
-    
+    workspace_root = _workspace_root(scope)
+
     try:
-        full_path = validate_workspace_path(path, workspace_root)
+        full_path = _resolve_scope_path(path, scope)
     except ValueError as e:
         return {"error": str(e)}
-    
-    if not full_path.exists():
-        return {"error": "Path does not exist"}
-    
+
     if is_sensitive_path(full_path, workspace_root):
         return {"error": "Cannot delete restricted path"}
-    
+
     try:
         if full_path.is_dir():
             shutil.rmtree(full_path)
@@ -310,23 +331,22 @@ def workspace_delete(
 
 def workspace_create_directory(
     path: str,
-    workspace_root: Path | None = None,
+    scope: WorkspaceScope,
 ) -> dict[str, Any]:
     """Create a new directory in the workspace."""
-    if workspace_root is None:
-        workspace_root = get_workspace_path()
-    
+    workspace_root = _workspace_root(scope)
+
     try:
-        full_path = validate_workspace_path(path, workspace_root)
+        full_path = _resolve_scope_path(path, scope, allow_missing=True)
     except ValueError as e:
         return {"error": str(e)}
-    
+
     if full_path.exists():
         return {"error": "Path already exists"}
-    
+
     if is_sensitive_path(full_path, workspace_root):
         return {"error": "Cannot create restricted directory"}
-    
+
     try:
         full_path.mkdir(parents=True, exist_ok=True)
         return {
@@ -340,31 +360,27 @@ def workspace_create_directory(
 def workspace_copy(
     source_path: str,
     dest_path: str,
-    workspace_root: Path | None = None,
+    scope: WorkspaceScope,
 ) -> dict[str, Any]:
     """Copy a file or directory within the workspace."""
-    if workspace_root is None:
-        workspace_root = get_workspace_path()
-    
+    workspace_root = _workspace_root(scope)
+
     try:
-        source_full = validate_workspace_path(source_path, workspace_root)
+        source_full = _resolve_scope_path(source_path, scope)
     except ValueError as e:
         return {"error": f"Source: {e}"}
-    
+
     try:
-        dest_full = validate_workspace_path(dest_path, workspace_root)
+        dest_full = _resolve_scope_path(dest_path, scope, allow_missing=True)
     except ValueError as e:
         return {"error": f"Destination: {e}"}
-    
-    if not source_full.exists():
-        return {"error": "Source path does not exist"}
-    
+
     if is_sensitive_path(dest_full, workspace_root):
         return {"error": "Cannot copy to restricted location"}
-    
+
     if dest_full.is_dir():
         dest_full = dest_full / source_full.name
-    
+
     try:
         if source_full.is_dir():
             shutil.copytree(str(source_full), str(dest_full))

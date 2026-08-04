@@ -331,6 +331,32 @@ export interface WorkspacesPayload {
   };
 }
 
+export interface WorkspaceEntry {
+  name: string;
+  path: string;
+  is_directory: boolean;
+  size: number;
+  modified_at: number;
+  created_at: number;
+}
+
+export interface WorkspaceListPayload {
+  current_path: string;
+  parent_path: string | null;
+  files: WorkspaceEntry[];
+  error?: string;
+}
+
+export interface WorkspaceReadPayload {
+  path?: string;
+  content?: string;
+  encoding?: string;
+  size?: number;
+  is_binary?: boolean;
+  message?: string;
+  error?: string;
+}
+
 export type SidebarDensity = "comfortable" | "compact";
 export type SidebarSortMode = "updated_desc" | "created_desc" | "title_asc";
 
@@ -443,6 +469,30 @@ export interface ProviderOAuthPending {
 
 export type ProviderOAuthLoginResult = SettingsPayload | ProviderOAuthAuthorizationRequired;
 export type ProviderOAuthCompletionResult = SettingsPayload | ProviderOAuthPending;
+
+export interface OllamaUsagePayload {
+  configured: boolean;
+  error?: string | null;
+  activity?: {
+    cost?: string;
+    period?: {
+      type?: string;
+      starting_at?: string;
+      ending_at?: string;
+    };
+    models?: Array<{ name?: string; request_count?: number }>;
+  } | null;
+  limits?: {
+    session?: {
+      usage?: number;
+      models?: Array<{ name?: string; request_count?: number }>;
+    };
+    weekly?: {
+      usage?: number;
+      models?: Array<{ name?: string; request_count?: number }>;
+    };
+  } | null;
+}
 
 export interface SettingsPayload {
   surface?: RuntimeSurface;
@@ -644,7 +694,9 @@ export interface SettingsPayload {
     active_days_30d: number;
     requests_30d: number;
     updated_at?: string | null;
+    provider_tokens_by_provider?: Record<string, number>;
   };
+  ollama_usage?: OllamaUsagePayload;
   advanced: {
     restrict_to_workspace: boolean;
     workspace_sandbox?: {

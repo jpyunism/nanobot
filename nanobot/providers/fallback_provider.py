@@ -122,6 +122,10 @@ class FallbackProvider(LLMProvider):
         self._primary_tripped_at: float | None = None
 
     @property
+    def provider_name(self) -> str:
+        return self._primary.provider_name
+
+    @property
     def generation(self):
         return self._primary.generation
 

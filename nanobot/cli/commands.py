@@ -1749,7 +1749,12 @@ def _run_gateway(
         runtime_events=runtime_events,
         turn_delivery_factory=turn_delivery_factory,
         provider_signature=provider_snapshot.signature,
-        hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
+        hooks=[TokenUsageHook(
+            timezone_name=config.agents.defaults.timezone,
+            provider_name_provider=lambda: getattr(
+                provider_snapshot.provider, "provider_name", None
+            ),
+        )],
         local_trigger_store=trigger_store,
         hook_factories=[create_file_edit_activity_hook],
     )

@@ -398,6 +398,7 @@ class AgentLoop:
             fail_on_tool_error=fail_on_tool_error,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
         )
+        self.subagents.set_runtime_resolver(self.runtime_resolver)
         self.workflow_loader = WorkflowLoader(
             workspace,
             disabled_workflows=set(disabled_workflows or []),

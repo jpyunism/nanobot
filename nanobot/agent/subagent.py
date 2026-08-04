@@ -200,6 +200,7 @@ def _persist_subagent_pending(
     origin_message_id: str | None,
     temperature: float | None,
     workspace_scope: WorkspaceScope | None,
+    model_preset: str | None = None,
 ) -> None:
     """Persist a pending subagent record so it can be relaunched after restart."""
     directory = _subagent_snapshot_dir(workspace, session_key)
@@ -214,6 +215,7 @@ def _persist_subagent_pending(
         "origin_message_id": origin_message_id,
         "temperature": temperature,
         "workspace_scope": workspace_scope.to_dict() if workspace_scope is not None else None,
+        "model_preset": model_preset,
         "persisted_at": time.time(),
     }
     path = _pending_path(workspace, session_key, task_id)
@@ -373,6 +375,12 @@ class SubagentManager:
         self._event_callback: SubagentEventCallback | None = None
         # Pending records loaded on startup and relaunched via resume_pending.
         self._pending_records: list[dict[str, Any]] = _load_subagent_pendings(self.workspace)
+        # Optional resolver for named model presets (set by AgentLoop).
+        self._runtime_resolver: Any = None
+
+    def set_runtime_resolver(self, resolver: Any) -> None:
+        """Attach the loop's model runtime resolver for named preset resolution."""
+        self._runtime_resolver = resolver
 
     def set_event_callback(self, callback: SubagentEventCallback | None) -> None:
         """Register an async callback invoked with each status update."""
@@ -428,6 +436,7 @@ class SubagentManager:
                     session_key=record.get("session_key"),
                     origin_message_id=record.get("origin_message_id"),
                     temperature=record.get("temperature"),
+                    model_preset=record.get("model_preset"),
                     workspace_scope=ws_scope,
                     runtime=runtime,
                     task_id=task_id,
@@ -489,6 +498,29 @@ class SubagentManager:
             context_window_tokens=runtime.context_window_tokens,
         )
 
+    def _resolve_preset_runtime(
+        self,
+        model_preset: str,
+        base: LLMRuntime,
+    ) -> LLMRuntime:
+        """Resolve a named model preset into a runtime for a subagent.
+
+        Uses the resolver attached to the loop (via ``set_runtime_resolver``)
+        when available so presets resolve against the live catalog. Falls back
+        to the base runtime's provider when no resolver is configured.
+        """
+        resolver = self._runtime_resolver
+        if resolver is not None:
+            try:
+                return resolver.resolve_preset(model_preset)
+            except Exception:
+                logger.exception(
+                    "Could not resolve model_preset {} for subagent; falling back to base runtime",
+                    model_preset,
+                )
+                return base
+        return base
+
     def _subagent_tools_config(self) -> ToolsConfig:
         """Build a ToolsConfig scoped for subagent use."""
         return ToolsConfig(
@@ -533,10 +565,13 @@ class SubagentManager:
         *,
         runtime: LLMRuntime | None = None,
         task_id: str | None = None,
+        model_preset: str | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         if runtime is None:
             runtime = self._compat_spawn_runtime()
+        if model_preset is not None:
+            runtime = self._resolve_preset_runtime(model_preset, runtime)
         if temperature is not None:
             runtime = runtime.with_generation_overrides(temperature=temperature)
         task_id = task_id or str(uuid.uuid4())[:8]
@@ -562,6 +597,7 @@ class SubagentManager:
             origin_message_id,
             temperature,
             workspace_scope,
+            model_preset,
         )
 
         bg_task = asyncio.create_task(
@@ -612,10 +648,13 @@ class SubagentManager:
         workspace_scope: WorkspaceScope | None = None,
         *,
         runtime: LLMRuntime | None = None,
+        model_preset: str | None = None,
     ) -> str:
         """Run a subagent synchronously and return its result to the caller."""
         if runtime is None:
             runtime = self._compat_spawn_runtime()
+        if model_preset is not None:
+            runtime = self._resolve_preset_runtime(model_preset, runtime)
         if temperature is not None:
             runtime = runtime.with_generation_overrides(temperature=temperature)
         task_id = str(uuid.uuid4())[:8]
