@@ -1,10 +1,12 @@
 import { useBootstrap } from "@/hooks/useBootstrap";
+import { useLocalAppearance } from "@/hooks/useLocalAppearance";
 import { useNativeEngineRestart } from "@/hooks/useNativeEngineRestart";
 import { ClientProvider } from "@/providers/ClientProvider";
 import { AppShell } from "@/components/shell/AppShell";
 
 export default function App() {
   const boot = useBootstrap();
+  useLocalAppearance();
   const onNativeEngineRestart = useNativeEngineRestart({
     state: boot.state,
     bootRefreshReady: boot.refreshReady,

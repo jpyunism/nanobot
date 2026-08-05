@@ -77,6 +77,103 @@
     --scrollbar-thumb: hsl(var(--muted-foreground) / 0.28);
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.44);
   }
+
+  /* Accent color themes (Appearance settings). */
+  :root[data-accent="blue"] {
+    --primary: 221 83% 53%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 221 85% 94%;
+    --accent-foreground: 221 40% 20%;
+    --sidebar-accent: 221 85% 92%;
+    --sidebar-accent-foreground: 221 40% 20%;
+    --ring: 221 83% 53%;
+    --inline-token-highlight: 221 70% 50%;
+  }
+  :root[data-accent="green"] {
+    --primary: 142 71% 45%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 142 65% 92%;
+    --accent-foreground: 142 55% 18%;
+    --sidebar-accent: 142 65% 90%;
+    --sidebar-accent-foreground: 142 55% 18%;
+    --ring: 142 71% 45%;
+    --inline-token-highlight: 142 70% 42%;
+  }
+  :root[data-accent="purple"] {
+    --primary: 262 83% 58%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 262 80% 94%;
+    --accent-foreground: 262 55% 22%;
+    --sidebar-accent: 262 80% 92%;
+    --sidebar-accent-foreground: 262 55% 22%;
+    --ring: 262 83% 58%;
+    --inline-token-highlight: 262 70% 55%;
+  }
+  :root[data-accent="orange"] {
+    --primary: 24 95% 53%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 24 90% 93%;
+    --accent-foreground: 24 60% 20%;
+    --sidebar-accent: 24 90% 91%;
+    --sidebar-accent-foreground: 24 60% 20%;
+    --ring: 24 95% 53%;
+    --inline-token-highlight: 24 90% 50%;
+  }
+  :root[data-accent="rose"] {
+    --primary: 350 89% 60%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 350 85% 94%;
+    --accent-foreground: 350 60% 20%;
+    --sidebar-accent: 350 85% 92%;
+    --sidebar-accent-foreground: 350 60% 20%;
+    --ring: 350 89% 60%;
+    --inline-token-highlight: 350 80% 55%;
+  }
+  .dark[data-accent="blue"] {
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 221 45% 24%;
+    --accent-foreground: 217 91% 88%;
+    --sidebar-accent: 221 40% 28%;
+    --sidebar-accent-foreground: 217 91% 88%;
+    --inline-token-highlight: 217 92% 72%;
+  }
+  .dark[data-accent="green"] {
+    --primary: 142 71% 50%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 142 45% 24%;
+    --accent-foreground: 142 71% 88%;
+    --sidebar-accent: 142 40% 28%;
+    --sidebar-accent-foreground: 142 71% 88%;
+    --inline-token-highlight: 142 71% 62%;
+  }
+  .dark[data-accent="purple"] {
+    --primary: 263 70% 66%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 262 45% 26%;
+    --accent-foreground: 262 80% 88%;
+    --sidebar-accent: 262 40% 30%;
+    --sidebar-accent-foreground: 262 80% 88%;
+    --inline-token-highlight: 262 70% 66%;
+  }
+  .dark[data-accent="orange"] {
+    --primary: 24 95% 58%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 24 55% 24%;
+    --accent-foreground: 24 90% 88%;
+    --sidebar-accent: 24 50% 28%;
+    --sidebar-accent-foreground: 24 90% 88%;
+    --inline-token-highlight: 24 90% 60%;
+  }
+  .dark[data-accent="rose"] {
+    --primary: 350 89% 64%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 350 50% 26%;
+    --accent-foreground: 350 85% 88%;
+    --sidebar-accent: 350 45% 30%;
+    --sidebar-accent-foreground: 350 85% 88%;
+    --inline-token-highlight: 350 80% 66%;
+  }
 }
 
 @layer base {
@@ -93,6 +190,14 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
     overflow: hidden;
+  }
+
+  /* Typography preference (Appearance settings). */
+  html[data-font="serif"] body {
+    font-family: Georgia, "Times New Roman", "Noto Serif", "Songti SC", serif;
+  }
+  html[data-font="mono"] body {
+    font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, Consolas, monospace;
   }
 
   * {

@@ -142,8 +142,10 @@ import {
   readLocalPreferences,
   writeLocalPreferences,
   type FileEditDisplayMode,
+  type LocalAccent,
   type LocalActivityMode,
   type LocalDensity,
+  type LocalFont,
   type LocalPreferences,
 } from "@/lib/local-preferences";
 import { getRuntimeHost, isNativeRuntime } from "@/lib/runtime";
@@ -2864,6 +2866,35 @@ function AppearanceSettings({
             description={t("settings.help.language")}
           >
             <LanguageSwitcher />
+          </SettingsRow>
+
+          <SettingsRow
+            title={tx("settings.rows.font", "Font")}
+            description={tx("settings.help.font", "Stored only in this browser.")}
+          >
+            <SegmentedControl
+              value={localPrefs.font}
+              options={[
+                { value: "system", label: tx("settings.values.system", "System") },
+                { value: "serif", label: tx("settings.values.serif", "Serif") },
+                { value: "mono", label: tx("settings.values.mono", "Mono") },
+              ]}
+              onChange={(font) =>
+                onChangeLocalPrefs((prev) => ({ ...prev, font: font as LocalFont }))
+              }
+            />
+          </SettingsRow>
+
+          <SettingsRow
+            title={tx("settings.rows.accent", "Color theme")}
+            description={tx("settings.help.accent", "Stored only in this browser.")}
+          >
+            <AccentSwatches
+              value={localPrefs.accent}
+              onChange={(accent) =>
+                onChangeLocalPrefs((prev) => ({ ...prev, accent }))
+              }
+            />
           </SettingsRow>
         </SettingsGroup>
       </section>
@@ -9742,6 +9773,45 @@ function StatusPill({
     >
       <span className="truncate">{children}</span>
     </span>
+  );
+}
+
+function AccentSwatches({
+  value,
+  onChange,
+}: {
+  value: LocalAccent;
+  onChange: (accent: LocalAccent) => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const swatches: Array<{ value: LocalAccent; label: string; className: string }> = [
+    { value: "default", label: tx("settings.values.default", "Default"), className: "bg-muted-foreground/60" },
+    { value: "blue", label: tx("settings.values.blue", "Blue"), className: "bg-[hsl(221_83%_53%)]" },
+    { value: "green", label: tx("settings.values.green", "Green"), className: "bg-[hsl(142_71%_45%)]" },
+    { value: "purple", label: tx("settings.values.purple", "Purple"), className: "bg-[hsl(262_83%_58%)]" },
+    { value: "orange", label: tx("settings.values.orange", "Orange"), className: "bg-[hsl(24_95%_53%)]" },
+    { value: "rose", label: tx("settings.values.rose", "Rose"), className: "bg-[hsl(350_89%_60%)]" },
+  ];
+  return (
+    <div className="flex items-center gap-2">
+      {swatches.map((swatch) => (
+        <button
+          key={swatch.value}
+          type="button"
+          aria-pressed={value === swatch.value}
+          aria-label={swatch.label}
+          title={swatch.label}
+          onClick={() => onChange(swatch.value)}
+          className={cn(
+            "h-7 w-7 rounded-full border border-border/60 transition-transform",
+            swatch.className,
+            value === swatch.value &&
+              "scale-110 ring-2 ring-ring ring-offset-2 ring-offset-background",
+          )}
+        />
+      ))}
+    </div>
   );
 }
 

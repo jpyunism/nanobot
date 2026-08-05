@@ -1,6 +1,8 @@
 export type LocalDensity = "comfortable" | "compact";
 export type LocalActivityMode = "auto" | "expanded";
 export type FileEditDisplayMode = "summary" | "diff" | "collapsed_diff";
+export type LocalFont = "system" | "serif" | "mono";
+export type LocalAccent = "default" | "blue" | "green" | "purple" | "orange" | "rose";
 
 export interface LocalPreferences {
   density: LocalDensity;
@@ -8,6 +10,8 @@ export interface LocalPreferences {
   codeWrap: boolean;
   brandLogos: boolean;
   fileEditDisplayMode: FileEditDisplayMode;
+  font: LocalFont;
+  accent: LocalAccent;
 }
 
 export const LOCAL_PREFS_STORAGE_KEY = "nanobot-webui.settings-preferences";
@@ -19,10 +23,21 @@ export const DEFAULT_LOCAL_PREFS: LocalPreferences = {
   codeWrap: true,
   brandLogos: false,
   fileEditDisplayMode: "summary",
+  font: "system",
+  accent: "default",
 };
 
 export function normalizeFileEditDisplayMode(value: unknown): FileEditDisplayMode {
   return value === "diff" || value === "collapsed_diff" ? value : "summary";
+}
+
+export function normalizeFont(value: unknown): LocalFont {
+  return value === "serif" || value === "mono" ? value : "system";
+}
+
+export function normalizeAccent(value: unknown): LocalAccent {
+  const accents: LocalAccent[] = ["default", "blue", "green", "purple", "orange", "rose"];
+  return accents.includes(value as LocalAccent) ? (value as LocalAccent) : "default";
 }
 
 export function readLocalPreferences(): LocalPreferences {
@@ -36,6 +51,8 @@ export function readLocalPreferences(): LocalPreferences {
       codeWrap: parsed.codeWrap !== false,
       brandLogos: parsed.brandLogos === true,
       fileEditDisplayMode: normalizeFileEditDisplayMode(parsed.fileEditDisplayMode),
+      font: normalizeFont(parsed.font),
+      accent: normalizeAccent(parsed.accent),
     };
   } catch {
     return DEFAULT_LOCAL_PREFS;

@@ -211,6 +211,8 @@
     "rows": {
       "theme": "Theme",
       "language": "Language",
+      "font": "Font",
+      "accent": "Color theme",
       "provider": "Provider",
       "model": "Model",
       "restart": "Restart nanobot",
@@ -261,6 +263,8 @@
     "help": {
       "theme": "Switch between light and dark appearance.",
       "language": "Choose the language used by the WebUI.",
+      "font": "Stored only in this browser.",
+      "accent": "Stored only in this browser.",
       "provider": "Select the provider that should serve new model requests.",
       "model": "Choose the model used by this preset.",
       "configPath": "The gateway configuration file currently in use.",
@@ -402,6 +406,14 @@
     "values": {
       "light": "Light",
       "dark": "Dark",
+      "system": "System",
+      "serif": "Serif",
+      "mono": "Mono",
+      "blue": "Blue",
+      "green": "Green",
+      "purple": "Purple",
+      "orange": "Orange",
+      "rose": "Rose",
       "notAvailable": "Not available",
       "enabled": "Enabled",
       "disabled": "Disabled",
