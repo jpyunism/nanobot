@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import dataclasses
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -75,6 +77,17 @@ def test_webui_quote_is_bounded_and_projected_as_model_only_context() -> None:
 
     assert runtime_context_blocks_from_metadata({
         RUNTIME_CONTEXT_INPUT_META: [block],
+    }) == [block]
+
+
+def test_blocks_survive_durable_queue_json_round_trip() -> None:
+    block = RuntimeContextBlock(source="whatsapp_sender_identity", content="phone: +56975746099")
+    round_tripped = json.loads(
+        json.dumps([dataclasses.asdict(block)], default=str)
+    )
+
+    assert runtime_context_blocks_from_metadata({
+        RUNTIME_CONTEXT_INPUT_META: round_tripped,
     }) == [block]
 
 

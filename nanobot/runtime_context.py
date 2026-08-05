@@ -140,6 +140,13 @@ def normalize_runtime_context_blocks(result: RuntimeContextResult) -> list[Runti
     values = [result] if isinstance(result, RuntimeContextBlock) else list(result)
     blocks: list[RuntimeContextBlock] = []
     for block in values:
+        if isinstance(block, Mapping):
+            # The durable bus round-trips metadata through JSON, turning
+            # RuntimeContextBlock dataclasses into plain dicts.
+            block = RuntimeContextBlock(
+                source=str(block.get("source") or ""),
+                content=str(block.get("content") or ""),
+            )
         if not isinstance(block, RuntimeContextBlock):
             raise TypeError("runtime context providers must return RuntimeContextBlock values")
         source = block.source.strip()
