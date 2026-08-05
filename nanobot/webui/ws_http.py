@@ -30,6 +30,21 @@ from nanobot.runtime_context import public_history_messages
 from nanobot.security.workspace_access import WorkspaceScope
 from nanobot.triggers.local_types import LocalTrigger
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
+from nanobot.webui.agenda_api import (
+    create_appointment as agenda_create_appointment,
+)
+from nanobot.webui.agenda_api import (
+    delete_appointment as agenda_delete_appointment,
+)
+from nanobot.webui.agenda_api import (
+    fetch_appointment as agenda_fetch_appointment,
+)
+from nanobot.webui.agenda_api import (
+    list_appointments as agenda_list_appointments,
+)
+from nanobot.webui.agenda_api import (
+    update_appointment as agenda_update_appointment,
+)
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
     file_download_bytes,
@@ -105,6 +120,36 @@ from nanobot.webui.sidebar_state import (
 )
 from nanobot.webui.skills_api import webui_skill_detail_payload, webui_skills_payload
 from nanobot.webui.thread_disk import delete_webui_thread
+from nanobot.webui.todos_api import (
+    create_item as todo_create_item,
+)
+from nanobot.webui.todos_api import (
+    create_todo_list as todo_create_todo_list,
+)
+from nanobot.webui.todos_api import (
+    delete_item as todo_delete_item,
+)
+from nanobot.webui.todos_api import (
+    delete_todo_list as todo_delete_todo_list,
+)
+from nanobot.webui.todos_api import (
+    fetch_todo_list as todo_fetch_todo_list,
+)
+from nanobot.webui.todos_api import (
+    fetch_users as todo_fetch_users,
+)
+from nanobot.webui.todos_api import (
+    list_todo_lists as todo_list_todo_lists,
+)
+from nanobot.webui.todos_api import (
+    migrate_legacy as todo_migrate_legacy,
+)
+from nanobot.webui.todos_api import (
+    update_item as todo_update_item,
+)
+from nanobot.webui.todos_api import (
+    update_users as todo_update_users,
+)
 from nanobot.webui.transcript import build_webui_thread_response
 from nanobot.webui.workspace_browser_api import (
     workspace_copy,
@@ -294,6 +339,14 @@ class GatewayHTTPHandler:
 
         # Workspace browser routes
         response = self._dispatch_workspace_browser_routes(request, got)
+        if response is not None:
+            return response
+
+        # Agenda and Todos routes
+        response = self._dispatch_agenda_routes(request, got)
+        if response is not None:
+            return response
+        response = self._dispatch_todos_routes(request, got)
         if response is not None:
             return response
 
@@ -1301,6 +1354,211 @@ class GatewayHTTPHandler:
         if got == "/api/webui/sidebar-state/update":
             return self._handle_webui_sidebar_state_update(request)
         return None
+
+    # -- Agenda and Todos routes -------------------------------------------
+    #
+    # The WebUI's WS+HTTP transport issues every request as HTTP GET and
+    # carries mutation payloads in headers. Route shapes and header names
+    # must stay in sync with webui/src/lib/agenda-api.ts and todos-api.ts.
+
+    _AGENDA_DATA_HEADER = "X-Nanobot-Agenda-Data"
+    _TODO_DATA_HEADER = "X-Nanobot-Todo-Data"
+
+    def _dispatch_agenda_routes(
+        self, request: WsRequest, got: str
+    ) -> Response | None:
+        if got == "/api/agenda" or got == "/api/agenda/appointments":
+            return self._handle_agenda_list(request)
+        if got == "/api/agenda/create" or got == "/api/agenda/appointments/create":
+            return self._handle_agenda_create(request)
+        m = re.match(r"^/api/agenda/([^/]+)/update$", got)
+        if m:
+            return self._handle_agenda_update(request, m.group(1))
+        m = re.match(r"^/api/agenda/([^/]+)/delete$", got)
+        if m:
+            return self._handle_agenda_delete(request, m.group(1))
+        m = re.match(r"^/api/agenda/([^/]+)$", got)
+        if m:
+            return self._handle_agenda_get(request, m.group(1))
+        return None
+
+    def _handle_agenda_list(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        scope = self._agenda_todos_scope(request)
+        return _http_json_response(agenda_list_appointments(scope))
+
+    def _handle_agenda_get(self, request: WsRequest, appointment_id: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        scope = self._agenda_todos_scope(request)
+        result = agenda_fetch_appointment(appointment_id, scope)
+        if result.get("error"):
+            return _http_error(404, result["error"])
+        return _http_json_response(result)
+
+    def _handle_agenda_create(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        scope = self._agenda_todos_scope(request)
+        body, err = read_json_request_header(request, self._AGENDA_DATA_HEADER, 256_000)
+        if err is not None:
+            return err
+        payload = body if isinstance(body, dict) else {}
+        result = agenda_create_appointment(payload, scope)
+        if result.get("error"):
+            return _http_error(400, result["error"])
+        return _http_json_response(result, status=201)
+
+    def _handle_agenda_update(self, request: WsRequest, appointment_id: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        scope = self._agenda_todos_scope(request)
+        body, err = read_json_request_header(request, self._AGENDA_DATA_HEADER, 256_000)
+        if err is not None:
+            return err
+        changes = body if isinstance(body, dict) else {}
+        result = agenda_update_appointment(appointment_id, changes, scope)
+        if result.get("error"):
+            return _http_error(400, result["error"])
+        return _http_json_response(result)
+
+    def _handle_agenda_delete(self, request: WsRequest, appointment_id: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        scope = self._agenda_todos_scope(request)
+        result = agenda_delete_appointment(appointment_id, scope)
+        if result.get("error"):
+            return _http_error(404, result["error"])
+        return _http_json_response(result)
+
+    def _dispatch_todos_routes(
+        self, request: WsRequest, got: str
+    ) -> Response | None:
+        if got == "/api/todos" or got == "/api/todos/lists":
+            return self._handle_todo_list_index(request)
+        if got == "/api/todos/create" or got == "/api/todos/lists/create":
+            return self._handle_todo_list_create(request)
+        if got == "/api/todos/_users" or got == "/api/todos/users":
+            return self._handle_todo_users(request)
+        if got == "/api/todos/migrate":
+            return self._handle_todo_migrate(request)
+        m = re.match(r"^/api/todos/([^/]+)/items/([^/]+)/delete$", got)
+        if m:
+            return self._handle_todo_item_delete(request, m.group(1), m.group(2))
+        m = re.match(r"^/api/todos/([^/]+)/items/([^/]+)$", got)
+        if m:
+            return self._handle_todo_item_update(request, m.group(1), m.group(2))
+        m = re.match(r"^/api/todos/([^/]+)/items$", got)
+        if m:
+            return self._handle_todo_item_create(request, m.group(1))
+        m = re.match(r"^/api/todos/([^/]+)$", got)
+        if m:
+            return self._handle_todo_list_get_or_delete(request, m.group(1))
+        return None
+
+    def _handle_todo_list_index(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        scope = self._agenda_todos_scope(request)
+        return _http_json_response(todo_list_todo_lists(scope))
+
+    def _handle_todo_list_create(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        scope = self._agenda_todos_scope(request)
+        body, err = read_json_request_header(request, self._TODO_DATA_HEADER, 256_000)
+        if err is not None:
+            return err
+        payload = body if isinstance(body, dict) else {}
+        name = payload.get("name") or ""
+        result = todo_create_todo_list(name, scope, slug=payload.get("slug"))
+        if result.get("error"):
+            return _http_error(400, result["error"])
+        return _http_json_response(result, status=201)
+
+    def _handle_todo_list_get_or_delete(self, request: WsRequest, slug: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        scope = self._agenda_todos_scope(request)
+        # The frontend uses /api/todos/<slug> for both fetch (no data header)
+        # and delete (no data header). We distinguish by checking whether the
+        # list exists: GET returns it, DELETE removes it.
+        result = todo_fetch_todo_list(slug, scope)
+        if result.get("error"):
+            return _http_error(404, result["error"])
+        # If the caller provided a mutation payload, treat it as an explicit
+        # delete request (future-proofing) otherwise just return the list.
+        if request.headers.get(self._TODO_DATA_HEADER):
+            result = todo_delete_todo_list(slug, scope)
+            if result.get("error"):
+                return _http_error(404, result["error"])
+        return _http_json_response(result)
+
+    def _handle_todo_item_create(self, request: WsRequest, slug: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        scope = self._agenda_todos_scope(request)
+        body, err = read_json_request_header(request, self._TODO_DATA_HEADER, 256_000)
+        if err is not None:
+            return err
+        payload = body if isinstance(body, dict) else {}
+        result = todo_create_item(slug, payload, scope)
+        if result.get("error"):
+            return _http_error(400, result["error"])
+        return _http_json_response(result, status=201)
+
+    def _handle_todo_item_update(self, request: WsRequest, slug: str, item_id: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        scope = self._agenda_todos_scope(request)
+        body, err = read_json_request_header(request, self._TODO_DATA_HEADER, 256_000)
+        if err is not None:
+            return err
+        changes = body if isinstance(body, dict) else {}
+        result = todo_update_item(slug, item_id, changes, scope)
+        if result.get("error"):
+            return _http_error(400, result["error"])
+        return _http_json_response(result)
+
+    def _handle_todo_item_delete(self, request: WsRequest, slug: str, item_id: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        scope = self._agenda_todos_scope(request)
+        result = todo_delete_item(slug, item_id, scope)
+        if result.get("error"):
+            return _http_error(404, result["error"])
+        return _http_json_response(result)
+
+    def _handle_todo_users(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        scope = self._agenda_todos_scope(request)
+        body, err = read_json_request_header(request, self._TODO_DATA_HEADER, 256_000)
+        if err is not None:
+            # No data header => GET; present => PATCH.
+            return _http_json_response(todo_fetch_users(scope))
+        users = body if isinstance(body, dict) else {}
+        result = todo_update_users(users, scope)
+        if result.get("error"):
+            return _http_error(400, result["error"])
+        return _http_json_response(result)
+
+    def _handle_todo_migrate(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        scope = self._agenda_todos_scope(request)
+        return _http_json_response(todo_migrate_legacy(scope))
+
+    def _agenda_todos_scope(self, request: WsRequest) -> WorkspaceScope:
+        """Resolve the workspace scope for agenda/todos requests."""
+        query = _parse_query(request.path)
+        chat_id = _query_first(query, "chat_id")
+        if chat_id:
+            scope = self.workspaces.scope_for_session_key(f"websocket:{chat_id}")
+        else:
+            scope = self.workspaces.default_scope()
+        return scope
 
     def _handle_commands(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
