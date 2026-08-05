@@ -770,19 +770,23 @@ class ChannelManager:
                     channel = self.channels.get(msg.channel)
                     if channel is not None and channel.show_reasoning:
                         await self._send_with_retry(channel, msg)
+                    await self.bus.ack_outbound(msg)
                     continue
 
                 if progress_event:
                     if progress_event.tool_hint and not self._should_send_progress(
                         msg.channel, tool_hint=True,
                     ):
+                        await self.bus.ack_outbound(msg)
                         continue
                     if not progress_event.tool_hint and not self._should_send_progress(
                         msg.channel, tool_hint=False,
                     ):
+                        await self.bus.ack_outbound(msg)
                         continue
 
                 if isinstance(event, RetryWaitEvent):
+                    await self.bus.ack_outbound(msg)
                     continue
 
                 if (
@@ -790,6 +794,7 @@ class ChannelManager:
                     and msg.channel == "websocket"
                     and "websocket" not in self.channels
                 ):
+                    await self.bus.ack_outbound(msg)
                     continue
 
                 # Coalesce consecutive stream delta messages for the same (channel, chat_id)
@@ -811,6 +816,7 @@ class ChannelManager:
                     ):
                         if self._should_suppress_outbound(msg):
                             logger.info("Suppressing duplicate outbound message to {}:{}", msg.channel, msg.chat_id)
+                            await self.bus.ack_outbound(msg)
                             continue
                     await self._send_with_retry(channel, msg)
                 else:

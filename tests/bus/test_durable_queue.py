@@ -86,6 +86,18 @@ async def test_durable_outbound_roundtrip(bus: MessageBus, tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_durable_outbound_fifo_order(bus: MessageBus) -> None:
+    # Streamed deltas must be consumed in publication order; the on-disk
+    # filenames are random UUIDs, so ordering must come from mtime.
+    for i in range(8):
+        await bus.publish_outbound(OutboundMessage(channel="websocket", chat_id="c1", content=f"d{i}"))
+    consumed = [await bus.consume_outbound() for _ in range(8)]
+    assert [m.content for m in consumed] == [f"d{i}" for i in range(8)]
+    for m in consumed:
+        await bus.ack_outbound(m)
+
+
+@pytest.mark.asyncio
 async def test_in_memory_bus_is_not_durable(tmp_path: Path) -> None:
     bus = MessageBus()
     msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="x")
@@ -131,3 +143,36 @@ async def test_durable_publish_wakes_consumer(bus: MessageBus) -> None:
     await asyncio.wait_for(task, timeout=1.0)
     assert consumed is not None
     assert consumed.content == "wake"
+
+
+@pytest.mark.asyncio
+async def test_durable_consume_picks_up_signalless_file(bus: MessageBus, tmp_path: Path) -> None:
+    """A file in inbox with no pending signal (signal desync from a crash or
+    recovery race) must still be consumed; the inbox is the source of truth."""
+    import json as _json
+
+    outbound_dir = tmp_path / "bus" / "outbound" / "inbox"
+    outbound_dir.mkdir(parents=True, exist_ok=True)
+    (outbound_dir / "orphan.json").write_text(
+        _json.dumps({"channel": "websocket", "chat_id": "c1", "content": "orphan"})
+    )
+    msg = await asyncio.wait_for(bus.consume_outbound(), timeout=2)
+    assert msg.content == "orphan"
+    await bus.ack_outbound(msg)
+
+
+@pytest.mark.asyncio
+async def test_coalesced_delta_keeps_delivery_id() -> None:
+    """replace_outbound_event must not drop the durable-queue ack id, or
+    coalesced stream deltas leak their processing file forever."""
+    from nanobot.bus.outbound_events import (
+        StreamDeltaEvent,
+        replace_outbound_event,
+    )
+
+    msg = OutboundMessage(channel="websocket", chat_id="c1", content="a")
+    msg._delivery_id = "abc123"
+    merged = replace_outbound_event(
+        msg, StreamDeltaEvent(content="ab", stream_id="s1"), content="ab"
+    )
+    assert merged._delivery_id == "abc123"

@@ -64,6 +64,11 @@ from nanobot.webui.websocket_logging import websockets_server_logger
 
 # Plain HTTP WebUI routes also run through websockets.process_request.
 _WEBUI_HTTP_OPEN_TIMEOUT_S = 360.0
+# A client that stops reading (backgrounded tab, dead browser) makes
+# connection.send() block forever. Bound each send so one hung connection
+# cannot wedge the single outbound dispatcher. Library guidance: drop the
+# connection rather than wait on a full write buffer.
+_WEBSOCKET_SEND_TIMEOUT_S = 30.0
 
 
 class WebSocketConfig(Base):
@@ -798,13 +803,26 @@ class WebSocketChannel(BaseChannel):
     async def _safe_send_to(self, connection: Any, raw: str, *, label: str = "") -> None:
         """Send a raw frame to one connection, cleaning up on ConnectionClosed."""
         try:
-            await connection.send(raw)
+            # A stalled client (full TCP buffer / backgrounded tab that stopped
+            # reading) makes ``connection.send`` block forever. Bound it so one
+            # hung connection cannot wedge the single outbound dispatcher and
+            # starve every other channel. On timeout the connection is dropped.
+            await asyncio.wait_for(connection.send(raw), timeout=_WEBSOCKET_SEND_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            self._cleanup_connection(connection)
+            self._abort_connection(connection)
+            self.logger.warning("connection send timed out{}; dropping connection", label)
         except ConnectionClosed:
             self._cleanup_connection(connection)
             self.logger.warning("connection gone{}", label)
         except Exception:
             self.logger.exception("send failed{}", label)
             raise
+
+    def _abort_connection(self, connection: Any) -> None:
+        """Force-close a connection whose send timed out (send state is unknown)."""
+        with suppress(Exception):
+            connection.transport.abort()
 
     async def send(self, msg: OutboundMessage) -> None:
         event = outbound_event_from_message(msg)

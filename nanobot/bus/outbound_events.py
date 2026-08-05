@@ -146,11 +146,15 @@ def replace_outbound_event(
 ) -> OutboundMessage:
     """Return *msg* with a new event and optional content."""
 
-    return replace(
+    result = replace(
         msg,
         content=_event_content(event) if content is None else content,
         event=event,
     )
+    delivery_id = getattr(msg, "_delivery_id", None)
+    if delivery_id is not None:
+        result._delivery_id = delivery_id
+    return result
 
 
 def _event_content(event: OutboundEvent) -> str:

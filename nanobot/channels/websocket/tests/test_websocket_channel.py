@@ -3772,3 +3772,29 @@ async def test_subscribe_subagent_is_quiet_when_subagent_missing(bus) -> None:
     calls = fake_connection.send.call_args_list
     assert any("subagent_subscribed" in c.args[0] for c in calls)
     assert not any("subagent_update" in c.args[0] for c in calls)
+
+
+def test_safe_send_drops_hung_connection(monkeypatch: Any) -> None:
+    """A stalled client must not block the dispatcher: send times out and the
+    connection is aborted instead of waiting forever."""
+    import nanobot.channels.websocket.runtime as rt
+
+    bus = MagicMock()
+    channel = _ch(bus, workspace_path=Path.cwd())
+    monkeypatch.setattr(rt, "_WEBSOCKET_SEND_TIMEOUT_S", 0.05)
+
+    async def hung_send(_raw: str) -> None:
+        await asyncio.sleep(3600)
+
+    fake_connection = MagicMock()
+    fake_connection.send.side_effect = hung_send
+    fake_connection.transport = MagicMock()
+
+    async def exercise() -> None:
+        channel._attach(fake_connection, "chat-x")
+        await channel._safe_send_to(fake_connection, '{"ok":true}')
+        assert "chat-x" not in channel._subs
+        assert fake_connection not in channel._conn_chats
+        assert fake_connection.transport.abort.call_count == 1
+
+    asyncio.run(exercise())

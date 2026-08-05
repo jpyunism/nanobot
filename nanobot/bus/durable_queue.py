@@ -169,7 +169,10 @@ class DurableMessageQueue:
         self._processing: dict[str, Path] = {}
 
     def _next_inbox_file(self) -> Path | None:
-        files = sorted(self.inbox_dir.glob("*.json"))
+        # Filenames are random UUIDs, so lexical order is meaningless. Sort by
+        # mtime (insertion order) so streamed deltas are consumed FIFO instead
+        # of in a scrambled order.
+        files = sorted(self.inbox_dir.glob("*.json"), key=lambda p: p.stat().st_mtime_ns)
         for path in files:
             if path.is_file():
                 return path
@@ -229,15 +232,14 @@ class DurableInboundQueue(DurableMessageQueue):
         self._publish(_inbound_to_dict(msg), put_signal=lambda: self._signal.put("published"))
 
     async def consume(self) -> InboundMessage:
-        await self._signal.get()
         path = self._next_inbox_file()
         while path is None:
-            # Recover could race with consume; wait a bit and retry.
-            await asyncio.sleep(0.001)
+            # The signal is only a wake-up hint; the inbox is the source of
+            # truth. If a signal fires while the inbox looks empty (e.g. a
+            # burst is mid-write) keep waiting for one, but never treat a
+            # signal as an obligation to claim a file -- that would orphan it.
+            await self._signal.get()
             path = self._next_inbox_file()
-            if path is None:
-                await self._signal.get()
-                path = self._next_inbox_file()
         delivery_id, processing_path = self._claim(path)
         data = json.loads(processing_path.read_text(encoding="utf-8"))
         msg = _dict_to_inbound(data)
@@ -277,14 +279,10 @@ class DurableOutboundQueue(DurableMessageQueue):
         self._publish(_outbound_to_dict(msg), put_signal=lambda: self._signal.put("published"))
 
     async def consume(self) -> OutboundMessage:
-        await self._signal.get()
         path = self._next_inbox_file()
         while path is None:
-            await asyncio.sleep(0.001)
+            await self._signal.get()
             path = self._next_inbox_file()
-            if path is None:
-                await self._signal.get()
-                path = self._next_inbox_file()
         delivery_id, processing_path = self._claim(path)
         data = json.loads(processing_path.read_text(encoding="utf-8"))
         msg = _dict_to_outbound(data)
