@@ -300,6 +300,8 @@ export interface ChatSummary {
   workspaceScope?: WorkspaceScopePayload | null;
   /** Project id when this chat is bound to a project. */
   projectId?: string | null;
+  /** Todo list slug when this chat is bound to a todo list (else null). */
+  todoList?: string | null;
 }
 
 export type WorkspaceAccessMode = "restricted" | "full";
@@ -1420,3 +1422,100 @@ export type SubagentLifecycleEvent =
   | "tool_result"
   | "completed"
   | "failed";
+
+// -- Todos --------------------------------------------------------------------
+
+export interface TodoUser {
+  name: string;
+  phone?: string | null;
+  authorized: boolean;
+}
+
+export interface TodoUsersPayload {
+  users: Record<string, TodoUser>;
+}
+
+export interface TodoItem {
+  id: string;
+  text: string;
+  done: boolean;
+  created: string;
+  done_at: string | null;
+  due_date: string | null;
+  link: string | null;
+  price_clp: number | null;
+  assignee: string | null;
+  notes?: string | null;
+}
+
+export interface TodoList {
+  id: string;
+  slug: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  items: TodoItem[];
+}
+
+export interface TodoListSummary {
+  id: string;
+  slug: string;
+  name: string;
+  item_count: number;
+  done_count: number;
+  updated_at: string;
+}
+
+export interface TodoListsPayload {
+  lists: TodoListSummary[];
+  error?: string;
+}
+
+export interface TodoListDetailPayload {
+  list: TodoList;
+  users: Record<string, TodoUser>;
+  error?: string;
+}
+
+// -- Agenda -------------------------------------------------------------------
+
+export type AgendaCategory =
+  | "personal"
+  | "work"
+  | "health"
+  | "reminder"
+  | "journal"
+  | "other";
+
+export interface AgendaAppointment {
+  id: string;
+  title: string;
+  date: string; // YYYY-MM-DD
+  time: string | null; // HH:MM or null for all-day
+  all_day: boolean;
+  description: string;
+  category: AgendaCategory | string;
+  color: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgendaListPayload {
+  appointments: AgendaAppointment[];
+  error?: string;
+}
+
+export interface AgendaDetailPayload {
+  appointment?: AgendaAppointment;
+  error?: string;
+}
+
+export interface AgendaCreatePayload {
+  title: string;
+  date: string;
+  time?: string | null;
+  all_day?: boolean;
+  description?: string;
+  category?: AgendaCategory | string;
+  color?: string;
+}
