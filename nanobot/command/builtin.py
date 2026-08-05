@@ -218,6 +218,20 @@ async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
         metadata=dict(msg.metadata or {}),
     )
 
+    # Acknowledge the inbound message before scheduling the restart so
+    # durable queues don't leave the /restart message in processing/ for
+    # the next startup.
+    try:
+        loop = ctx.loop
+        if loop is not None:
+            bus = getattr(loop, "bus", None)
+            if bus is not None:
+                await bus.ack_inbound(msg)
+    except Exception:
+        from loguru import logger
+
+        logger.exception("Failed to ack /restart message before restart")
+
     async def _do_restart():
         await asyncio.sleep(1)
         argv = [sys.executable, "-m", "nanobot"] + sys.argv[1:]

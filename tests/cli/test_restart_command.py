@@ -186,6 +186,68 @@ class TestRestartCommand:
             await scheduled[0]
 
     @pytest.mark.asyncio
+    async def test_restart_acks_inbound_before_exec(self):
+        """Verify /restart acks the durable inbound message before exiting."""
+        loop, bus = _make_loop()
+        loop.restart_mode = "exec"
+        msg = InboundMessage(channel="websocket", sender_id="u1", chat_id="c1", content="/restart")
+
+        acked_messages: list[InboundMessage] = []
+        original_ack = bus.ack_inbound
+
+        async def _tracking_ack(inbound_msg: InboundMessage) -> None:
+            acked_messages.append(inbound_msg)
+            await original_ack(inbound_msg)
+
+        bus.ack_inbound = _tracking_ack
+
+        async def _fast_sleep(_delay: float) -> None:
+            return None
+
+        scheduled: list[asyncio.Task] = []
+
+        def _capture_task(coro):
+            task = asyncio.create_task(coro)
+            scheduled.append(task)
+            return task
+
+        fake_asyncio = SimpleNamespace(
+            sleep=_fast_sleep,
+            create_task=_capture_task,
+        )
+
+        execv_calls: list[tuple] = []
+
+        def _fake_execv(_path: str, _argv: list[str]) -> None:
+            execv_calls.append((_path, _argv))
+
+        with patch.object(loop, "_dispatch", new_callable=AsyncMock) as mock_dispatch, \
+             patch("nanobot.command.builtin.asyncio", new=fake_asyncio), \
+             patch("nanobot.command.builtin.os.execv", new=_fake_execv):
+            await bus.publish_inbound(msg)
+
+            loop._running = True
+            run_task = asyncio.create_task(loop.run())
+            out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+            loop._running = False
+            run_task.cancel()
+            try:
+                await run_task
+            except asyncio.CancelledError:
+                pass
+
+            mock_dispatch.assert_not_called()
+            assert "Restarting" in out.content
+            assert scheduled
+            await scheduled[0]
+
+        assert execv_calls, "os.execv should have been called"
+        assert acked_messages, "inbound message should have been acked"
+        assert acked_messages[0] is msg
+        # The ack must happen before execv; since _do_restart awaits ack_inbound
+        # before calling os.execv, the call order is guaranteed.
+
+    @pytest.mark.asyncio
     async def test_status_intercepted_in_run_loop(self):
         """Verify /status is handled at the run-loop level for immediate replies."""
         loop, bus = _make_loop()
