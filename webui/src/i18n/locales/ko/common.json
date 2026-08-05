@@ -114,6 +114,8 @@
     "rows": {
       "theme": "테마",
       "language": "언어",
+      "font": "글꼴",
+      "accent": "색상 테마",
       "provider": "제공자",
       "model": "모델",
       "restart": "nanobot 재시작",
@@ -164,6 +166,8 @@
     "help": {
       "theme": "밝은 모드와 어두운 모드를 전환합니다.",
       "language": "WebUI에서 사용할 언어를 선택합니다.",
+      "font": "이 브라우저에만 저장됩니다.",
+      "accent": "이 브라우저에만 저장됩니다.",
       "provider": "새 모델 요청을 처리할 제공자를 선택합니다.",
       "model": "이 프리셋에서 사용할 모델을 선택하세요.",
       "configPath": "현재 게이트웨이가 사용하는 설정 파일입니다.",
@@ -209,6 +213,14 @@
     "values": {
       "light": "라이트",
       "dark": "다크",
+      "system": "시스템",
+      "serif": "세리프",
+      "mono": "고정폭",
+      "blue": "파란색",
+      "green": "초록색",
+      "purple": "보라색",
+      "orange": "주황색",
+      "rose": "장미색",
       "notAvailable": "사용 불가",
       "enabled": "활성화됨",
       "disabled": "비활성화됨",

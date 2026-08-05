@@ -571,7 +571,9 @@ describe("SettingsView Apps catalog", () => {
 
     expect(await screen.findByText("Add tools to nanobot, then @ them in chat.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Ready" })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("button", { name: "Apps" })).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getAllByRole("button", { name: "Apps" }).some((b) => b.getAttribute("aria-pressed") === "true"),
+    ).toBe(true);
     expect(screen.getByRole("button", { name: "Integrations" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Plugins" })).not.toBeInTheDocument();
     expect(screen.queryByText("Api")).not.toBeInTheDocument();

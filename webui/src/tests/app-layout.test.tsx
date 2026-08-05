@@ -345,21 +345,16 @@ describe("App layout", () => {
     expect(asideClassNames.some((cls) => cls.includes("lg:block"))).toBe(true);
   });
 
-  it("places Automations after Skills in the main sidebar", async () => {
+  it("places Automations in the main sidebar", async () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    const appsButton = within(sidebar).getByRole("button", { name: "Apps" });
-    const skillsButton = within(sidebar).getByRole("button", { name: "Skills" });
     const automationsButton = within(sidebar).getByRole("button", { name: "Automations" });
 
-    expect(appsButton.compareDocumentPosition(skillsButton) & Node.DOCUMENT_POSITION_FOLLOWING)
-      .toBeTruthy();
-    expect(
-      skillsButton.compareDocumentPosition(automationsButton) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(within(sidebar).queryByRole("button", { name: "Apps" })).not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("button", { name: "Skills" })).not.toBeInTheDocument();
+    expect(automationsButton).toBeInTheDocument();
   });
 
   it("restores the Settings route after a restart fallback hash", async () => {
@@ -394,7 +389,7 @@ describe("App layout", () => {
     expect(window.location.hash).toBe("#/settings?section=channels");
   });
 
-  it("opens Skills from the main sidebar", async () => {
+  it("opens Skills from the settings nav", async () => {
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
       "/api/settings/cli-apps": { apps: [], installed_count: 0, catalog_updated_at: "2026-04-18" },
@@ -431,27 +426,21 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    const skillsButton = within(sidebar).getByRole("button", { name: "Skills" });
+    expect(within(sidebar).queryByRole("button", { name: "Skills" })).not.toBeInTheDocument();
 
-    fireEvent.click(skillsButton);
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
+    const settingsNav = await screen.findByRole("navigation", { name: "Settings sections" });
+    fireEvent.click(within(settingsNav).getByRole("button", { name: "Skills" }));
 
-    expect(await screen.findByRole("heading", { name: "Skills" })).toBeInTheDocument();
-    expect(screen.getByText("cron")).toBeInTheDocument();
+    expect(await screen.findByText("cron")).toBeInTheDocument();
     expect(screen.getByText("github")).toBeInTheDocument();
     expect(screen.getByText("Missing: CLI: gh")).toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "Sidebar navigation" })).toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "Settings sections" })).not.toBeInTheDocument();
-    expect(within(sidebar).getByRole("button", { name: "Skills" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-    expect(document.title).toBe("Skills · nanobot");
+    expect(
+      within(await screen.findByRole("navigation", { name: "Settings sections" })).getByRole("button", { name: "Skills" }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(document.title).toBe("Settings · nanobot");
 
-    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
-    expect(await screen.findByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
-
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Skills" }));
-    expect(await screen.findByRole("heading", { name: "Skills" })).toBeInTheDocument();
+    fireEvent.click(within(await screen.findByRole("navigation", { name: "Settings sections" })).getByRole("button", { name: "Skills" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Open details for github" }));
 
@@ -1618,8 +1607,6 @@ describe("App layout", () => {
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     const searchButton = within(sidebar).getByRole("button", { name: "Search" });
-    const appsButton = within(sidebar).getByRole("button", { name: "Apps" });
-    expect(searchButton.compareDocumentPosition(appsButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
 
     expect(
@@ -1645,7 +1632,8 @@ describe("App layout", () => {
     expect(within(settingsNav).getByRole("button", { name: "Image" })).toBeInTheDocument();
     expect(within(settingsNav).queryByRole("button", { name: "Files" })).not.toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Web" })).toBeInTheDocument();
-    expect(within(settingsNav).queryByRole("button", { name: "Apps" })).not.toBeInTheDocument();
+    expect(within(settingsNav).getByRole("button", { name: "Apps" })).toBeInTheDocument();
+    expect(within(settingsNav).getByRole("button", { name: "Skills" })).toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Security" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
     fireEvent.pointerDown(within(settingsNav).getByRole("button", { name: "Settings: Overview" }));
@@ -1825,7 +1813,7 @@ describe("App layout", () => {
     expect(window.location.hash).toBe("#/settings?section=voice");
   });
 
-  it("opens Apps from the main sidebar without replacing the sidebar", async () => {
+  it("opens Apps from the settings nav", async () => {
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
       "/api/settings/cli-apps": { apps: [], installed_count: 0, catalog_updated_at: "2026-04-18" },
@@ -1836,18 +1824,17 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    const appsButton = within(sidebar).getByRole("button", { name: "Apps" });
+    expect(within(sidebar).queryByRole("button", { name: "Apps" })).not.toBeInTheDocument();
 
-    fireEvent.click(appsButton);
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
+    const settingsNav = await screen.findByRole("navigation", { name: "Settings sections" });
+    fireEvent.click(within(settingsNav).getByRole("button", { name: "Apps" }));
 
-    expect(await screen.findByRole("heading", { name: "Apps" })).toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "Sidebar navigation" })).toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "Settings sections" })).not.toBeInTheDocument();
-    expect(within(sidebar).getByRole("button", { name: "Apps" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-    expect(document.title).toBe("Apps · nanobot");
+    expect(await screen.findByRole("button", { name: "Ready" })).toBeInTheDocument();
+    expect(
+      within(await screen.findByRole("navigation", { name: "Settings sections" })).getByRole("button", { name: "Apps" }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(document.title).toBe("Settings · nanobot");
   });
 
   it("returns from settings to the blank start page when no session was active", async () => {

@@ -114,6 +114,8 @@
     "rows": {
       "theme": "テーマ",
       "language": "言語",
+      "font": "フォント",
+      "accent": "カラーテーマ",
       "provider": "プロバイダー",
       "model": "モデル",
       "restart": "nanobot を再起動",
@@ -164,6 +166,8 @@
     "help": {
       "theme": "ライト表示とダーク表示を切り替えます。",
       "language": "WebUI で使用する言語を選択します。",
+      "font": "このブラウザのみに保存されます。",
+      "accent": "このブラウザのみに保存されます。",
       "provider": "新しいモデルリクエストに使うプロバイダーを選択します。",
       "model": "このプリセットで使用するモデルを選択します。",
       "configPath": "現在ゲートウェイが使用している設定ファイルです。",
@@ -209,6 +213,14 @@
     "values": {
       "light": "ライト",
       "dark": "ダーク",
+      "system": "システム",
+      "serif": "セリフ",
+      "mono": "等幅",
+      "blue": "青",
+      "green": "緑",
+      "purple": "紫",
+      "orange": "オレンジ",
+      "rose": "ローズ",
       "notAvailable": "利用不可",
       "enabled": "有効",
       "disabled": "無効",

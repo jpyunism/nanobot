@@ -114,6 +114,8 @@
     "rows": {
       "theme": "Thème",
       "language": "Langue",
+      "font": "Police",
+      "accent": "Thème de couleur",
       "provider": "Fournisseur",
       "model": "Modèle",
       "restart": "Redémarrer nanobot",
@@ -164,6 +166,8 @@
     "help": {
       "theme": "Basculer entre l’apparence claire et sombre.",
       "language": "Choisissez la langue utilisée par WebUI.",
+      "font": "Enregistré uniquement dans ce navigateur.",
+      "accent": "Enregistré uniquement dans ce navigateur.",
       "provider": "Sélectionnez le fournisseur à utiliser pour les nouvelles requêtes de modèle.",
       "model": "Choisissez le modèle utilisé par ce préréglage.",
       "configPath": "Le fichier de configuration actuellement utilisé par la passerelle.",
@@ -209,6 +213,14 @@
     "values": {
       "light": "Clair",
       "dark": "Sombre",
+      "system": "Système",
+      "serif": "Serif",
+      "mono": "Mono",
+      "blue": "Bleu",
+      "green": "Vert",
+      "purple": "Violet",
+      "orange": "Orange",
+      "rose": "Rose",
       "notAvailable": "Indisponible",
       "enabled": "Activé",
       "disabled": "Désactivé",

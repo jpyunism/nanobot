@@ -56,9 +56,7 @@ export function useSidebarProps({
       onRequestRenameProject: chatActions.onRequestRenameProject,
       onNewChatInProject: chatActions.onNewInProject,
       onOpenSettings: utility.onOpenSettings,
-      onOpenApps: () => onOpenUtility("apps"),
       onOpenAutomations: () => onOpenUtility("automations"),
-      onOpenSkills: () => onOpenUtility("skills"),
       onOpenProjects: () => onOpenUtility("projects"),
       onOpenWorkspace: () => onOpenUtility("workspace"),
       onOpenTodos,
@@ -66,9 +64,7 @@ export function useSidebarProps({
       onSettingsIntent: utility.onSettingsIntent,
       onOpenSearch: chatActions.onOpenSessionSearch,
       activeUtility:
-        view === "apps" ||
         view === "automations" ||
-        view === "skills" ||
         view === "projects" ||
         view === "workspace" ||
         view === "todos" ||

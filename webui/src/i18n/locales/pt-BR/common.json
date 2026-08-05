@@ -166,6 +166,8 @@
     "rows": {
       "theme": "Tema",
       "language": "Idioma",
+      "font": "Fonte",
+      "accent": "Tema de cor",
       "provider": "Provedor",
       "model": "Modelo",
       "restart": "Reiniciar nanobot",
@@ -216,6 +218,8 @@
     "help": {
       "theme": "Alterna entre aparência clara e escura.",
       "language": "Escolha o idioma usado pela WebUI.",
+      "font": "Salvo apenas neste navegador.",
+      "accent": "Salvo apenas neste navegador.",
       "provider": "Selecione o provedor que atenderá as novas requisições de modelo.",
       "model": "Escolha o modelo usado por esta predefinição.",
       "configPath": "O arquivo de configuração do gateway em uso.",
@@ -357,6 +361,14 @@
     "values": {
       "light": "Claro",
       "dark": "Escuro",
+      "system": "Sistema",
+      "serif": "Serif",
+      "mono": "Mono",
+      "blue": "Azul",
+      "green": "Verde",
+      "purple": "Roxo",
+      "orange": "Laranja",
+      "rose": "Rosa",
       "notAvailable": "Indisponível",
       "enabled": "Habilitado",
       "disabled": "Desabilitado",

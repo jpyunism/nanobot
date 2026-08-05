@@ -114,6 +114,8 @@
     "rows": {
       "theme": "Chủ đề",
       "language": "Ngôn ngữ",
+      "font": "Phông chữ",
+      "accent": "Chủ đề màu",
       "provider": "Nhà cung cấp",
       "model": "Mô hình",
       "restart": "Khởi động lại nanobot",
@@ -164,6 +166,8 @@
     "help": {
       "theme": "Chuyển giữa giao diện sáng và tối.",
       "language": "Chọn ngôn ngữ dùng trong WebUI.",
+      "font": "Chỉ lưu trong trình duyệt này.",
+      "accent": "Chỉ lưu trong trình duyệt này.",
       "provider": "Selecciona el proveedor para nuevas solicitudes de modelo.",
       "model": "Chọn mô hình mà cấu hình sẵn này sử dụng.",
       "configPath": "Archivo de configuración que usa actualmente el gateway.",
@@ -209,6 +213,14 @@
     "values": {
       "light": "Sáng",
       "dark": "Tối",
+      "system": "Hệ thống",
+      "serif": "Serif",
+      "mono": "Mono",
+      "blue": "Xanh dương",
+      "green": "Xanh lục",
+      "purple": "Tím",
+      "orange": "Cam",
+      "rose": "Hồng",
       "notAvailable": "Không khả dụng",
       "enabled": "Đã bật",
       "disabled": "Đã tắt",

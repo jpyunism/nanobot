@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from "react";
 import {
   Archive,
-  Brain,
   CalendarClock,
   CalendarDays,
   FolderKanban,
@@ -11,7 +10,6 @@ import {
   Search,
   Settings,
   SquarePen,
-  Blocks,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -38,8 +36,6 @@ interface SidebarProps {
   onRequestRenameProject: (projectKey: string, label: string) => void;
   onNewChatInProject: (projectPath: string, projectName: string) => void;
   onOpenSettings: () => void;
-  onOpenApps: () => void;
-  onOpenSkills: () => void;
   onOpenAutomations: () => void;
   onOpenProjects?: () => void;
   onOpenWorkspace?: () => void;
@@ -47,7 +43,7 @@ interface SidebarProps {
   onOpenAgenda?: () => void;
   onSettingsIntent?: () => void;
   onOpenSearch: () => void;
-  activeUtility?: "apps" | "skills" | "automations" | "projects" | "workspace" | "todos" | "agenda" | null;
+  activeUtility?: "automations" | "projects" | "workspace" | "todos" | "agenda" | null;
   onToggleArchived: () => void;
   onCollapse: () => void;
   onExpand?: () => void;
@@ -211,22 +207,6 @@ export function Sidebar(props: SidebarProps) {
             icon={<CalendarDays className="h-4 w-4" />}
           />
         )}
-        <SidebarActionButton
-          collapsed={collapsed}
-          label={t("sidebar.apps")}
-          onClick={props.onOpenApps}
-          onIntent={props.onSettingsIntent}
-          active={props.activeUtility === "apps"}
-          icon={<Blocks className="h-4 w-4" />}
-        />
-        <SidebarActionButton
-          collapsed={collapsed}
-          label={t("sidebar.skills.title")}
-          onClick={props.onOpenSkills}
-          onIntent={props.onSettingsIntent}
-          active={props.activeUtility === "skills"}
-          icon={<Brain className="h-4 w-4" />}
-        />
         <SidebarActionButton
           collapsed={collapsed}
           label={t("sidebar.automations", { defaultValue: "Automations" })}

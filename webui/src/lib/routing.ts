@@ -47,7 +47,7 @@ export function defaultShellRoute(): ShellRoute {
 }
 
 export function shellViewForSettingsSection(section: SettingsSectionKey): ShellView {
-  if (section === "apps" || section === "automations" || section === "skills") return section;
+  if (section === "automations") return section;
   return "settings";
 }
 

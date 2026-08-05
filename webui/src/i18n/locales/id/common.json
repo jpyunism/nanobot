@@ -114,6 +114,8 @@
     "rows": {
       "theme": "Tema",
       "language": "Bahasa",
+      "font": "Font",
+      "accent": "Tema warna",
       "provider": "Penyedia",
       "model": "Model",
       "restart": "Mulai ulang nanobot",
@@ -164,6 +166,8 @@
     "help": {
       "theme": "Beralih antara tampilan terang dan gelap.",
       "language": "Pilih bahasa yang digunakan WebUI.",
+      "font": "Hanya disimpan di browser ini.",
+      "accent": "Hanya disimpan di browser ini.",
       "provider": "Selecciona el proveedor para nuevas solicitudes de modelo.",
       "model": "Pilih model yang digunakan oleh preset ini.",
       "configPath": "Archivo de configuración que usa actualmente el gateway.",
@@ -209,6 +213,14 @@
     "values": {
       "light": "Terang",
       "dark": "Gelap",
+      "system": "Sistem",
+      "serif": "Serif",
+      "mono": "Mono",
+      "blue": "Biru",
+      "green": "Hijau",
+      "purple": "Ungu",
+      "orange": "Oranye",
+      "rose": "Merah muda",
       "notAvailable": "Tidak tersedia",
       "enabled": "Aktif",
       "disabled": "Nonaktif",

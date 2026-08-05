@@ -114,6 +114,8 @@
     "rows": {
       "theme": "主題",
       "language": "語言",
+      "font": "字型",
+      "accent": "顏色主題",
       "provider": "供應商",
       "model": "模型",
       "restart": "重新啟動 nanobot",
@@ -164,6 +166,8 @@
     "help": {
       "theme": "在淺色與深色外觀之間切換。",
       "language": "選擇 WebUI 使用的語言。",
+      "font": "僅保存在此瀏覽器中。",
+      "accent": "僅保存在此瀏覽器中。",
       "provider": "選擇處理新模型請求的供應商。",
       "model": "選擇此預設使用的模型。",
       "configPath": "目前閘道使用中的設定檔。",
@@ -209,6 +213,14 @@
     "values": {
       "light": "淺色",
       "dark": "深色",
+      "system": "系統",
+      "serif": "襯線",
+      "mono": "等寬",
+      "blue": "藍色",
+      "green": "綠色",
+      "purple": "紫色",
+      "orange": "橙色",
+      "rose": "玫瑰",
       "notAvailable": "不可用",
       "enabled": "已啟用",
       "disabled": "已停用",
