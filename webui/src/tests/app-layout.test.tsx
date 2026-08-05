@@ -1606,7 +1606,6 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    const searchButton = within(sidebar).getByRole("button", { name: "Search" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
 
     expect(
