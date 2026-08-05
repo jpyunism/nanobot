@@ -98,8 +98,8 @@ export function AgendaSurface({ agenda, onBackToChat }: Props) {
 
   const sendComposer = useCallback(() => {
     const text = composerText.trim();
-    if (!text || agenda.assistant.running || !agenda.chatKey) return;
-    agenda.sendMessage(text);
+    if (!text || agenda.assistant.running) return;
+    void agenda.sendMessage(text);
     setComposerText("");
   }, [composerText, agenda]);
 
@@ -387,20 +387,13 @@ export function AgendaSurface({ agenda, onBackToChat }: Props) {
                   <Sparkles className="h-3 w-3" />
                   {t("agenda.askAi")}
                 </div>
-                {agenda.chatKey ? null : (
-                  <span className="text-[11px] text-muted-foreground/70">{t("agenda.composer.connecting")}</span>
-                )}
               </div>
               <div className="flex items-end gap-2">
                 <textarea
                   value={composerText}
                   onChange={(e) => setComposerText(e.target.value)}
-                  placeholder={
-                    agenda.chatKey
-                      ? t("agenda.composer.placeholder")
-                      : t("agenda.composer.connecting")
-                  }
-                  disabled={!agenda.chatKey}
+                  placeholder={t("agenda.composer.placeholder")}
+                  disabled={agenda.assistant.running}
                   rows={2}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
@@ -413,10 +406,14 @@ export function AgendaSurface({ agenda, onBackToChat }: Props) {
                 <Button
                   size="icon"
                   onClick={sendComposer}
-                  disabled={!agenda.chatKey || !composerText.trim() || agenda.assistant.running}
+                  disabled={!composerText.trim() || agenda.assistant.running}
                   aria-label={t("agenda.composer.send")}
                 >
-                  <Send className="h-4 w-4" />
+                  {agenda.assistant.running ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
                 </Button>
               </div>
             </div>

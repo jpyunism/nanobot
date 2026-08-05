@@ -86,6 +86,30 @@ describe("groupSessions by projectId", () => {
     expect(groups.length).toBeGreaterThan(0);
   });
 
+  it("hides agenda and todo surface chats from the non-project sidebar", () => {
+    const normal = makeSession({ updatedAt: "2024-02-01T00:00:00Z" });
+    const agenda = makeSession({
+      updatedAt: "2024-03-01T00:00:00Z",
+      agendaAppointmentId: "__surface__",
+    });
+    const todos = makeSession({
+      updatedAt: "2024-03-02T00:00:00Z",
+      todoList: "groceries",
+    });
+    const groups = groupSessions([normal, agenda, todos], labels, {
+      pinnedKeys: [],
+      archivedKeys: [],
+      titleOverrides: {},
+      projectNameOverrides: {},
+      showArchived: false,
+      sort: "updated_desc",
+      defaultWorkspacePath: null,
+    });
+    const visible = groups.flatMap((g) => g.sessions);
+    expect(visible).toHaveLength(1);
+    expect(visible[0].key).toBe(normal.key);
+  });
+
   it("projectId takes precedence over workspaceScope.project_path", () => {
     const a = makeSession({
       projectId: "alpha",

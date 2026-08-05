@@ -20,6 +20,7 @@ import { useHostSidebarLayout } from "@/hooks/useHostSidebarLayout";
 import { useWorkspaceScope } from "@/hooks/useWorkspaceScope";
 import { useTodos } from "@/hooks/useTodos";
 import { useAgenda } from "@/hooks/useAgenda";
+import { useEphemeralSurfaceCleanup } from "@/hooks/useEphemeralSurfaceCleanup";
 import { useDialogsState } from "@/lib/dialogs";
 import type { RuntimeSurface } from "@/lib/types";
 import type { NanobotClient } from "@/lib/nanobot-client";
@@ -129,7 +130,8 @@ export function useShellBootstrap({
     shouldClearDraftScope: view === "chat" && !activeKey,
   });
   const todos = useTodos(sessions);
-  const agenda = useAgenda(sessions);
+  const agenda = useAgenda();
+  useEphemeralSurfaceCleanup(sessions, loading, deleteChat, token);
   const [todoSlug, setTodoSlug] = useState<string | null>(null);
   const {
     workspaces,

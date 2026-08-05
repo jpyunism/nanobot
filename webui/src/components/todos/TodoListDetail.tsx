@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ArrowLeft,
+  Loader2,
   Plus,
   RefreshCw,
   Send,
@@ -63,9 +64,11 @@ export function TodoListDetail({
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const findChatRef = useRef(onFindChatForSlug);
   const bindChatRef = useRef(onBindChat);
+  const onRefreshRef = useRef(onRefresh);
   const creatingForSlugRef = useRef<string | null>(null);
   findChatRef.current = onFindChatForSlug;
   bindChatRef.current = onBindChat;
+  onRefreshRef.current = onRefresh;
   chatKeyRef.current = chatKey;
 
   // Resolve / create a chat bound to this todo list.
@@ -81,7 +84,7 @@ export function TodoListDetail({
     }
     const existing = findChatRef.current(list.slug);
     if (existing) {
-      setChatKey(existing.key);
+      setChatKey(existing.chatId);
       creatingForSlugRef.current = null;
       return;
     }
@@ -92,16 +95,19 @@ export function TodoListDetail({
     }
     creatingForSlugRef.current = list.slug;
     // No existing chat for this list — create one bound to the list.
+    // chatKey holds the RAW chat_id (uuid) for the WS socket; the prefixed
+    // websocket: key is used only for the metadata bind API.
     let cancelled = false;
     client
       .newChat(10_000, null, { todoList: list.slug })
       .then((chatId) => {
         if (cancelled) return;
-        const key = `websocket:${chatId}`;
-        setChatKey(key);
+        setChatKey(chatId);
         // Bind server-side (metadata) — the new_chat envelope already set
         // todo_list, but call bind for sessions that may already exist.
-        void bindChatRef.current(key, list.slug).catch(() => undefined);
+        void bindChatRef.current(`websocket:${chatId}`, list.slug).catch(
+          () => undefined,
+        );
       })
       .catch(() => {
         creatingForSlugRef.current = null;
@@ -129,6 +135,7 @@ export function TodoListDetail({
         }));
       } else if (ev.event === "turn_end") {
         setAssistant((prev) => ({ ...prev, running: false }));
+        onRefreshRef.current();
       } else if (ev.event === "delta") {
         // Live stream: show partial text
         const text = ev.text ?? "";
@@ -348,7 +355,11 @@ export function TodoListDetail({
               disabled={!chatKey || !composerText.trim() || assistant.running}
               aria-label={t("todos.composer.send", { defaultValue: "Send" })}
             >
-              <Send className="h-4 w-4" />
+              {assistant.running ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
             </Button>
           </div>
         </div>

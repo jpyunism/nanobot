@@ -11,7 +11,6 @@ import {
 import type {
   AgendaAppointment,
   AgendaCreatePayload,
-  ChatSummary,
   InboundEvent,
 } from "@/lib/types";
 
@@ -42,7 +41,7 @@ function sortAppointments(appointments: AgendaAppointment[]): AgendaAppointment[
   });
 }
 
-export function useAgenda(sessions: ChatSummary[]) {
+export function useAgenda() {
   const { token, client } = useClient();
   const tokenRef = useRef(token);
   tokenRef.current = token;
@@ -51,6 +50,7 @@ export function useAgenda(sessions: ChatSummary[]) {
   const [assistant, setAssistant] = useState<AssistantState>(EMPTY);
   const chatKeyRef = useRef(chatKey);
   chatKeyRef.current = chatKey;
+  const sendingRef = useRef(false);
   const refreshSeqRef = useRef(0);
 
   const refresh = useCallback(async () => {
@@ -76,35 +76,28 @@ export function useAgenda(sessions: ChatSummary[]) {
     void refresh();
   }, [refresh]);
 
-  // Find or create a chat bound to the agenda surface.
-  useEffect(() => {
-    if (!client || typeof client.newChat !== "function") {
-      return;
+  // Lazily create (or reuse) the ephemeral chat bound to the agenda surface.
+  // Created on first send so the session-only cleanup never races a fresh chat.
+  // chatKey holds the RAW chat_id (uuid) for the WS socket; the prefixed
+  // websocket: key is used only for the metadata bind API.
+  const ensureChat = useCallback(async (): Promise<string | null> => {
+    if (chatKeyRef.current) return chatKeyRef.current;
+    if (!client || typeof client.newChat !== "function") return null;
+    try {
+      const chatId = await client.newChat(10_000, null, {
+        agendaAppointment: "__surface__",
+      });
+      setChatKey(chatId);
+      void bindChatAgendaApi(
+        tokenRef.current,
+        `websocket:${chatId}`,
+        "__surface__",
+      ).catch(() => undefined);
+      return chatId;
+    } catch {
+      return null;
     }
-    const existing = sessions.find(
-      (s) => s.agendaAppointmentId === "__surface__" && s.channel === "websocket",
-    );
-    if (existing) {
-      setChatKey(existing.key);
-      return;
-    }
-    let cancelled = false;
-    const promise = client.newChat(10_000, null, { agendaAppointment: "__surface__" });
-    if (!(promise instanceof Promise)) {
-      return;
-    }
-    promise
-      .then((chatId) => {
-        if (cancelled) return;
-        const key = `websocket:${chatId}`;
-        setChatKey(key);
-        void bindChatAgendaApi(tokenRef.current, key, "__surface__").catch(() => undefined);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [client, sessions]);
+  }, [client]);
 
   // Subscribe to inbound events for this chat to show the assistant's last reply.
   useEffect(() => {
@@ -120,6 +113,7 @@ export function useAgenda(sessions: ChatSummary[]) {
         setAssistant((prev) => ({ ...prev, running: ev.status === "running" }));
       } else if (ev.event === "turn_end") {
         setAssistant((prev) => ({ ...prev, running: false }));
+        void refresh();
       } else if (ev.event === "delta") {
         const text = ev.text ?? "";
         if (text) setAssistant((prev) => ({ ...prev, lastText: prev.lastText + text }));
@@ -132,12 +126,25 @@ export function useAgenda(sessions: ChatSummary[]) {
   }, [chatKey, client]);
 
   const sendMessage = useCallback(
-    (text: string) => {
-      if (!chatKeyRef.current || !client || typeof client.sendMessage !== "function") return;
-      setAssistant((prev) => ({ ...prev, lastText: "", running: true }));
-      client.sendMessage(chatKeyRef.current, text);
+    async (text: string) => {
+      if (!text.trim() || sendingRef.current) return;
+      sendingRef.current = true;
+      setAssistant({ lastText: "", running: true });
+      try {
+        let key = chatKeyRef.current;
+        if (!key) {
+          key = await ensureChat();
+        }
+        if (!key || !client || typeof client.sendMessage !== "function") {
+          setAssistant(EMPTY);
+          return;
+        }
+        client.sendMessage(key, text);
+      } finally {
+        sendingRef.current = false;
+      }
     },
-    [client],
+    [client, ensureChat],
   );
 
   const createAppointment = useCallback(async (payload: AgendaCreatePayload) => {
