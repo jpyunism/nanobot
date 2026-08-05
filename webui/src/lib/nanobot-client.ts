@@ -359,7 +359,7 @@ export class NanobotClient {
   newChat(
     timeoutMs: number = 5_000,
     workspaceScope?: WorkspaceScopePayload | null,
-    options?: { todoList?: string },
+    options?: { todoList?: string; agendaAppointment?: string },
   ): Promise<string> {
     if (this.pendingNewChat) {
       return Promise.reject(new Error("newChat already in flight"));
@@ -374,6 +374,7 @@ export class NanobotClient {
         type: "new_chat",
         ...(workspaceScope ? { workspace_scope: workspaceScope } : {}),
         ...(options?.todoList ? { todo_list: options.todoList } : {}),
+        ...(options?.agendaAppointment ? { agenda_appointment: options.agendaAppointment } : {}),
       });
     });
   }

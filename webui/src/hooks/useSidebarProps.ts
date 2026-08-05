@@ -7,7 +7,7 @@ type Args = {
   sessions: ChatSummary[];
   activeKey: string | null;
   loading: boolean;
-  view: "chat" | "settings" | "apps" | "automations" | "skills" | "projects" | "workspace";
+  view: "chat" | "settings" | "apps" | "automations" | "skills" | "projects" | "workspace" | "todos" | "agenda";
   sidebarState: SidebarStatePayload;
   workspaces: WorkspacesPayload | null;
   runningChatIdList: string[];
@@ -15,6 +15,8 @@ type Args = {
   chatActions: ActionsApi["chat"];
   utility: ActionsApi["utility"];
   onOpenUtility: ActionsApi["utility"]["onOpen"];
+  onOpenTodos: () => void;
+  onOpenAgenda: () => void;
   token: string;
 };
 
@@ -30,6 +32,8 @@ export function useSidebarProps({
   chatActions,
   utility,
   onOpenUtility,
+  onOpenTodos,
+  onOpenAgenda,
   token,
 }: Args) {
   const projectNameOverrides = useProjectNames(
@@ -57,6 +61,8 @@ export function useSidebarProps({
       onOpenSkills: () => onOpenUtility("skills"),
       onOpenProjects: () => onOpenUtility("projects"),
       onOpenWorkspace: () => onOpenUtility("workspace"),
+      onOpenTodos,
+      onOpenAgenda,
       onSettingsIntent: utility.onSettingsIntent,
       onOpenSearch: chatActions.onOpenSessionSearch,
       activeUtility:
@@ -64,7 +70,9 @@ export function useSidebarProps({
         view === "automations" ||
         view === "skills" ||
         view === "projects" ||
-        view === "workspace"
+        view === "workspace" ||
+        view === "todos" ||
+        view === "agenda"
           ? view
           : null,
       onToggleArchived: chatActions.onToggleArchived,
@@ -92,6 +100,8 @@ export function useSidebarProps({
       chatActions,
       utility,
       onOpenUtility,
+      onOpenTodos,
+      onOpenAgenda,
       projectNameOverrides,
     ],
   );

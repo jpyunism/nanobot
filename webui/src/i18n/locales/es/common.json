@@ -60,7 +60,9 @@
     "skills": {
       "title": "Habilidades"
     },
-    "projects": "Proyectos"
+    "projects": "Proyectos",
+    "todos": "Tareas",
+    "agenda": "Agenda"
   },
   "workspace": {
     "dialog": {
@@ -1303,5 +1305,62 @@
       "empty": "Todavía no hay archivos."
     },
     "bindToChat": "Vincular tema al proyecto"
+  },
+  "agenda": {
+    "categories": {
+      "personal": "Personal",
+      "work": "Trabajo",
+      "health": "Salud",
+      "reminder": "Recordatorio",
+      "journal": "Journal",
+      "other": "Otro"
+    },
+    "title": "Agenda",
+    "backToChats": "Volver a chats",
+    "prevMonthAria": "Mes anterior",
+    "nextMonthAria": "Mes siguiente",
+    "today": "Hoy",
+    "newAppointment": "Nueva cita",
+    "loading": "Cargando…",
+    "noAppointments": "No hay citas para este día.",
+    "allDay": "Todo el día",
+    "assistant": "Asistente",
+    "askAi": "Preguntar a la IA",
+    "composer": {
+      "placeholder": "Pide al agente que actualice tu agenda…",
+      "connecting": "Conectando chat…",
+      "send": "Enviar"
+    },
+    "form": {
+      "editTitle": "Editar cita",
+      "newTitle": "Nueva cita",
+      "close": "Cerrar",
+      "titleLabel": "Título",
+      "titlePlaceholder": "¿Qué tienes?",
+      "dateLabel": "Fecha",
+      "categoryLabel": "Categoría",
+      "timeLabel": "Hora",
+      "allDay": "Todo el día",
+      "notesLabel": "Notas",
+      "notesPlaceholder": "Detalles opcionales…",
+      "cancel": "Cancelar",
+      "save": "Guardar",
+      "add": "Agregar"
+    },
+    "weekday": {
+      "mon": "Lun",
+      "tue": "Mar",
+      "wed": "Mié",
+      "thu": "Jue",
+      "fri": "Vie",
+      "sat": "Sáb",
+      "sun": "Dom"
+    }
+  },
+  "todos": {
+    "item": {
+      "linkPlaceholder": "https://",
+      "pricePlaceholder": "$0"
+    }
   }
 }

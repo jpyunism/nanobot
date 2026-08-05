@@ -38,14 +38,19 @@ export function SessionSearchDialog({
   const [highlightedIndex, setHighlightedIndex] = useState(0);
 
   const normalizedQuery = query.trim().toLowerCase();
+  const chatSessions = useMemo(
+    () => sessions.filter((session) => !session.todoList && !session.agendaAppointmentId),
+    [sessions],
+  );
+
   const sessionResults = useMemo(() => {
     if (!open) return [];
-    if (!normalizedQuery) return sessions;
+    if (!normalizedQuery) return chatSessions;
     const terms = normalizedQuery.split(/\s+/).filter(Boolean);
-    return sessions.filter((session) =>
+    return chatSessions.filter((session) =>
       sessionMatchesTerms(session, terms, titleOverrides[session.key]),
     );
-  }, [normalizedQuery, open, sessions, titleOverrides]);
+  }, [normalizedQuery, open, chatSessions, titleOverrides]);
   const itemCount = sessionResults.length;
 
   useEffect(() => {

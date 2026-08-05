@@ -292,3 +292,19 @@ class WebUIWorkspaceController:
             session.metadata["webui"] = True
             session.metadata[WORKSPACE_SCOPE_METADATA_KEY] = scope.metadata()
             self._sessions.save(session)
+
+    def persist_todo_list(self, chat_id: str, slug: str) -> None:
+        """Bind a chat to a todo list slug via ``session.metadata['todo_list']``."""
+        if self._sessions is None:
+            return
+        session = self._sessions.get_or_create(f"websocket:{chat_id}")
+        session.metadata["todo_list"] = slug
+        self._sessions.save(session)
+
+    def persist_agenda_appointment(self, chat_id: str, appointment_id: str) -> None:
+        """Bind a chat to an agenda appointment id via ``session.metadata['agenda_appointment']``."""
+        if self._sessions is None:
+            return
+        session = self._sessions.get_or_create(f"websocket:{chat_id}")
+        session.metadata["agenda_appointment"] = appointment_id
+        self._sessions.save(session)

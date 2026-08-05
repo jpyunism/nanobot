@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useClient } from "@/providers/ClientProvider";
 import {
+  bindChatAgenda as bindChatAgendaApi,
   createAgendaAppointment as createAgendaAppointmentApi,
   deleteAgendaAppointment as deleteAgendaAppointmentApi,
   listAgendaAppointments,
@@ -10,7 +11,16 @@ import {
 import type {
   AgendaAppointment,
   AgendaCreatePayload,
+  ChatSummary,
+  InboundEvent,
 } from "@/lib/types";
+
+interface AssistantState {
+  lastText: string;
+  running: boolean;
+}
+
+const EMPTY: AssistantState = { lastText: "", running: false };
 
 interface AgendaState {
   appointments: AgendaAppointment[];
@@ -32,11 +42,15 @@ function sortAppointments(appointments: AgendaAppointment[]): AgendaAppointment[
   });
 }
 
-export function useAgenda() {
-  const { token } = useClient();
+export function useAgenda(sessions: ChatSummary[]) {
+  const { token, client } = useClient();
   const tokenRef = useRef(token);
   tokenRef.current = token;
   const [state, setState] = useState<AgendaState>(initialState);
+  const [chatKey, setChatKey] = useState<string | null>(null);
+  const [assistant, setAssistant] = useState<AssistantState>(EMPTY);
+  const chatKeyRef = useRef(chatKey);
+  chatKeyRef.current = chatKey;
   const refreshSeqRef = useRef(0);
 
   const refresh = useCallback(async () => {
@@ -61,6 +75,70 @@ export function useAgenda() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Find or create a chat bound to the agenda surface.
+  useEffect(() => {
+    if (!client || typeof client.newChat !== "function") {
+      return;
+    }
+    const existing = sessions.find(
+      (s) => s.agendaAppointmentId === "__surface__" && s.channel === "websocket",
+    );
+    if (existing) {
+      setChatKey(existing.key);
+      return;
+    }
+    let cancelled = false;
+    const promise = client.newChat(10_000, null, { agendaAppointment: "__surface__" });
+    if (!(promise instanceof Promise)) {
+      return;
+    }
+    promise
+      .then((chatId) => {
+        if (cancelled) return;
+        const key = `websocket:${chatId}`;
+        setChatKey(key);
+        void bindChatAgendaApi(tokenRef.current, key, "__surface__").catch(() => undefined);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [client, sessions]);
+
+  // Subscribe to inbound events for this chat to show the assistant's last reply.
+  useEffect(() => {
+    if (!chatKey) {
+      setAssistant(EMPTY);
+      return;
+    }
+    const handler = (ev: InboundEvent) => {
+      if (ev.event === "message" && !ev.kind) {
+        const text = ev.text?.trim();
+        if (text) setAssistant((prev) => ({ ...prev, lastText: text }));
+      } else if (ev.event === "goal_status") {
+        setAssistant((prev) => ({ ...prev, running: ev.status === "running" }));
+      } else if (ev.event === "turn_end") {
+        setAssistant((prev) => ({ ...prev, running: false }));
+      } else if (ev.event === "delta") {
+        const text = ev.text ?? "";
+        if (text) setAssistant((prev) => ({ ...prev, lastText: prev.lastText + text }));
+      } else if (ev.event === "stream_end") {
+        if (ev.text) setAssistant((prev) => ({ ...prev, lastText: ev.text ?? prev.lastText }));
+      }
+    };
+    const unsub = client.onChat(chatKey, handler);
+    return () => unsub();
+  }, [chatKey, client]);
+
+  const sendMessage = useCallback(
+    (text: string) => {
+      if (!chatKeyRef.current || !client || typeof client.sendMessage !== "function") return;
+      setAssistant((prev) => ({ ...prev, lastText: "", running: true }));
+      client.sendMessage(chatKeyRef.current, text);
+    },
+    [client],
+  );
 
   const createAppointment = useCallback(async (payload: AgendaCreatePayload) => {
     const t = tokenRef.current;
@@ -128,6 +206,9 @@ export function useAgenda() {
     createAppointment,
     updateAppointment,
     removeAppointment,
+    chatKey,
+    assistant,
+    sendMessage,
   };
 }
 

@@ -60,7 +60,9 @@
     "skills": {
       "title": "スキル"
     },
-    "projects": "プロジェクト"
+    "projects": "プロジェクト",
+    "todos": "Todos",
+    "agenda": "Agenda"
   },
   "settings": {
     "backToChat": "チャットに戻る",
@@ -1303,5 +1305,62 @@
       "empty": "No files yet."
     },
     "bindToChat": "Bind chat to project"
+  },
+  "agenda": {
+    "categories": {
+      "personal": "Personal",
+      "work": "Work",
+      "health": "Health",
+      "reminder": "Reminder",
+      "journal": "Journal",
+      "other": "Other"
+    },
+    "title": "Agenda",
+    "backToChats": "Back to chats",
+    "prevMonthAria": "Previous month",
+    "nextMonthAria": "Next month",
+    "today": "Today",
+    "newAppointment": "New appointment",
+    "loading": "Loading…",
+    "noAppointments": "No appointments for this day.",
+    "allDay": "All day",
+    "assistant": "Assistant",
+    "askAi": "Ask AI",
+    "composer": {
+      "placeholder": "Ask the agent to update your agenda…",
+      "connecting": "Connecting chat…",
+      "send": "Send"
+    },
+    "form": {
+      "editTitle": "Edit appointment",
+      "newTitle": "New appointment",
+      "close": "Close",
+      "titleLabel": "Title",
+      "titlePlaceholder": "What do you have?",
+      "dateLabel": "Date",
+      "categoryLabel": "Category",
+      "timeLabel": "Time",
+      "allDay": "All day",
+      "notesLabel": "Notes",
+      "notesPlaceholder": "Optional details…",
+      "cancel": "Cancel",
+      "save": "Save",
+      "add": "Add"
+    },
+    "weekday": {
+      "mon": "Mon",
+      "tue": "Tue",
+      "wed": "Wed",
+      "thu": "Thu",
+      "fri": "Fri",
+      "sat": "Sat",
+      "sun": "Sun"
+    }
+  },
+  "todos": {
+    "item": {
+      "linkPlaceholder": "https://",
+      "pricePlaceholder": "$0"
+    }
   }
 }

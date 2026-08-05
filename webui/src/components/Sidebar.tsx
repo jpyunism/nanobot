@@ -3,8 +3,10 @@ import {
   Archive,
   Brain,
   CalendarClock,
+  CalendarDays,
   FolderKanban,
   FolderTree,
+  ListTodo,
   Menu,
   Search,
   Settings,
@@ -41,9 +43,11 @@ interface SidebarProps {
   onOpenAutomations: () => void;
   onOpenProjects?: () => void;
   onOpenWorkspace?: () => void;
+  onOpenTodos?: () => void;
+  onOpenAgenda?: () => void;
   onSettingsIntent?: () => void;
   onOpenSearch: () => void;
-  activeUtility?: "apps" | "skills" | "automations" | "projects" | "workspace" | null;
+  activeUtility?: "apps" | "skills" | "automations" | "projects" | "workspace" | "todos" | "agenda" | null;
   onToggleArchived: () => void;
   onCollapse: () => void;
   onExpand?: () => void;
@@ -177,6 +181,26 @@ export function Sidebar(props: SidebarProps) {
             onIntent={props.onSettingsIntent}
             active={props.activeUtility === "workspace"}
             icon={<FolderTree className="h-4 w-4" />}
+          />
+        )}
+        {props.onOpenTodos && (
+          <SidebarActionButton
+            collapsed={collapsed}
+            label={t("sidebar.todos", { defaultValue: "Todos" })}
+            onClick={props.onOpenTodos}
+            onIntent={props.onSettingsIntent}
+            active={props.activeUtility === "todos"}
+            icon={<ListTodo className="h-4 w-4" />}
+          />
+        )}
+        {props.onOpenAgenda && (
+          <SidebarActionButton
+            collapsed={collapsed}
+            label={t("sidebar.agenda", { defaultValue: "Agenda" })}
+            onClick={props.onOpenAgenda}
+            onIntent={props.onSettingsIntent}
+            active={props.activeUtility === "agenda"}
+            icon={<CalendarDays className="h-4 w-4" />}
           />
         )}
         <SidebarActionButton

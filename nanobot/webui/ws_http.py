@@ -112,7 +112,9 @@ from nanobot.webui.session_automations import (
 from nanobot.webui.session_list_index import list_webui_sessions
 from nanobot.webui.session_meta import (
     chat_project_id_from_metadata,
+    chat_todo_list_from_metadata,
     set_chat_project_id,
+    set_chat_todo_list,
 )
 from nanobot.webui.sidebar_state import (
     read_webui_sidebar_state,
@@ -514,6 +516,14 @@ class GatewayHTTPHandler:
         m = re.match(r"^/api/sessions/([^/]+)/project/unbind$", got)
         if m:
             return self._handle_session_project_unbind(request, m.group(1))
+
+        m = re.match(r"^/api/sessions/([^/]+)/todo/bind$", got)
+        if m:
+            return self._handle_session_todo_bind(request, m.group(1))
+
+        m = re.match(r"^/api/sessions/([^/]+)/todo/unbind$", got)
+        if m:
+            return self._handle_session_todo_unbind(request, m.group(1))
 
         return None
 
@@ -1145,6 +1155,46 @@ class GatewayHTTPHandler:
         return _http_json_response({
             "session_key": decoded_key,
             "project_id": None,
+        })
+
+    def _handle_session_todo_bind(self, request: WsRequest, key: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self.session_manager is None:
+            return _http_error(503, "session manager unavailable")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not _is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+        session = self.session_manager.get_or_create(decoded_key)
+        query = _parse_query(request.path)
+        slug = (_query_first(query, "slug") or "").strip()
+        if not slug:
+            return _http_error(400, "missing slug")
+        set_chat_todo_list(session, slug)
+        self.session_manager.save(session)
+        return _http_json_response({
+            "session_key": decoded_key,
+            "todo_list": chat_todo_list_from_metadata(session.metadata),
+        })
+
+    def _handle_session_todo_unbind(self, request: WsRequest, key: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self.session_manager is None:
+            return _http_error(503, "session manager unavailable")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not _is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+        session = self.session_manager.get_or_create(decoded_key)
+        set_chat_todo_list(session, None)
+        self.session_manager.save(session)
+        return _http_json_response({
+            "session_key": decoded_key,
+            "todo_list": None,
         })
 
     # -- Automation routes --------------------------------------------------

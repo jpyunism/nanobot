@@ -61,6 +61,9 @@ export function groupSessions(
   const normalSessions: ChatSummary[] = [];
 
   for (const session of sessions) {
+    if (session.todoList) {
+      continue;
+    }
     if (archived.has(session.key)) {
       if (options.showArchived) archivedSessions.push(session);
       continue;
@@ -242,6 +245,9 @@ function groupSessionsByProject(
   }>();
 
   for (const session of sessions) {
+    if (session.todoList || session.agendaAppointmentId) {
+      continue;
+    }
     if (archived.has(session.key) && !options.showArchived) {
       continue;
     }

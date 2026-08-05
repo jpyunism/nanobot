@@ -150,6 +150,10 @@ function ThemedShell({
             onRestart={shell.engineRestart.onRestart}
             onNativeEngineRestart={onNativeEngineRestart}
             showSidebar={shell.view === "settings"}
+            todoSlug={shell.todoSlug}
+            onOpenTodoSlug={shell.onOpenTodoSlug}
+            todos={shell.todos}
+            agenda={shell.agenda}
             fallback={
               <div
                 aria-busy="true"

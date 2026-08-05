@@ -145,6 +145,8 @@ export async function listSessions(
     run_started_at?: number | null;
     workspace_scope?: WorkspaceScopePayload | null;
     project_id?: string | null;
+    todo_list?: string | null;
+    agenda_appointment?: string | null;
   };
   const body = await request<{ sessions: Row[] }>(
     `${base}/api/sessions`,
@@ -163,6 +165,8 @@ export async function listSessions(
     runStartedAt: s.run_started_at ?? null,
     workspaceScope: s.workspace_scope ?? null,
     projectId: s.project_id ?? null,
+    todoList: s.todo_list ?? null,
+    agendaAppointmentId: s.agenda_appointment ?? null,
   }));
 }
 

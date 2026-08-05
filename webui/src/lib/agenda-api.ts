@@ -93,3 +93,27 @@ export async function deleteAgendaAppointment(
     token,
   );
 }
+
+export async function bindChatAgenda(
+  token: string,
+  sessionKey: string,
+  appointmentId: string,
+  base: string = "",
+): Promise<{ session_key: string; agenda_appointment: string }> {
+  const query = new URLSearchParams({ appointment_id: appointmentId });
+  return agendaRequest<{ session_key: string; agenda_appointment: string }>(
+    `${base}/api/sessions/${encodeURIComponent(sessionKey)}/agenda/bind?${query}`,
+    token,
+  );
+}
+
+export async function unbindChatAgenda(
+  token: string,
+  sessionKey: string,
+  base: string = "",
+): Promise<{ session_key: string; agenda_appointment: null }> {
+  return agendaRequest<{ session_key: string; agenda_appointment: null }>(
+    `${base}/api/sessions/${encodeURIComponent(sessionKey)}/agenda/unbind`,
+    token,
+  );
+}

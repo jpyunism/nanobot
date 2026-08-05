@@ -302,6 +302,8 @@ export interface ChatSummary {
   projectId?: string | null;
   /** Todo list slug when this chat is bound to a todo list (else null). */
   todoList?: string | null;
+  /** Agenda appointment id when this chat is bound to an agenda appointment (else null). */
+  agendaAppointmentId?: string | null;
 }
 
 export type WorkspaceAccessMode = "restricted" | "full";

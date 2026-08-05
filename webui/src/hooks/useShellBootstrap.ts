@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSessions } from "@/hooks/useSessions";
 import { useSidebarState } from "@/hooks/useSidebarState";
 import { useShellRoute } from "@/hooks/useShellRoute";
@@ -18,6 +18,8 @@ import { useThreadSessionSync } from "@/hooks/useThreadSessionSync";
 import { useDeferredTitleRefresh } from "@/hooks/useDeferredTitleRefresh";
 import { useHostSidebarLayout } from "@/hooks/useHostSidebarLayout";
 import { useWorkspaceScope } from "@/hooks/useWorkspaceScope";
+import { useTodos } from "@/hooks/useTodos";
+import { useAgenda } from "@/hooks/useAgenda";
 import { useDialogsState } from "@/lib/dialogs";
 import type { RuntimeSurface } from "@/lib/types";
 import type { NanobotClient } from "@/lib/nanobot-client";
@@ -126,6 +128,9 @@ export function useShellBootstrap({
     loading,
     shouldClearDraftScope: view === "chat" && !activeKey,
   });
+  const todos = useTodos(sessions);
+  const agenda = useAgenda(sessions);
+  const [todoSlug, setTodoSlug] = useState<string | null>(null);
   const {
     workspaces,
     error: workspaceError,
@@ -199,7 +204,33 @@ export function useShellBootstrap({
     },
   } = chatActions;
 
-  useShellShortcuts({ onNewChat, onOpenSessionSearch });
+  const onOpenTodoSlug = useCallback(
+    (slug: string | null) => {
+      setTodoSlug(slug);
+      if (slug) {
+        navigate({ view: "todos", activeKey, settingsSection: "overview" });
+      } else {
+        navigate({ view: "todos", activeKey, settingsSection: "overview" });
+      }
+    },
+    [navigate, activeKey],
+  );
+
+  const onOpenTodos = useCallback(
+    (slug?: string | null) => {
+      setMobileSidebarOpen(false);
+      setTodoSlug(slug ?? null);
+      navigate({ view: "todos", activeKey, settingsSection: "overview" });
+    },
+    [navigate, activeKey, setMobileSidebarOpen],
+  );
+
+  const onOpenAgenda = useCallback(() => {
+    setMobileSidebarOpen(false);
+    navigate({ view: "agenda", activeKey, settingsSection: "overview" });
+  }, [navigate, activeKey, setMobileSidebarOpen]);
+
+  useShellShortcuts({ onNewChat, onOpenSessionSearch, onOpenAgenda });
 
   const onTurnEnd = useDeferredTitleRefresh(activeSession, refresh);
 
@@ -221,6 +252,8 @@ export function useShellBootstrap({
     chatActions: chatActions.chat,
     utility: chatActions.utility,
     onOpenUtility,
+    onOpenTodos,
+    onOpenAgenda,
     token,
   });
 
@@ -281,6 +314,12 @@ export function useShellBootstrap({
     renderHostSidebarFlowContent,
     sidebarProps,
     workspaces,
+    todos,
+    agenda,
+    todoSlug,
+    onOpenTodoSlug,
+    onOpenTodos,
+    onOpenAgenda,
   };
 }
 

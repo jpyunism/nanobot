@@ -61,20 +61,36 @@ export function TodoListDetail({
   const [chatKey, setChatKey] = useState<string | null>(null);
   const chatKeyRef = useRef<string | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const findChatRef = useRef(onFindChatForSlug);
+  const bindChatRef = useRef(onBindChat);
+  const creatingForSlugRef = useRef<string | null>(null);
+  findChatRef.current = onFindChatForSlug;
+  bindChatRef.current = onBindChat;
   chatKeyRef.current = chatKey;
 
   // Resolve / create a chat bound to this todo list.
+  // We intentionally do NOT depend on onFindChatForSlug / sessions so that
+  // frequent session-list updates do not re-trigger creation and spawn
+  // multiple chats for the same list.
   useEffect(() => {
     if (!list) {
       setChatKey(null);
       setAssistant(EMPTY);
+      creatingForSlugRef.current = null;
       return;
     }
-    const existing = onFindChatForSlug(list.slug);
+    const existing = findChatRef.current(list.slug);
     if (existing) {
       setChatKey(existing.key);
+      creatingForSlugRef.current = null;
       return;
     }
+    // Avoid creating multiple chats when dependencies change rapidly or when
+    // sessions update just before the newly created chat appears in the index.
+    if (creatingForSlugRef.current === list.slug) {
+      return;
+    }
+    creatingForSlugRef.current = list.slug;
     // No existing chat for this list — create one bound to the list.
     let cancelled = false;
     client
@@ -85,15 +101,16 @@ export function TodoListDetail({
         setChatKey(key);
         // Bind server-side (metadata) — the new_chat envelope already set
         // todo_list, but call bind for sessions that may already exist.
-        void onBindChat(key, list.slug).catch(() => undefined);
+        void bindChatRef.current(key, list.slug).catch(() => undefined);
       })
       .catch(() => {
+        creatingForSlugRef.current = null;
         // Ignore — user can retry by sending a message
       });
     return () => {
       cancelled = true;
     };
-  }, [list?.slug, onFindChatForSlug, client, onBindChat]);
+  }, [list?.slug, client]);
 
   // Subscribe to inbound events for this chat to show the assistant's last reply.
   useEffect(() => {

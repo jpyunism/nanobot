@@ -26,6 +26,10 @@ from nanobot.session.manager import (
     _metadata_title,
 )
 from nanobot.session.model_selection import model_preset_from_metadata
+from nanobot.webui.session_meta import (
+    chat_agenda_appointment_from_metadata,
+    chat_todo_list_from_metadata,
+)
 
 _INDEX_VERSION = 4
 _INDEX_FILENAME = ".webui_session_index.json"
@@ -44,6 +48,16 @@ def _project_id_from_metadata(metadata: Any) -> str | None:
         return None
     cleaned = raw.strip()
     return cleaned or None
+
+
+def _todo_list_from_metadata(metadata: Any) -> str | None:
+    """Public helper: read the chat-todo binding from session metadata."""
+    return chat_todo_list_from_metadata(metadata)
+
+
+def _agenda_appointment_from_metadata(metadata: Any) -> str | None:
+    """Public helper: read the chat-agenda binding from session metadata."""
+    return chat_agenda_appointment_from_metadata(metadata)
 
 
 def list_webui_sessions(session_manager: SessionManager) -> list[dict[str, Any]]:
@@ -153,6 +167,8 @@ def _public_row(sessions_dir: Path, row: dict[str, Any]) -> dict[str, Any]:
         "preview": row.get("preview", ""),
         _MODEL_PRESET_FIELD: row.get(_MODEL_PRESET_FIELD),
         "project_id": row.get("project_id"),
+        "todo_list": row.get("todo_list"),
+        "agenda_appointment": row.get("agenda_appointment"),
         "path": str(sessions_dir / str(row.get("file", ""))),
     }
 
@@ -273,6 +289,8 @@ def _indexed_row_for_session(session: Session, path: Path) -> dict[str, Any]:
         "preview": _preview_from_messages(session.messages),
         _MODEL_PRESET_FIELD: model_preset_from_metadata(session.metadata),
         "project_id": _project_id_from_metadata(session.metadata),
+        "todo_list": _todo_list_from_metadata(session.metadata),
+        "agenda_appointment": _agenda_appointment_from_metadata(session.metadata),
         "file": path.name,
         "mtime_ns": signature["mtime_ns"],
         "size": signature["size"],
@@ -348,6 +366,8 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
                 "preview": preview or fallback_preview,
                 _MODEL_PRESET_FIELD: model_preset_from_metadata(data.get("metadata", {})),
                 "project_id": _project_id_from_metadata(data.get("metadata", {})),
+                "todo_list": _todo_list_from_metadata(data.get("metadata", {})),
+                "agenda_appointment": _agenda_appointment_from_metadata(data.get("metadata", {})),
                 "file": path.name,
                 "mtime_ns": signature["mtime_ns"],
                 "size": signature["size"],

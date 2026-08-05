@@ -118,7 +118,7 @@ export function TodoItemModal({ open, item, users, onOpenChange, onSave }: Props
               </span>
               <Input
                 type="url"
-                placeholder="https://"
+                placeholder={t("todos.item.linkPlaceholder")}
                 value={link}
                 onChange={(e) => setLink(e.target.value)}
               />
@@ -131,7 +131,7 @@ export function TodoItemModal({ open, item, users, onOpenChange, onSave }: Props
                 inputMode="numeric"
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
-                placeholder="$0"
+                placeholder={t("todos.item.pricePlaceholder")}
               />
             </label>
           </div>

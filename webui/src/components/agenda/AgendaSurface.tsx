@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
 import type { UseAgenda } from "@/hooks/useAgenda";
@@ -15,28 +16,41 @@ import {
   ChevronRight,
   Loader2,
   Plus,
+  Send,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
-const CATEGORIES: { value: AgendaCategory; label: string; color: string }[] = [
-  { value: "personal", label: "Personal", color: "#3b82f6" },
-  { value: "work", label: "Trabajo", color: "#10b981" },
-  { value: "health", label: "Salud", color: "#ef4444" },
-  { value: "reminder", label: "Recordatorio", color: "#f59e0b" },
-  { value: "journal", label: "Journal", color: "#8b5cf6" },
-  { value: "other", label: "Otro", color: "#64748b" },
-];
+function useCategories(t: (key: string) => string): { value: AgendaCategory; label: string; color: string }[] {
+  return useMemo(
+    () => [
+      { value: "personal", label: t("agenda.categories.personal"), color: "#3b82f6" },
+      { value: "work", label: t("agenda.categories.work"), color: "#10b981" },
+      { value: "health", label: t("agenda.categories.health"), color: "#ef4444" },
+      { value: "reminder", label: t("agenda.categories.reminder"), color: "#f59e0b" },
+      { value: "journal", label: t("agenda.categories.journal"), color: "#8b5cf6" },
+      { value: "other", label: t("agenda.categories.other"), color: "#64748b" },
+    ],
+    [t],
+  );
+}
 
-const WEEKDAY_LABELS = [
-  "Lun",
-  "Mar",
-  "Mié",
-  "Jue",
-  "Vie",
-  "Sáb",
-  "Dom",
-];
+function useWeekdayLabels(t: (key: string) => string): string[] {
+  return useMemo(
+    () => [
+      t("agenda.weekday.mon"),
+      t("agenda.weekday.tue"),
+      t("agenda.weekday.wed"),
+      t("agenda.weekday.thu"),
+      t("agenda.weekday.fri"),
+      t("agenda.weekday.sat"),
+      t("agenda.weekday.sun"),
+    ],
+    [t],
+  );
+}
 
 function activeLocale(): string {
   return i18n.resolvedLanguage || i18n.language || "en";
@@ -70,6 +84,8 @@ interface Props {
 }
 
 export function AgendaSurface({ agenda, onBackToChat }: Props) {
+  const { t } = useTranslation();
+  const WEEKDAY_LABELS = useWeekdayLabels(t);
   const today = new Date();
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
@@ -78,6 +94,14 @@ export function AgendaSurface({ agenda, onBackToChat }: Props) {
   );
   const [editing, setEditing] = useState<AgendaAppointment | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  const [composerText, setComposerText] = useState("");
+
+  const sendComposer = useCallback(() => {
+    const text = composerText.trim();
+    if (!text || agenda.assistant.running || !agenda.chatKey) return;
+    agenda.sendMessage(text);
+    setComposerText("");
+  }, [composerText, agenda]);
 
   const byDate = useMemo(() => {
     const map = new Map<string, AgendaAppointment[]>();
@@ -132,11 +156,11 @@ export function AgendaSurface({ agenda, onBackToChat }: Props) {
             className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           >
             <ChevronLeft className="h-4 w-4" />
-            Chats
+            {t("agenda.backToChats")}
           </button>
           <div className="mx-2 h-5 w-px bg-border" />
           <CalendarDays className="h-5 w-5 text-muted-foreground" />
-          <h1 className="text-lg font-semibold text-foreground">Agenda</h1>
+          <h1 className="text-lg font-semibold text-foreground">{t("agenda.title")}</h1>
         </div>
 
         {/* Month navigation */}
@@ -145,7 +169,7 @@ export function AgendaSurface({ agenda, onBackToChat }: Props) {
             <button
               type="button"
               onClick={goPrev}
-              aria-label="Mes anterior"
+              aria-label={t("agenda.prevMonthAria")}
               className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -156,7 +180,7 @@ export function AgendaSurface({ agenda, onBackToChat }: Props) {
             <button
               type="button"
               onClick={goNext}
-              aria-label="Mes siguiente"
+              aria-label={t("agenda.nextMonthAria")}
               className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             >
               <ChevronRight className="h-4 w-4" />
@@ -167,7 +191,7 @@ export function AgendaSurface({ agenda, onBackToChat }: Props) {
             onClick={goToday}
             className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent"
           >
-            Hoy
+            {t("agenda.today")}
           </button>
         </div>
 
@@ -252,9 +276,9 @@ export function AgendaSurface({ agenda, onBackToChat }: Props) {
               }}
               className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
             >
-              <Plus className="h-4 w-4" />
-              Nueva cita
-            </button>
+            <Plus className="h-4 w-4" />
+            {t("agenda.newAppointment")}
+          </button>
           </div>
 
           {agenda.loading && !formOpen ? (
@@ -264,7 +288,7 @@ export function AgendaSurface({ agenda, onBackToChat }: Props) {
             </div>
           ) : selectedAppointments.length === 0 && !formOpen ? (
             <p className="py-6 text-sm text-muted-foreground">
-              No hay citas para este día.
+              {t("agenda.noAppointments")}
             </p>
           ) : null}
 
@@ -279,7 +303,7 @@ export function AgendaSurface({ agenda, onBackToChat }: Props) {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-foreground">
-                        {appt.time ? appt.time : "Todo el día"}
+                        {appt.time ? appt.time : t("agenda.allDay")}
                       </span>
                       <span className="truncate text-sm font-semibold text-foreground">
                         {appt.title}
@@ -341,6 +365,62 @@ export function AgendaSurface({ agenda, onBackToChat }: Props) {
           {agenda.error && (
             <p className="mt-2 text-sm text-destructive">{agenda.error}</p>
           )}
+
+          {/* Assistant strip */}
+          {agenda.assistant.lastText && (
+            <div className="mb-4 border-t border-border/40 bg-muted/30 px-4 py-2 text-[12px] text-muted-foreground">
+              <div className="mb-0.5 flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground/60">
+                <Sparkles className="h-3 w-3" />
+                {t("agenda.assistant")}
+              </div>
+              <div className="line-clamp-3 whitespace-pre-wrap break-words leading-4">
+                {agenda.assistant.lastText}
+              </div>
+            </div>
+          )}
+
+          {/* Ask AI composer */}
+          <div className="border-t border-border/60 bg-background p-3">
+            <div className="mx-auto flex max-w-[58rem] flex-col gap-2">
+              <div className="flex items-center justify-between gap-2 px-1">
+                <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                  <Sparkles className="h-3 w-3" />
+                  {t("agenda.askAi")}
+                </div>
+                {agenda.chatKey ? null : (
+                  <span className="text-[11px] text-muted-foreground/70">{t("agenda.composer.connecting")}</span>
+                )}
+              </div>
+              <div className="flex items-end gap-2">
+                <textarea
+                  value={composerText}
+                  onChange={(e) => setComposerText(e.target.value)}
+                  placeholder={
+                    agenda.chatKey
+                      ? t("agenda.composer.placeholder")
+                      : t("agenda.composer.connecting")
+                  }
+                  disabled={!agenda.chatKey}
+                  rows={2}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      sendComposer();
+                    }
+                  }}
+                  className="min-h-[2.25rem] flex-1 resize-none rounded-2xl border border-border bg-background px-3 py-2 text-sm leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                />
+                <Button
+                  size="icon"
+                  onClick={sendComposer}
+                  disabled={!agenda.chatKey || !composerText.trim() || agenda.assistant.running}
+                  aria-label={t("agenda.composer.send")}
+                >
+                  <Send className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -389,6 +469,8 @@ interface AgendaFormProps {
 }
 
 function AgendaForm({ defaultDate, editing, onCancel, onSave }: AgendaFormProps) {
+  const { t } = useTranslation();
+  const CATEGORIES = useCategories(t);
   const [title, setTitle] = useState(editing?.title ?? "");
   const [date, setDate] = useState(editing?.date ?? defaultDate);
   const [time, setTime] = useState(editing?.time ?? "09:00");
@@ -428,13 +510,13 @@ function AgendaForm({ defaultDate, editing, onCancel, onSave }: AgendaFormProps)
       className="mt-4 space-y-4 rounded-xl border border-border bg-card p-4"
     >
       <div className="flex items-center justify-between">
-        <h4 className="text-sm font-semibold text-foreground">
-          {editing ? "Editar cita" : "Nueva cita"}
-        </h4>
-        <button
-          type="button"
-          onClick={onCancel}
-          aria-label="Cerrar"
+          <h4 className="text-sm font-semibold text-foreground">
+            {editing ? t("agenda.form.editTitle") : t("agenda.form.newTitle")}
+          </h4>
+          <button
+            type="button"
+            onClick={onCancel}
+            aria-label={t("agenda.form.close")}
           className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
         >
           <X className="h-4 w-4" />
@@ -443,12 +525,12 @@ function AgendaForm({ defaultDate, editing, onCancel, onSave }: AgendaFormProps)
 
       <div className="space-y-3">
         <label className="block text-sm font-medium text-foreground">
-          Título
+          {t("agenda.form.titleLabel")}
           <input
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="¿Qué tienes?"
+            placeholder={t("agenda.form.titlePlaceholder")}
             required
             className="mt-1 block w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
@@ -456,7 +538,7 @@ function AgendaForm({ defaultDate, editing, onCancel, onSave }: AgendaFormProps)
 
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <label className="block text-sm font-medium text-foreground">
-            Fecha
+            {t("agenda.form.dateLabel")}
             <input
               type="date"
               value={date}
@@ -466,7 +548,7 @@ function AgendaForm({ defaultDate, editing, onCancel, onSave }: AgendaFormProps)
             />
           </label>
           <label className="block text-sm font-medium text-foreground">
-            Categoría
+            {t("agenda.form.categoryLabel")}
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value as AgendaCategory)}
@@ -485,7 +567,7 @@ function AgendaForm({ defaultDate, editing, onCancel, onSave }: AgendaFormProps)
               allDay && "opacity-50",
             )}
           >
-            Hora
+            {t("agenda.form.timeLabel")}
             <input
               type="time"
               value={time}
@@ -503,16 +585,16 @@ function AgendaForm({ defaultDate, editing, onCancel, onSave }: AgendaFormProps)
             onChange={(e) => setAllDay(e.target.checked)}
             className="h-4 w-4 rounded border-border accent-primary"
           />
-          Todo el día
+          {t("agenda.form.allDay")}
         </label>
 
         <label className="block text-sm font-medium text-foreground">
-          Notas
+          {t("agenda.form.notesLabel")}
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={2}
-            placeholder="Detalles opcionales…"
+            placeholder={t("agenda.form.notesPlaceholder")}
             className="mt-1 block w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
         </label>
@@ -526,7 +608,7 @@ function AgendaForm({ defaultDate, editing, onCancel, onSave }: AgendaFormProps)
           onClick={onCancel}
           className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent"
         >
-          Cancelar
+          {t("agenda.form.cancel")}
         </button>
         <button
           type="submit"
@@ -534,7 +616,7 @@ function AgendaForm({ defaultDate, editing, onCancel, onSave }: AgendaFormProps)
           className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
         >
           {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-          {editing ? "Guardar" : "Agregar"}
+          {editing ? t("agenda.form.save") : t("agenda.form.add")}
         </button>
       </div>
     </form>

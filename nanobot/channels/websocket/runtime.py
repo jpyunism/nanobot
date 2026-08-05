@@ -576,6 +576,12 @@ class WebSocketChannel(BaseChannel):
             if scope is None:
                 return
             self._workspaces.persist_scope(new_id, scope)
+            todo_list = envelope.get("todo_list")
+            if isinstance(todo_list, str) and todo_list:
+                self._workspaces.persist_todo_list(new_id, todo_list)
+            agenda_appointment = envelope.get("agenda_appointment")
+            if isinstance(agenda_appointment, str) and agenda_appointment:
+                self._workspaces.persist_agenda_appointment(new_id, agenda_appointment)
             self._attach(connection, new_id)
             await self._send_event(connection, "attached", chat_id=new_id)
             await self._send_event(

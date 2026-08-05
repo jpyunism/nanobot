@@ -3,17 +3,23 @@ import { useEffect } from "react";
 type Args = {
   onNewChat: () => void;
   onOpenSessionSearch: () => void;
+  onOpenAgenda?: () => void;
 };
 
-export function useShellShortcuts({ onNewChat, onOpenSessionSearch }: Args) {
+export function useShellShortcuts({ onNewChat, onOpenSessionSearch, onOpenAgenda }: Args) {
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented) return;
-      const commandShiftO =
+      const commandShift =
         (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey;
-      if (commandShiftO && event.key.toLowerCase() === "o") {
+      if (commandShift && event.key.toLowerCase() === "o") {
         event.preventDefault();
         onNewChat();
+        return;
+      }
+      if (commandShift && event.key.toLowerCase() === "a" && onOpenAgenda) {
+        event.preventDefault();
+        onOpenAgenda();
         return;
       }
       const plainCommandK =
@@ -25,5 +31,5 @@ export function useShellShortcuts({ onNewChat, onOpenSessionSearch }: Args) {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onNewChat, onOpenSessionSearch]);
+  }, [onNewChat, onOpenSessionSearch, onOpenAgenda]);
 }

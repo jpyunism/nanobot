@@ -7,7 +7,9 @@ export type ShellView =
   | "automations"
   | "skills"
   | "projects"
-  | "workspace";
+  | "workspace"
+  | "todos"
+  | "agenda";
 
 export type ShellRoute = {
   view: ShellView;
@@ -112,6 +114,8 @@ export function readShellRoute(): ShellRoute {
   if (path === "/skills") return { view: "skills", activeKey, settingsSection: "skills" };
   if (path === "/projects") return { view: "projects", activeKey, settingsSection: "overview" };
   if (path === "/workspace") return { view: "workspace", activeKey, settingsSection: "overview" };
+  if (path === "/todos") return { view: "todos", activeKey, settingsSection: "overview" };
+  if (path === "/agenda") return { view: "agenda", activeKey, settingsSection: "overview" };
   if (path.startsWith("/chat/")) {
     const encoded = path.slice("/chat/".length);
     try {

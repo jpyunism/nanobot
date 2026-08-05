@@ -8,6 +8,12 @@ import { cn } from "@/lib/utils";
 const SettingsView = lazy(() =>
   import("@/components/settings/SettingsView").then((m) => ({ default: m.SettingsView })),
 );
+const TodosSurface = lazy(() =>
+  import("@/components/todos/TodosSurface").then((m) => ({ default: m.TodosSurface })),
+);
+const AgendaSurface = lazy(() =>
+  import("@/components/agenda/AgendaSurface").then((m) => ({ default: m.AgendaSurface })),
+);
 
 type ThreadProps = React.ComponentProps<typeof ThreadShell>;
 type SettingsProps = React.ComponentProps<typeof SettingsView>;
@@ -19,7 +25,12 @@ export type MainView =
   | "automations"
   | "skills"
   | "projects"
-  | "workspace";
+  | "workspace"
+  | "todos"
+  | "agenda";
+
+type TodoProps = React.ComponentProps<typeof TodosSurface>;
+type AgendaProps = React.ComponentProps<typeof AgendaSurface>;
 
 type Args = {
   view: MainView;
@@ -54,6 +65,10 @@ type Args = {
   onNativeEngineRestart: SettingsProps["onNativeEngineRestart"];
   showSidebar: boolean;
   fallback: ReactNode;
+  todoSlug: TodoProps["todoSlug"];
+  onOpenTodoSlug: TodoProps["onOpenSlug"];
+  todos: TodoProps["todos"];
+  agenda: AgendaProps["agenda"];
 };
 
 function ChatSurface(props: Args) {
@@ -123,6 +138,44 @@ function SettingsSurface(props: Args) {
   );
 }
 
+function TodosSurfaceWrapper(props: Args) {
+  return (
+    <div
+      className={cn(
+        "absolute inset-0 flex flex-col",
+        props.view !== "todos" && "hidden",
+      )}
+    >
+      <Suspense fallback={props.fallback}>
+        <TodosSurface
+          todoSlug={props.todoSlug}
+          todos={props.todos}
+          onOpenSlug={props.onOpenTodoSlug}
+          onBackToChat={props.onBackToChat}
+        />
+      </Suspense>
+    </div>
+  );
+}
+
+function AgendaSurfaceWrapper(props: Args) {
+  return (
+    <div
+      className={cn(
+        "absolute inset-0 flex flex-col",
+        props.view !== "agenda" && "hidden",
+      )}
+    >
+      <Suspense fallback={props.fallback}>
+        <AgendaSurface
+          agenda={props.agenda}
+          onBackToChat={props.onBackToChat}
+        />
+      </Suspense>
+    </div>
+  );
+}
+
 export function MainView(props: Args) {
   return (
     <main
@@ -134,6 +187,10 @@ export function MainView(props: Args) {
         <ProjectsSurface onBackToChat={props.onBackToChat} />
       ) : props.view === "workspace" ? (
         <WorkspaceBrowser onBackToChat={props.onBackToChat} />
+      ) : props.view === "todos" ? (
+        <TodosSurfaceWrapper {...props} />
+      ) : props.view === "agenda" ? (
+        <AgendaSurfaceWrapper {...props} />
       ) : (
         <SettingsSurface {...props} />
       )}
