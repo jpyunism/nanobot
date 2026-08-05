@@ -216,10 +216,6 @@ class Tool(ABC):
         """Run the tool; return content, or ``ToolResult.error(...)`` for failures."""
         ...
 
-    @staticmethod
-    def error(content: str) -> ToolResult:
-        return ToolResult.error(content)
-
     def _cast_object(self, obj: Any, schema: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(obj, dict):
             return obj

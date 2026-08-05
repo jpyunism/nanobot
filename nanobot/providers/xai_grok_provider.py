@@ -21,6 +21,9 @@ from nanobot.providers.base import (
     ToolCallRequest,
     resolve_stream_idle_timeout_s,
 )
+from nanobot.providers.base import (
+    ResponsesSSEHTTPError as _XAIHTTPError,
+)
 from nanobot.providers.openai_responses import (
     consume_sse_with_reasoning,
     convert_messages,
@@ -312,25 +315,37 @@ def _decode_access_token_claims(token: str) -> dict[str, Any]:
     return claims if isinstance(claims, dict) else {}
 
 
-class _XAIHTTPError(RuntimeError):
-    def __init__(
-        self,
-        message: str,
-        *,
-        status_code: int,
-        retry_after: float | None = None,
-        error_type: str | None = None,
-        error_code: str | None = None,
-        should_retry: bool | None = None,
-        response_body: str | None = None,
-    ):
-        super().__init__(message)
-        self.status_code = status_code
-        self.retry_after = retry_after
-        self.error_type = error_type
-        self.error_code = error_code
-        self.should_retry = should_retry
-        self.response_body = response_body
+async def _request_xai(
+    url: str,
+    headers: dict[str, str],
+    body: dict[str, Any],
+    *,
+    proxy: str | None = None,
+    on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+    on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
+    on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+) -> tuple[str, list[ToolCallRequest], str, dict[str, int], str | None]:
+    async def _on_response_event(event: dict[str, Any]) -> None:
+        hosted_event = _xai_hosted_tool_event(event)
+        if hosted_event is not None and on_tool_call_delta is not None:
+            await on_tool_call_delta(hosted_event)
+
+    client_kwargs: dict[str, Any] = {"timeout": resolve_stream_idle_timeout_s()}
+    if proxy:
+        client_kwargs.update(proxy=proxy, trust_env=False)
+    async with httpx.AsyncClient(**client_kwargs) as client:
+        async with client.stream("POST", url, headers=headers, json=body) as response:
+            if response.status_code != 200:
+                content = await response.aread()
+                raw = content.decode("utf-8", "ignore")
+                raise _build_xai_http_error(response.status_code, response.headers, raw)
+            return await consume_sse_with_reasoning(
+                response,
+                on_content_delta=on_content_delta,
+                on_tool_call_delta=on_tool_call_delta,
+                on_reasoning_delta=on_thinking_delta,
+                on_response_event=_on_response_event if on_tool_call_delta else None,
+            )
 
 
 async def _fetch_xai_model_capabilities(
@@ -389,39 +404,6 @@ def _parse_xai_model_capabilities(payload: Any) -> dict[str, bool]:
             if isinstance(identifier, str) and identifier.strip():
                 capabilities[_strip_model_prefix(identifier.strip())] = supports_backend_search
     return capabilities
-
-
-async def _request_xai(
-    url: str,
-    headers: dict[str, str],
-    body: dict[str, Any],
-    *,
-    proxy: str | None = None,
-    on_content_delta: Callable[[str], Awaitable[None]] | None = None,
-    on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
-    on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
-) -> tuple[str, list[ToolCallRequest], str, dict[str, int], str | None]:
-    async def _on_response_event(event: dict[str, Any]) -> None:
-        hosted_event = _xai_hosted_tool_event(event)
-        if hosted_event is not None and on_tool_call_delta is not None:
-            await on_tool_call_delta(hosted_event)
-
-    client_kwargs: dict[str, Any] = {"timeout": resolve_stream_idle_timeout_s()}
-    if proxy:
-        client_kwargs.update(proxy=proxy, trust_env=False)
-    async with httpx.AsyncClient(**client_kwargs) as client:
-        async with client.stream("POST", url, headers=headers, json=body) as response:
-            if response.status_code != 200:
-                content = await response.aread()
-                raw = content.decode("utf-8", "ignore")
-                raise _build_xai_http_error(response.status_code, response.headers, raw)
-            return await consume_sse_with_reasoning(
-                response,
-                on_content_delta=on_content_delta,
-                on_tool_call_delta=on_tool_call_delta,
-                on_reasoning_delta=on_thinking_delta,
-                on_response_event=_on_response_event if on_tool_call_delta else None,
-            )
 
 
 def _xai_hosted_tool_event(event: dict[str, Any]) -> dict[str, Any] | None:
@@ -492,7 +474,7 @@ def _build_xai_http_error(
         retry_after=retry_after,
         error_type=error_type,
         error_code=error_code,
-        should_retry=_should_retry_status(status_code, error_type, error_code, raw),
+        should_retry=LLMProvider.should_retry_status(status_code, error_type, error_code, raw),
         response_body=response_body,
     )
 
@@ -565,7 +547,7 @@ def _xai_error_response(exc: Exception) -> LLMResponse:
     elif isinstance(exc, _XAIHTTPError):
         error_kind = "http"
     if status_code is not None and should_retry is None:
-        should_retry = _should_retry_status(
+        should_retry = LLMProvider.should_retry_status(
             int(status_code),
             getattr(exc, "error_type", None),
             getattr(exc, "error_code", None),
@@ -584,22 +566,3 @@ def _xai_error_response(exc: Exception) -> LLMResponse:
         error_retry_after_s=retry_after,
         error_should_retry=should_retry,
     )
-
-
-def _should_retry_status(
-    status_code: int,
-    error_type: str | None,
-    error_code: str | None,
-    content: str | None,
-) -> bool:
-    if status_code == 429:
-        return LLMProvider._is_retryable_429_response(
-            LLMResponse(
-                content=content or "",
-                finish_reason="error",
-                error_status_code=status_code,
-                error_type=error_type,
-                error_code=error_code,
-            )
-        )
-    return status_code in LLMProvider._RETRYABLE_STATUS_CODES or status_code >= 500

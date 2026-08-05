@@ -18,7 +18,6 @@ from nanobot.providers.openai_codex_provider import (
     _CodexHTTPError,
     _friendly_error,
     _request_codex,
-    _should_retry_status,
 )
 from nanobot.providers.registry import find_by_name
 
@@ -524,7 +523,7 @@ def test_codex_429_classification_uses_raw_error_semantics(
 ) -> None:
     error_type, error_code = provider_base.LLMProvider._extract_error_type_code(raw)
 
-    assert _should_retry_status(429, error_type, error_code, raw) is expected_retry
+    assert provider_base.LLMProvider.should_retry_status(429, error_type, error_code, raw) is expected_retry
 
 
 def test_codex_reasoning_options_request_summary_without_forcing_effort() -> None:

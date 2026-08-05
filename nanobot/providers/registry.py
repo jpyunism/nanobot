@@ -58,7 +58,6 @@ class ProviderSpec:
     # gateway / local detection
     is_gateway: bool = False  # routes any model (OpenRouter, AiHubMix)
     is_local: bool = False  # local deployment (vLLM, Ollama)
-    detect_by_key_prefix: str = ""  # match api_key prefix, e.g. "sk-or-"
     detect_by_base_keyword: str = ""  # match substring in api_base URL
     default_api_base: str = ""  # OpenAI-compatible base URL for this provider
 
@@ -185,7 +184,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="OpenRouter",
         backend="openai_compat",
         is_gateway=True,
-        detect_by_key_prefix="sk-or-",
         detect_by_base_keyword="openrouter",
         default_api_base="https://openrouter.ai/api/v1",
         supports_prompt_caching=True,
@@ -239,7 +237,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Hugging Face",
         backend="openai_compat",
         is_gateway=True,
-        detect_by_key_prefix="hf_",
         detect_by_base_keyword="huggingface",
         default_api_base="https://router.huggingface.co/v1",
     ),
@@ -678,7 +675,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="NVIDIA NIM",
         backend="openai_compat",
         is_gateway=False,
-        detect_by_key_prefix="nvapi-",
         detect_by_base_keyword="nvidia.com",
         default_api_base="https://integrate.api.nvidia.com/v1",
     ),

@@ -18,6 +18,9 @@ from nanobot.providers.base import (
     ToolCallRequest,
     resolve_stream_idle_timeout_s,
 )
+from nanobot.providers.base import (
+    ResponsesSSEHTTPError as _CodexHTTPError,
+)
 from nanobot.providers.openai_responses import (
     consume_sse_with_reasoning,
     convert_messages,
@@ -190,25 +193,6 @@ def _build_headers(account_id: str, token: str) -> dict[str, str]:
     }
 
 
-class _CodexHTTPError(RuntimeError):
-    def __init__(
-        self,
-        message: str,
-        *,
-        status_code: int | None = None,
-        retry_after: float | None = None,
-        error_type: str | None = None,
-        error_code: str | None = None,
-        should_retry: bool | None = None,
-    ):
-        super().__init__(message)
-        self.status_code = status_code
-        self.retry_after = retry_after
-        self.error_type = error_type
-        self.error_code = error_code
-        self.should_retry = should_retry
-
-
 async def _request_codex(
     url: str,
     headers: dict[str, str],
@@ -237,7 +221,9 @@ async def _request_codex(
                     retry_after=retry_after,
                     error_type=error_type,
                     error_code=error_code,
-                    should_retry=_should_retry_status(response.status_code, error_type, error_code, raw),
+                    should_retry=LLMProvider.should_retry_status(
+                        response.status_code, error_type, error_code, raw
+                    ),
                 )
             return await consume_sse_with_reasoning(
                 response,
@@ -287,7 +273,7 @@ def _codex_error_response(exc: Exception) -> LLMResponse:
 
     if status_code is not None and should_retry is None:
         retry_content = None if int(status_code) == 429 and isinstance(exc, _CodexHTTPError) else detail
-        should_retry = _should_retry_status(
+        should_retry = LLMProvider.should_retry_status(
             int(status_code),
             getattr(exc, "error_type", None),
             getattr(exc, "error_code", None),
@@ -326,21 +312,3 @@ def _codex_log_summary(exc_type: str, response: LLMResponse) -> str:
 
     return exc_type
 
-
-def _should_retry_status(
-    status_code: int,
-    error_type: str | None,
-    error_code: str | None,
-    content: str | None,
-) -> bool:
-    if status_code == 429:
-        return LLMProvider._is_retryable_429_response(
-            LLMResponse(
-                content=content or "",
-                finish_reason="error",
-                error_status_code=status_code,
-                error_type=error_type,
-                error_code=error_code,
-            )
-        )
-    return status_code in LLMProvider._RETRYABLE_STATUS_CODES or status_code >= 500

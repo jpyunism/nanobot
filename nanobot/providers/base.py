@@ -190,6 +190,29 @@ class GenerationSettings:
     reasoning_effort: str | None = None
 
 
+class ResponsesSSEHTTPError(RuntimeError):
+    """HTTP failure from a Responses SSE endpoint, with retry metadata."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        retry_after: float | None = None,
+        error_type: str | None = None,
+        error_code: str | None = None,
+        should_retry: bool | None = None,
+        response_body: str | None = None,
+    ):
+        super().__init__(message)
+        self.status_code = status_code
+        self.retry_after = retry_after
+        self.error_type = error_type
+        self.error_code = error_code
+        self.should_retry = should_retry
+        self.response_body = response_body
+
+
 _SYNTHETIC_USER_CONTENT = "(conversation continued)"
 
 
@@ -518,6 +541,25 @@ class LLMProvider(ABC):
             return True
         # Unknown 429 defaults to WAIT+retry.
         return True
+
+    @staticmethod
+    def should_retry_status(
+        status_code: int,
+        error_type: str | None,
+        error_code: str | None,
+        content: str | None,
+    ) -> bool:
+        if status_code == 429:
+            return LLMProvider._is_retryable_429_response(
+                LLMResponse(
+                    content=content or "",
+                    finish_reason="error",
+                    error_status_code=status_code,
+                    error_type=error_type,
+                    error_code=error_code,
+                )
+            )
+        return status_code in LLMProvider._RETRYABLE_STATUS_CODES or status_code >= 500
 
     @staticmethod
     def _enforce_role_alternation(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
