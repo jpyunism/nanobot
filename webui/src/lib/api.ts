@@ -147,6 +147,7 @@ export async function listSessions(
     project_id?: string | null;
     todo_list?: string | null;
     agenda_appointment?: string | null;
+    research?: string | null;
   };
   const body = await request<{ sessions: Row[] }>(
     `${base}/api/sessions`,
@@ -167,6 +168,7 @@ export async function listSessions(
     projectId: s.project_id ?? null,
     todoList: s.todo_list ?? null,
     agendaAppointmentId: s.agenda_appointment ?? null,
+    research: s.research ?? null,
   }));
 }
 

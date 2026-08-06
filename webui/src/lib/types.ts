@@ -304,6 +304,8 @@ export interface ChatSummary {
   todoList?: string | null;
   /** Agenda appointment id when this chat is bound to an agenda appointment (else null). */
   agendaAppointmentId?: string | null;
+  /** Research marker when this chat is an ephemeral research surface (else null). */
+  research?: string | null;
 }
 
 export type WorkspaceAccessMode = "restricted" | "full";

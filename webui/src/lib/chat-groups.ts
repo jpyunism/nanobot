@@ -61,7 +61,7 @@ export function groupSessions(
   const normalSessions: ChatSummary[] = [];
 
   for (const session of sessions) {
-    if (session.todoList || session.agendaAppointmentId) {
+    if (session.todoList || session.agendaAppointmentId || session.research) {
       continue;
     }
     if (archived.has(session.key)) {
@@ -245,7 +245,7 @@ function groupSessionsByProject(
   }>();
 
   for (const session of sessions) {
-    if (session.todoList || session.agendaAppointmentId) {
+    if (session.todoList || session.agendaAppointmentId || session.research) {
       continue;
     }
     if (archived.has(session.key) && !options.showArchived) {

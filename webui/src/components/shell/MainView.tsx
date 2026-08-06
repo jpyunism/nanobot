@@ -14,6 +14,9 @@ const TodosSurface = lazy(() =>
 const AgendaSurface = lazy(() =>
   import("@/components/agenda/AgendaSurface").then((m) => ({ default: m.AgendaSurface })),
 );
+const ResearchSurface = lazy(() =>
+  import("@/components/research/ResearchSurface").then((m) => ({ default: m.ResearchSurface })),
+);
 
 type ThreadProps = React.ComponentProps<typeof ThreadShell>;
 type SettingsProps = React.ComponentProps<typeof SettingsView>;
@@ -27,7 +30,8 @@ export type MainView =
   | "projects"
   | "workspace"
   | "todos"
-  | "agenda";
+  | "agenda"
+  | "research";
 
 type TodoProps = React.ComponentProps<typeof TodosSurface>;
 type AgendaProps = React.ComponentProps<typeof AgendaSurface>;
@@ -47,6 +51,7 @@ type Args = {
   isRestarting: boolean;
   onToggleSidebar: () => void;
   onNewChat: () => void;
+  onOpenResearch: () => void;
   onCreateChat: ThreadProps["onCreateChat"];
   onForkChat: ThreadProps["onForkChat"];
   onTurnEnd: ThreadProps["onTurnEnd"];
@@ -176,6 +181,23 @@ function AgendaSurfaceWrapper(props: Args) {
   );
 }
 
+function ResearchSurfaceWrapper(props: Args) {
+  return (
+    <div
+      className={cn(
+        "absolute inset-0 flex flex-col",
+        props.view !== "research" && "hidden",
+      )}
+    >
+      <Suspense fallback={props.fallback}>
+        <ResearchSurface
+          onBackToChat={props.onBackToChat}
+        />
+      </Suspense>
+    </div>
+  );
+}
+
 export function MainView(props: Args) {
   return (
     <main
@@ -191,6 +213,8 @@ export function MainView(props: Args) {
         <TodosSurfaceWrapper {...props} />
       ) : props.view === "agenda" ? (
         <AgendaSurfaceWrapper {...props} />
+      ) : props.view === "research" ? (
+        <ResearchSurfaceWrapper {...props} />
       ) : (
         <SettingsSurface {...props} />
       )}

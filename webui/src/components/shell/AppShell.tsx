@@ -133,6 +133,7 @@ function ThemedShell({
             isRestarting={shell.engineRestart.isRestarting}
             onToggleSidebar={shell.toggleSidebar}
             onNewChat={shell.onNewChat}
+            onOpenResearch={shell.onOpenResearch}
             onCreateChat={shell.onCreateChat}
             onForkChat={shell.onForkChat}
             onTurnEnd={shell.onTurnEnd}

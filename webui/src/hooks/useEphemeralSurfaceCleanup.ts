@@ -2,9 +2,9 @@ import { useEffect, useRef } from "react";
 
 import type { ChatSummary } from "@/lib/types";
 
-/** True for chats created by the Agenda/Todos surfaces (invisible + ephemeral). */
+/** True for chats created by the Agenda/Todos/Research surfaces (invisible + ephemeral). */
 export function isEphemeralSurfaceSession(session: ChatSummary): boolean {
-  return Boolean(session.todoList || session.agendaAppointmentId);
+  return Boolean(session.todoList || session.agendaAppointmentId || session.research);
 }
 
 /**

@@ -62,7 +62,8 @@
     },
     "projects": "Proyectos",
     "todos": "Tareas",
-    "agenda": "Agenda"
+    "agenda": "Agenda",
+    "research": "Investigación"
   },
   "workspace": {
     "dialog": {
@@ -1368,6 +1369,32 @@
       "sat": "Sáb",
       "sun": "Dom"
     }
+  },
+  "research": {
+    "title": "Investigación",
+    "backToChats": "Volver a los chats",
+    "subtitle": "Investigaciones guardadas en la carpeta research/.",
+    "refresh": "Actualizar",
+    "new": "Nueva investigación",
+    "loading": "Cargando…",
+    "empty": "Aún no hay investigaciones. Crea una para empezar.",
+    "reporte": "Reporte",
+    "articulo": "Artículo",
+    "close": "Cerrar",
+    "assistant": "Asistente",
+    "askAi": "Preguntar a la IA",
+    "composer": {
+      "placeholder": "¿Qué tema quieres investigar?",
+      "send": "Enviar"
+    },
+    "readArticle": "Leer artículo",
+    "readReport": "Leer reporte",
+    "back": "Volver",
+    "share": "Compartir",
+    "shared": "Compartido",
+    "loadingDocument": "Cargando documento…",
+    "shareSelectArticle": "Selecciona el artículo para compartir",
+    "shareFailed": "No se pudo compartir"
   },
   "todos": {
     "item": {

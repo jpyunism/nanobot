@@ -76,6 +76,7 @@ class ContextBuilder:
         include_memory_recent_history: bool = True,
         session_key: str | None = None,
         unified_session: bool = False,
+        session_metadata: Mapping[str, Any] | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         root = workspace or self.workspace
@@ -92,6 +93,11 @@ class ContextBuilder:
             parts.append(f"# Memory\n\n{memory}")
 
         always_skills = self.skills.get_always_skills()
+        # Auto-load the research skill for ephemeral research surface chats.
+        if session_metadata and session_metadata.get("research"):
+            research_name = "research"
+            if research_name not in always_skills:
+                always_skills = [*always_skills, research_name]
         if always_skills:
             always_content = self.skills.load_skills_for_context(always_skills)
             if always_content:
@@ -226,6 +232,7 @@ class ContextBuilder:
                     include_memory_recent_history=include_memory_recent_history,
                     session_key=session_key,
                     unified_session=unified_session,
+                    session_metadata=session_metadata,
                 ),
             },
             *history,

@@ -62,7 +62,8 @@
     },
     "projects": "Dự án",
     "todos": "Todos",
-    "agenda": "Agenda"
+    "agenda": "Agenda",
+    "research": "Research"
   },
   "settings": {
     "backToChat": "Quay lại chat",
@@ -1374,5 +1375,31 @@
       "linkPlaceholder": "https://",
       "pricePlaceholder": "$0"
     }
+  },
+  "research": {
+    "title": "Research",
+    "backToChats": "Back to chats",
+    "subtitle": "Research projects saved in the research/ folder.",
+    "refresh": "Refresh",
+    "new": "New research",
+    "loading": "Loading…",
+    "empty": "No research yet. Create one to get started.",
+    "reporte": "Report",
+    "articulo": "Article",
+    "close": "Close",
+    "assistant": "Assistant",
+    "askAi": "Ask AI",
+    "composer": {
+      "placeholder": "What topic do you want to research?",
+      "send": "Send"
+    },
+    "readArticle": "Read article",
+    "readReport": "Read report",
+    "back": "Back",
+    "share": "Share",
+    "shared": "Shared",
+    "loadingDocument": "Loading document…",
+    "shareSelectArticle": "Select the article to share",
+    "shareFailed": "Could not share"
   }
 }

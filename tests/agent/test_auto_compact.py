@@ -330,10 +330,11 @@ class TestAutoCompact:
 
         await loop.auto_compact._archive("cli:test", runtime=loop.llm_runtime())
 
-        assert len(archived_messages) == 4
+        # Adaptive window: 6 turns (12 msgs) of low-density trivia → min_count=4
+        assert len(archived_messages) == 8
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
-        assert session_after.messages[0]["content"] == "msg user 2"
+        assert len(session_after.messages) == 4
+        assert session_after.messages[0]["content"] == "msg user 4"
         assert session_after.messages[-1]["content"] == "msg assistant 5"
         await loop.close_mcp()
 
@@ -351,7 +352,9 @@ class TestAutoCompact:
         await loop.auto_compact._archive("cli:test", runtime=loop.llm_runtime())
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) > loop.auto_compact._RECENT_SUFFIX_MESSAGES
+        # Adaptive window keeps fewer messages for low-density sessions,
+        # but extend_to_user ensures "record this" and all paired tool results survive
+        assert len(session_after.messages) >= 4
         assert session_after.messages[0]["content"] == "record this"
         assert session_after.messages[-1]["content"] == "done"
         tool_results = {
@@ -384,7 +387,7 @@ class TestAutoCompact:
         assert entry is not None
         assert entry[0] == "User said hello."
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
+        assert len(session_after.messages) == 4  # adaptive: 12 low-density msgs → min_count=4
         await loop.close_mcp()
 
     @pytest.mark.asyncio
@@ -417,7 +420,9 @@ class TestAutoCompact:
 
         await loop.auto_compact._archive("cli:test", runtime=loop.llm_runtime())
 
-        assert len(archived_messages) == 2
+        # 14 turns = 28 msgs, last_consolidated=18 → 10 unconsolidated
+        # Adaptive window: low-density trivia → min_count=4 → 10-4 = 6 archived
+        assert len(archived_messages) == 6
         await loop.close_mcp()
 
 
@@ -461,7 +466,8 @@ class TestAutoCompactIdleDetection:
         await loop._process_message(msg)
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(archived_messages) == 4
+        # 6 turns = 12 msgs, adaptive low-density → min_count=4 → 8 archived
+        assert len(archived_messages) == 8
         assert not any(m["content"] == "old user 0" for m in session_after.messages)
         assert any(m["content"] == "new msg" for m in session_after.messages)
         await loop.close_mcp()
@@ -614,7 +620,7 @@ class TestAutoCompactEdgeCases:
         await loop.auto_compact._archive("cli:test", runtime=loop.llm_runtime())
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
+        assert len(session_after.messages) == 4  # adaptive: 12 low-density msgs → min_count=4
         # "(nothing)" summary should not be stored
         assert "cli:test" not in loop.auto_compact._summaries
 
@@ -635,7 +641,7 @@ class TestAutoCompactEdgeCases:
         await loop.auto_compact._archive("cli:test", runtime=loop.llm_runtime())
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
+        assert len(session_after.messages) == 4  # adaptive: 12 low-density msgs → min_count=4
 
         await loop.close_mcp()
 
@@ -847,8 +853,8 @@ class TestProactiveAutoCompact:
         await self._run_check_expired(loop)
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
-        assert len(archived_messages) == 2
+        assert len(session_after.messages) == 4  # adaptive: 10 low-density msgs → min_count=4
+        assert len(archived_messages) == 6  # 10 total - 4 kept = 6 archived
         entry = loop.auto_compact._summaries.get("cli:test")
         assert entry is not None
         assert entry[0] == "User chatted about old things."
@@ -1030,7 +1036,7 @@ class TestProactiveAutoCompact:
 
         assert _fake_compact.state["count"] == 1
         s1_after = loop.sessions.get_or_create("cli:expired_idle")
-        assert len(s1_after.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
+        assert len(s1_after.messages) == 4  # adaptive: 12 low-density msgs → min_count=4
         s2_after = loop.sessions.get_or_create("cli:expired_active")
         assert len(s2_after.messages) == 12  # Preserved
         s3_after = loop.sessions.get_or_create("cli:recent")
@@ -1159,7 +1165,7 @@ class TestSummaryPersistence:
 
         # prepare_session should recover summary from metadata
         reloaded = loop.sessions.get_or_create("cli:test")
-        assert len(reloaded.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
+        assert len(reloaded.messages) == 4  # adaptive: 12 low-density msgs → min_count=4
         _, summary = loop.auto_compact.prepare_session(reloaded, "cli:test")
 
         assert summary is not None

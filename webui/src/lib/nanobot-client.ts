@@ -359,7 +359,7 @@ export class NanobotClient {
   newChat(
     timeoutMs: number = 5_000,
     workspaceScope?: WorkspaceScopePayload | null,
-    options?: { todoList?: string; agendaAppointment?: string },
+    options?: { todoList?: string; agendaAppointment?: string; research?: string },
   ): Promise<string> {
     if (this.pendingNewChat) {
       return Promise.reject(new Error("newChat already in flight"));
@@ -375,6 +375,7 @@ export class NanobotClient {
         ...(workspaceScope ? { workspace_scope: workspaceScope } : {}),
         ...(options?.todoList ? { todo_list: options.todoList } : {}),
         ...(options?.agendaAppointment ? { agenda_appointment: options.agendaAppointment } : {}),
+        ...(options?.research ? { research: options.research } : {}),
       });
     });
   }
@@ -629,6 +630,14 @@ export class NanobotClient {
     for (const handler of this.runStatusHandlers) {
       handler(chatId, startedAt);
     }
+  }
+
+  getPendingInbound(chatId: string): InboundEvent[] {
+    const q = this.pendingInboundByChat.get(chatId);
+    if (!q || q.length === 0) return [];
+    const flushed = q.splice(0);
+    this.pendingInboundByChat.delete(chatId);
+    return flushed;
   }
 
   private dispatch(chatId: string, ev: InboundEvent): void {

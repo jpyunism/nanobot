@@ -7,7 +7,12 @@ Only SNIP facts deserve a non-[skip] mark:
 - Persistent: still relevant after 2 weeks
 
 Output one fact per line in this format:
-- [mark] fact content
+- [tier] [mark] fact content
+
+Tiers (choose the best match):
+- [critical] Decisions, preferences, rules, bugfixes — must survive any compaction
+- [important] Technical discoveries, config details, project knowledge — keep if space allows
+- [supplemental] Active task state, temporary context, minor details — drop first when compacting
 
 Marks (choose the best match):
 - [permanent] Core preferences, personal traits, habits — never becomes stale

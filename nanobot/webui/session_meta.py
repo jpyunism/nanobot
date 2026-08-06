@@ -15,6 +15,7 @@ CHAT_PROJECT_ID_METADATA_KEY = "project_id"
 CHAT_PROJECT_INJECTED_FLAG = "_project_context_injected"
 CHAT_TODO_LIST_METADATA_KEY = "todo_list"
 CHAT_AGENDA_APPOINTMENT_METADATA_KEY = "agenda_appointment"
+CHAT_RESEARCH_METADATA_KEY = "research"
 
 
 def chat_project_id_from_metadata(metadata: dict[str, Any] | None) -> str | None:
@@ -114,3 +115,32 @@ def set_chat_agenda_appointment(session: Any, appointment_id: str | None) -> Non
         session.metadata.pop(CHAT_AGENDA_APPOINTMENT_METADATA_KEY, None)
         return
     session.metadata[CHAT_AGENDA_APPOINTMENT_METADATA_KEY] = cleaned
+
+
+def chat_research_from_metadata(metadata: dict[str, Any] | None) -> str | None:
+    """Return the research marker bound to a chat, or ``None`` if unbound."""
+    if not isinstance(metadata, dict):
+        return None
+    raw = metadata.get(CHAT_RESEARCH_METADATA_KEY)
+    if not isinstance(raw, str):
+        return None
+    cleaned = raw.strip()
+    return cleaned or None
+
+
+def set_chat_research(session: Any, research: str | None) -> None:
+    """Bind or unbind a session to a research marker.
+
+    Pass ``None`` or an empty string to unbind. The caller is responsible for
+    ``session.save()``.
+    """
+    if not hasattr(session, "metadata") or not isinstance(session.metadata, dict):
+        return
+    if research is None:
+        session.metadata.pop(CHAT_RESEARCH_METADATA_KEY, None)
+        return
+    cleaned = research.strip()
+    if not cleaned:
+        session.metadata.pop(CHAT_RESEARCH_METADATA_KEY, None)
+        return
+    session.metadata[CHAT_RESEARCH_METADATA_KEY] = cleaned

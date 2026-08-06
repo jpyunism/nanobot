@@ -10,6 +10,7 @@ import {
   Search,
   Settings,
   SquarePen,
+  Telescope,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -41,9 +42,10 @@ interface SidebarProps {
   onOpenWorkspace?: () => void;
   onOpenTodos?: () => void;
   onOpenAgenda?: () => void;
+  onOpenResearch?: () => void;
   onSettingsIntent?: () => void;
   onOpenSearch: () => void;
-  activeUtility?: "automations" | "projects" | "workspace" | "todos" | "agenda" | null;
+  activeUtility?: "automations" | "projects" | "workspace" | "todos" | "agenda" | "research" | null;
   onToggleArchived: () => void;
   onCollapse: () => void;
   onExpand?: () => void;
@@ -205,6 +207,16 @@ export function Sidebar(props: SidebarProps) {
             onIntent={props.onSettingsIntent}
             active={props.activeUtility === "agenda"}
             icon={<CalendarDays className="h-4 w-4" />}
+          />
+        )}
+        {props.onOpenResearch && (
+          <SidebarActionButton
+            collapsed={collapsed}
+            label={t("sidebar.research", { defaultValue: "Research" })}
+            onClick={props.onOpenResearch}
+            onIntent={props.onSettingsIntent}
+            active={props.activeUtility === "research"}
+            icon={<Telescope className="h-4 w-4" />}
           />
         )}
         <SidebarActionButton

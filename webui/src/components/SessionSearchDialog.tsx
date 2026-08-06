@@ -39,7 +39,7 @@ export function SessionSearchDialog({
 
   const normalizedQuery = query.trim().toLowerCase();
   const chatSessions = useMemo(
-    () => sessions.filter((session) => !session.todoList && !session.agendaAppointmentId),
+    () => sessions.filter((session) => !session.todoList && !session.agendaAppointmentId && !session.research),
     [sessions],
   );
 

@@ -84,7 +84,7 @@ export async function deleteTodoList(
   return todoRequest<{ ok: boolean; slug: string }>(
     `${base}/api/todos/${encodeURIComponent(slug)}`,
     token,
-    undefined,
+    {},
   );
 }
 

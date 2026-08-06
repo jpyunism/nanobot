@@ -103,6 +103,7 @@ from nanobot.webui.projects import (
     project_file_payload,
     projects_list_payload,
 )
+from nanobot.webui.research_api import share_research_article
 from nanobot.webui.session_automations import (
     all_automations_payload,
     serialize_automation_jobs,
@@ -349,6 +350,11 @@ class GatewayHTTPHandler:
         if response is not None:
             return response
         response = self._dispatch_todos_routes(request, got)
+        if response is not None:
+            return response
+
+        # Research routes
+        response = self._dispatch_research_routes(request, got)
         if response is not None:
             return response
 
@@ -702,6 +708,24 @@ class GatewayHTTPHandler:
         except ProjectError as exc:
             return _http_error(404, str(exc))
         return _http_json_response({"ok": True, "id": file_id})
+
+    # -- Research routes -----------------------------------------------------
+
+    def _dispatch_research_routes(self, request: WsRequest, got: str) -> Response | None:
+        if got == "/api/research/share":
+            return self._handle_research_share(request)
+        return None
+
+    def _handle_research_share(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        path = _query_first(query, "path") or ""
+        scope = self._workspace_browser_scope(request)
+        payload = share_research_article(path, scope)
+        if not payload.get("ok"):
+            return _http_error(400, payload.get("error") or "Failed to share")
+        return _http_json_response(payload)
 
     # -- Workspace browser routes ------------------------------------------
 

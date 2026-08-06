@@ -590,6 +590,9 @@ class WebSocketChannel(BaseChannel):
             agenda_appointment = envelope.get("agenda_appointment")
             if isinstance(agenda_appointment, str) and agenda_appointment:
                 self._workspaces.persist_agenda_appointment(new_id, agenda_appointment)
+            research = envelope.get("research")
+            if isinstance(research, str) and research:
+                self._workspaces.persist_research(new_id, research)
             self._attach(connection, new_id)
             await self._send_event(connection, "attached", chat_id=new_id)
             await self._send_event(

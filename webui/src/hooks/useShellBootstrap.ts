@@ -232,6 +232,11 @@ export function useShellBootstrap({
     navigate({ view: "agenda", activeKey, settingsSection: "overview" });
   }, [navigate, activeKey, setMobileSidebarOpen]);
 
+  const onOpenResearch = useCallback(() => {
+    setMobileSidebarOpen(false);
+    navigate({ view: "research", activeKey, settingsSection: "overview" });
+  }, [navigate, activeKey, setMobileSidebarOpen]);
+
   useShellShortcuts({ onNewChat, onOpenSessionSearch, onOpenAgenda });
 
   const onTurnEnd = useDeferredTitleRefresh(activeSession, refresh);
@@ -256,6 +261,7 @@ export function useShellBootstrap({
     onOpenUtility,
     onOpenTodos,
     onOpenAgenda,
+    onOpenResearch,
     token,
   });
 
@@ -322,6 +328,7 @@ export function useShellBootstrap({
     onOpenTodoSlug,
     onOpenTodos,
     onOpenAgenda,
+    onOpenResearch,
   };
 }
 

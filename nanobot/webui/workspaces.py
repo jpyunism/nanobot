@@ -308,3 +308,11 @@ class WebUIWorkspaceController:
         session = self._sessions.get_or_create(f"websocket:{chat_id}")
         session.metadata["agenda_appointment"] = appointment_id
         self._sessions.save(session)
+
+    def persist_research(self, chat_id: str, marker: str) -> None:
+        """Mark a chat as an ephemeral research surface via ``session.metadata['research']``."""
+        if self._sessions is None:
+            return
+        session = self._sessions.get_or_create(f"websocket:{chat_id}")
+        session.metadata["research"] = marker
+        self._sessions.save(session)

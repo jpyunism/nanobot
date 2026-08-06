@@ -28,6 +28,7 @@ from nanobot.session.manager import (
 from nanobot.session.model_selection import model_preset_from_metadata
 from nanobot.webui.session_meta import (
     chat_agenda_appointment_from_metadata,
+    chat_research_from_metadata,
     chat_todo_list_from_metadata,
 )
 
@@ -58,6 +59,11 @@ def _todo_list_from_metadata(metadata: Any) -> str | None:
 def _agenda_appointment_from_metadata(metadata: Any) -> str | None:
     """Public helper: read the chat-agenda binding from session metadata."""
     return chat_agenda_appointment_from_metadata(metadata)
+
+
+def _research_from_metadata(metadata: Any) -> str | None:
+    """Public helper: read the chat-research marker from session metadata."""
+    return chat_research_from_metadata(metadata)
 
 
 def list_webui_sessions(session_manager: SessionManager) -> list[dict[str, Any]]:
@@ -291,6 +297,7 @@ def _indexed_row_for_session(session: Session, path: Path) -> dict[str, Any]:
         "project_id": _project_id_from_metadata(session.metadata),
         "todo_list": _todo_list_from_metadata(session.metadata),
         "agenda_appointment": _agenda_appointment_from_metadata(session.metadata),
+        "research": _research_from_metadata(session.metadata),
         "file": path.name,
         "mtime_ns": signature["mtime_ns"],
         "size": signature["size"],
@@ -368,6 +375,7 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
                 "project_id": _project_id_from_metadata(data.get("metadata", {})),
                 "todo_list": _todo_list_from_metadata(data.get("metadata", {})),
                 "agenda_appointment": _agenda_appointment_from_metadata(data.get("metadata", {})),
+                "research": _research_from_metadata(data.get("metadata", {})),
                 "file": path.name,
                 "mtime_ns": signature["mtime_ns"],
                 "size": signature["size"],

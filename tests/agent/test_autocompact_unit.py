@@ -241,10 +241,11 @@ class TestCheckExpired:
         await scheduled[0]
 
         resolve_runtime.assert_called_once_with(session)
+        # Adaptive window: 5 messages with low info density → min_count=4
         ac.consolidator.compact_idle_session.assert_awaited_once_with(
             "cli:old",
             runtime=admitted,
-            max_suffix=ac._RECENT_SUFFIX_MESSAGES,
+            max_suffix=4,
         )
 
     @pytest.mark.parametrize("resolution_error", [KeyError, ValueError])
