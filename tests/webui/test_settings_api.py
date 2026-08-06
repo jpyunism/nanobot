@@ -774,14 +774,14 @@ def test_update_model_configuration_preserves_custom_context_windows(
     payload = update_model_configuration(
         {
             "name": ["codex"],
-            "context_window_tokens": ["128000"],
+            "context_window_tokens": ["131072"],
         }
     )
 
     rows = {row["name"]: row for row in payload["model_presets"]}
-    assert rows["codex"]["context_window_tokens"] == 128000
+    assert rows["codex"]["context_window_tokens"] == 131_072
     saved = load_config(config_path)
-    assert saved.model_presets["codex"].context_window_tokens == 128000
+    assert saved.model_presets["codex"].context_window_tokens == 131_072
 
 
 def test_update_context_window_rejects_unknown_values(
@@ -794,9 +794,9 @@ def test_update_context_window_rejects_unknown_values(
 
     with pytest.raises(
         WebUISettingsError,
-        match="context_window_tokens must be 65536, 200000, 262144, 500000, or 1048576",
+        match="context_window_tokens must be 65536, 131072, 200000, 262144, 500000, or 1048576",
     ):
-        update_agent_settings({"context_window_tokens": ["128000"]})
+        update_agent_settings({"context_window_tokens": ["100000"]})
 
 
 def test_update_model_configuration_rejects_default_preset(

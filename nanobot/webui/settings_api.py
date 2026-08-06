@@ -125,7 +125,7 @@ _IMAGE_GENERATION_ASPECT_RATIOS = {
     "2:3",
     "21:9",
 }
-_CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 200_000, 262_144, 500_000, 1_048_576}
+_CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 131_072, 200_000, 262_144, 500_000, 1_048_576}
 _OAUTH_PROXY_PROVIDERS = {"openai_codex", "xai_grok"}
 _XAI_WEBUI_OAUTH_TIMEOUT_S = 600
 _XAI_WEBUI_OAUTH_MAX_FLOWS = 8
@@ -866,7 +866,7 @@ def _parse_context_window_tokens(value: str | None) -> int | None:
         raise WebUISettingsError("context_window_tokens must be an integer") from None
     if parsed not in _CONTEXT_WINDOW_TOKEN_OPTIONS:
         raise WebUISettingsError(
-            "context_window_tokens must be 65536, 200000, 262144, 500000, or 1048576"
+            "context_window_tokens must be 65536, 131072, 200000, 262144, 500000, or 1048576"
         )
     return parsed
 

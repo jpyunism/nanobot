@@ -256,7 +256,7 @@ type ProviderForm = {
 type CustomProviderDraft = ProviderForm & { name: string };
 type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
 
-const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 200_000, 262_144, 500_000, 1_048_576] as const;
+const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 131_072, 200_000, 262_144, 500_000, 1_048_576] as const;
 const OAUTH_PROXY_PROVIDERS = new Set(["openai_codex", "xai_grok"]);
 const CUSTOM_PROVIDER_CREATION_KEY = "__custom_provider__";
 const CUSTOM_PROVIDER_ADVANCED_FIELDS: ProviderAdvancedField[] = [
@@ -9192,6 +9192,7 @@ function formatContextWindow(tokens: number): string {
 
 function formatModelContextWindow(tokens: number): string {
   if (tokens === 65_536) return "64K";
+  if (tokens === 131_072) return "128K";
   if (tokens === 262_144) return "256K";
   if (tokens === 1_048_576) return "1M";
   return formatContextWindow(tokens);
