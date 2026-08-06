@@ -1223,17 +1223,22 @@ class Consolidator:
             if summary and summary != "(nothing)":
                 self._persist_last_summary(session, summary)
 
-            session.messages = messages_to_keep
-            session.last_consolidated = 0
-            self.sessions.save(session)
+            # Only truncate if the summary succeeded (truthy) or there was nothing to archive.
+            # If archive() returned None (LLM failed), keep the session intact so the
+            # next turn doesn't lose context without a summary to inject.
+            if summary is not None:
+                session.messages = messages_to_keep
+                session.last_consolidated = 0
+                self.sessions.save(session)
 
             if messages_to_remove:
                 logger.info(
-                    "Idle-session compact for {}: archived={}, kept={}, summary={}",
+                    "Idle-session compact for {}: archived={}, kept={}, summary={}, truncated={}",
                     session_key,
                     len(messages_to_remove),
                     len(messages_to_keep),
                     bool(summary),
+                    summary is not None,
                 )
 
             return summary
