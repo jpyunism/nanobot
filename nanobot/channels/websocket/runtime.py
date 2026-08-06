@@ -430,6 +430,7 @@ class WebSocketChannel(BaseChannel):
             return await self._dispatch_http(connection, request)
 
         async def handler(connection: ServerConnection) -> None:
+            self._touch_activity()
             await self._connection_loop(connection)
 
         self.logger.info(
@@ -513,6 +514,7 @@ class WebSocketChannel(BaseChannel):
         default_chat_id = str(uuid.uuid4())
 
         try:
+            self._touch_activity()
             await connection.send(
                 json.dumps(
                     {
@@ -529,6 +531,7 @@ class WebSocketChannel(BaseChannel):
             await self._hydrate_after_subscribe(default_chat_id)
 
             async for raw in connection:
+                self._touch_activity()
                 if isinstance(raw, bytes):
                     try:
                         raw = raw.decode("utf-8")

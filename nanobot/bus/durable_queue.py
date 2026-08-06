@@ -207,7 +207,7 @@ class DurableMessageQueue:
                     break
         return recovered
 
-    def _publish(
+    async def _publish(
         self,
         data: dict[str, Any],
         put_signal: Callable[[], Awaitable[None] | None] | None = None,
@@ -215,11 +215,16 @@ class DurableMessageQueue:
         delivery_id = uuid.uuid4().hex
         data["_delivery_id"] = delivery_id
         path = self.inbox_dir / f"{delivery_id}.json"
-        _atomic_write(path, json.dumps(data, ensure_ascii=False, default=_encode_datetime))
+        content = json.dumps(data, ensure_ascii=False, default=_encode_datetime)
+        # Atomic fsync is synchronous I/O; run it in a thread so a slow disk
+        # cannot block the asyncio event loop for seconds and kill heartbeats
+        # for live channels (Discord/WebSocket pings).
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _atomic_write, path, content)
         if put_signal is not None:
             result = put_signal()
             if isinstance(result, Awaitable):
-                asyncio.get_running_loop().create_task(result)
+                loop.create_task(result)
 
 
 class DurableInboundQueue(DurableMessageQueue):
@@ -229,7 +234,9 @@ class DurableInboundQueue(DurableMessageQueue):
         super().__init__(workspace / "bus" / "inbound")
 
     async def publish(self, msg: InboundMessage) -> None:
-        self._publish(_inbound_to_dict(msg), put_signal=lambda: self._signal.put("published"))
+        await self._publish(
+            _inbound_to_dict(msg), put_signal=lambda: self._signal.put("published")
+        )
 
     async def consume(self) -> InboundMessage:
         path = self._next_inbox_file()
@@ -276,7 +283,9 @@ class DurableOutboundQueue(DurableMessageQueue):
         super().__init__(workspace / "bus" / "outbound")
 
     async def publish(self, msg: OutboundMessage) -> None:
-        self._publish(_outbound_to_dict(msg), put_signal=lambda: self._signal.put("published"))
+        await self._publish(
+            _outbound_to_dict(msg), put_signal=lambda: self._signal.put("published")
+        )
 
     async def consume(self) -> OutboundMessage:
         path = self._next_inbox_file()
