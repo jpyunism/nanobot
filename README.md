@@ -120,6 +120,28 @@ Verify the install:
 nanobot --version
 ```
 
+### Update
+
+Update nanobot to the latest `main` branch. The command detects your install
+(editable source checkout vs PyPI/zip), updates the Python package, rebuilds
+the WebUI bundle, and restarts the gateway service automatically:
+
+```bash
+nanobot update
+```
+
+Check for updates without applying anything:
+
+```bash
+nanobot update --check
+```
+
+Useful flags:
+
+- `--yes` / `-y` — skip confirmation prompts
+- `--no-restart` — do not restart the gateway service
+- `--no-webui` — skip the WebUI rebuild
+
 ---
 
 ## Quick Start

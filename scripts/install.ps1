@@ -8,7 +8,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $Package = "nanobot-ai"
-$MainSource = "https://github.com/HKUDS/nanobot/archive/refs/heads/main.zip"
+$MainSource = "https://github.com/madkoding/nanobot/archive/refs/heads/main.zip"
 $InstallTarget = $Package
 $InstallSource = "PyPI"
 $script:NanobotRunner = $null

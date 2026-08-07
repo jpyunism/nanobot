@@ -623,6 +623,29 @@ def main(
 
 
 # ============================================================================
+# Update
+# ============================================================================
+
+
+@app.command()
+def update(
+    check: bool = typer.Option(False, "--check", help="Compare local vs remote without updating"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompts"),
+    no_restart: bool = typer.Option(False, "--no-restart", help="Do not restart the gateway service"),
+    no_webui: bool = typer.Option(False, "--no-webui", help="Skip the WebUI rebuild"),
+):
+    """Update nanobot to the latest main branch from madkoding/nanobot.
+
+    Detects the current install (editable source checkout vs PyPI/zip),
+    updates the Python package, rebuilds the WebUI bundle, and restarts the
+    gateway service automatically.
+    """
+    from nanobot.utils.update import perform_update
+
+    raise typer.Exit(code=perform_update(check=check, yes=yes, no_restart=no_restart, no_webui=no_webui))
+
+
+# ============================================================================
 # Onboard / Setup
 # ============================================================================
 
