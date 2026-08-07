@@ -3,6 +3,7 @@ import { ThreadShell } from "@/components/thread/ThreadShell";
 import { ProjectsSurface } from "@/components/projects/ProjectsSurface";
 import { WorkspaceBrowser } from "@/components/workspace/WorkspaceBrowser";
 import type { ChatSummary, SettingsPayload, WorkspacesPayload, WorkspaceScopePayload } from "@/lib/types";
+import type { ShellView } from "@/lib/routing";
 import { cn } from "@/lib/utils";
 
 const SettingsView = lazy(() =>
@@ -21,17 +22,7 @@ const ResearchSurface = lazy(() =>
 type ThreadProps = React.ComponentProps<typeof ThreadShell>;
 type SettingsProps = React.ComponentProps<typeof SettingsView>;
 
-export type MainView =
-  | "chat"
-  | "settings"
-  | "apps"
-  | "automations"
-  | "skills"
-  | "projects"
-  | "workspace"
-  | "todos"
-  | "agenda"
-  | "research";
+export type MainView = ShellView;
 
 type TodoProps = React.ComponentProps<typeof TodosSurface>;
 type AgendaProps = React.ComponentProps<typeof AgendaSurface>;

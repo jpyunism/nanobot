@@ -83,12 +83,13 @@ The WebUI is a Vite + React 18 + TypeScript SPA. As of the `refactor(webui): ext
 
 ```
 webui/src/
-  App.tsx                          # 467 lines — bootstrap + Provider + shell render
+  App.tsx                          # thin entry — bootstrap + Provider + AppShell render
   components/
     shell/                         # shell-level composites
-      MainView.tsx                 # ThreadShell + SettingsView
+      AppShell.tsx                 # composition root (ThemedShell + providers)
+      MainView.tsx                 # view switch (chat/settings/projects/workspace/todos/agenda/research)
       SidebarLayout.tsx            # 3 Sidebar renders (host, host-preview, mobile sheet)
-      Overlays.tsx                 # 4 dialogs + restart toast + pairing popup
+      Overlays.tsx                 # 2 lazy dialogs (delete/rename) + restart toast + pairing popup
       ShellNativeHeader.tsx        # native chrome (HostChrome + theme toggle)
     HostChrome.tsx                 # native host wrapper
     PairingCodePopup.tsx           # pairing code UI
@@ -116,7 +117,7 @@ webui/src/
 | `useWorkspaceScope` | workspaces/draft/overrides + error |
 | `usePairing` | pairing code UI state + polling |
 | `useSettingsSnapshot` | fetchSettings + cache |
-| `useUtilityActions` | openApps/Automations/Skills/Settings (consolidated) |
+| `useChatActions` | chat + utility callbacks (openApps/Automations/Skills/Settings live under `chatActions.utility`) |
 | `useShellShortcuts` | keyboard shortcuts (Cmd+K, Cmd+Shift+O) |
 | `useDocumentTitle` | `document.title` effect per view |
 | `useThreadSessionSync` | active chat ref + thread session updates |

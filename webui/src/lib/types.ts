@@ -203,6 +203,11 @@ export interface SkillDetail extends SkillSummary {
 
 export interface SkillsPayload { skills: SkillSummary[]; }
 
+export interface ChatProjectBinding {
+  session_key: string;
+  project_id: string | null;
+}
+
 export interface ProjectSummary {
   id: string;
   name: string;

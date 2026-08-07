@@ -5,6 +5,7 @@ import type {
   ChannelConfigurePayload,
   ChannelConnectPayload,
   ChannelValidationPayload,
+  ChatProjectBinding,
   ChatSummary,
   CliAppsPayload,
   FilePreviewPayload,
@@ -377,11 +378,6 @@ export async function deleteSession(
     `${resolvedBase}/api/sessions/${encodeURIComponent(key)}/delete${suffix}`,
     token,
   );
-}
-
-export interface ChatProjectBinding {
-  session_key: string;
-  project_id: string | null;
 }
 
 export async function getChatProject(
