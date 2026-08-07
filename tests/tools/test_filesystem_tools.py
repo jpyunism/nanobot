@@ -9,6 +9,11 @@ from nanobot.agent.tools.filesystem import (
     WriteFileTool,
     _find_match,
 )
+from nanobot.security.workspace_access import (
+    bind_workspace_scope,
+    build_workspace_scope,
+    reset_workspace_scope,
+)
 
 # ---------------------------------------------------------------------------
 # ReadFileTool
@@ -343,6 +348,61 @@ class TestWorkspaceRestriction:
         result = await tool.execute(path=str(skill_file))
         assert "Test Skill" in result
         assert "Error" not in result
+
+    @pytest.mark.asyncio
+    async def test_project_folder_is_readable_via_scope(self, tmp_path):
+        """A project folder outside the workspace (bound via scope extra_read_dirs)
+        is readable but not writable."""
+        from dataclasses import replace
+
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        folder = tmp_path / "project-folder"
+        folder.mkdir()
+        doc = folder / "doc.txt"
+        doc.write_text("folder content", encoding="utf-8")
+
+        base_scope = build_workspace_scope(
+            workspace,
+            "restricted",
+            source_channel="websocket",
+        )
+        scope = replace(base_scope, extra_read_dirs=(folder,))
+        token = bind_workspace_scope(scope)
+        try:
+            read_tool = ReadFileTool(workspace=workspace, allowed_dir=workspace)
+            result = await read_tool.execute(path=str(doc))
+            assert "folder content" in result
+            assert "Error" not in result
+
+            write_tool = WriteFileTool(workspace=workspace, allowed_dir=workspace)
+            out = folder / "new.txt"
+            wresult = await write_tool.execute(path=str(out), content="x")
+            assert "Error" in wresult
+        finally:
+            reset_workspace_scope(token)
+
+    @pytest.mark.asyncio
+    async def test_project_folder_not_readable_without_scope_grant(self, tmp_path):
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        folder = tmp_path / "secret-folder"
+        folder.mkdir()
+        doc = folder / "doc.txt"
+        doc.write_text("secret", encoding="utf-8")
+
+        scope = build_workspace_scope(
+            workspace,
+            "restricted",
+            source_channel="websocket",
+        )
+        token = bind_workspace_scope(scope)
+        try:
+            tool = ReadFileTool(workspace=workspace, allowed_dir=workspace)
+            result = await tool.execute(path=str(doc))
+            assert "Error" in result
+        finally:
+            reset_workspace_scope(token)
 
     @pytest.mark.asyncio
     async def test_read_allowed_in_media_dir(self, tmp_path, monkeypatch):

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 from contextvars import ContextVar, Token
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 WorkspaceAccessMode = Literal["restricted", "full"]
 WORKSPACE_SCOPE_METADATA_KEY = "workspace_scope"
@@ -71,6 +71,7 @@ class WorkspaceScope:
     restrict_to_workspace: bool
     sandbox_status: WorkspaceSandboxStatus
     source_channel: str | None = None
+    extra_read_dirs: tuple[Path, ...] = ()
 
     @property
     def project_name(self) -> str:
@@ -135,6 +136,16 @@ class ToolWorkspace:
             return self.project_path
         return None
 
+    @property
+    def extra_read_dirs(self) -> tuple[Path, ...]:
+        """Read-only roots outside the workspace explicitly granted this turn."""
+        if self.scope is None:
+            return ()
+        return self.scope.extra_read_dirs
+
+
+ProjectExtraReadDirsProvider = Callable[[Any], tuple[Path, ...]]
+
 
 @dataclass(frozen=True)
 class WorkspaceScopeResolver:
@@ -143,6 +154,7 @@ class WorkspaceScopeResolver:
     default_workspace: str | Path
     default_restrict_to_workspace: bool
     scoped_channel: str = "websocket"
+    extra_read_dirs_for: ProjectExtraReadDirsProvider | None = None
 
     @property
     def sandbox_status(self) -> WorkspaceSandboxStatus:
@@ -174,13 +186,22 @@ class WorkspaceScopeResolver:
     ) -> WorkspaceScope:
         if channel != self.scoped_channel:
             return self.default()
-        return resolve_effective_workspace_scope(
+        scope = resolve_effective_workspace_scope(
             message_metadata=message_metadata,
             session_metadata=session_metadata,
             default_workspace=self.default_workspace,
             default_restrict_to_workspace=self.default_restrict_to_workspace,
             source_channel=channel,
         )
+        if self.extra_read_dirs_for is None:
+            return scope
+        try:
+            extra = self.extra_read_dirs_for(session_metadata)
+        except Exception:
+            extra = ()
+        if not extra:
+            return scope
+        return replace(scope, extra_read_dirs=tuple(extra))
 
     def persist_message_scope(self, session: Any, msg: Any) -> None:
         if getattr(msg, "channel", None) != self.scoped_channel:

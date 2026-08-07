@@ -14,6 +14,7 @@ from nanobot.webui.ingress_policy import DEFAULT_WEBUI_INGRESS_POLICY, WebUIIngr
 from nanobot.webui.media_gateway import WebUIMediaGateway
 from nanobot.webui.project_context_provider import make_project_context_provider
 from nanobot.webui.projects import WebUIProjectsController
+from nanobot.webui.session_meta import chat_project_id_from_metadata as _chat_project_id
 from nanobot.webui.transcript import WebUITranscriptRecorder
 from nanobot.webui.workspaces import WebUIWorkspaceController
 from nanobot.webui.ws_http import GatewayHTTPHandler
@@ -82,17 +83,42 @@ def build_gateway_services(
         default_restrict_to_workspace=default_restrict_to_workspace,
     )
     projects = WebUIProjectsController(data_dir=get_data_dir())
-    if (
-        agent_loop is not None
-        and session_manager is not None
-        and callable(getattr(agent_loop, "register_runtime_context_provider", None))
-    ):
+
+    def _project_extra_read_dirs(session_metadata: Any) -> tuple[Path, ...]:
+        """Read-only roots for the project bound to the session's folders."""
+        project_id = _chat_project_id(session_metadata)
+        if not project_id:
+            return ()
         try:
-            agent_loop.register_runtime_context_provider(
-                make_project_context_provider(session_manager, projects)
-            )
-        except Exception as exc:
-            logger.warning("failed to register project context provider: {}", exc)
+            folders = projects.list_folders(project_id)
+        except Exception:
+            return ()
+        roots: list[Path] = []
+        for folder in folders:
+            try:
+                p = Path(folder.path).expanduser().resolve(strict=False)
+            except (OSError, ValueError, RuntimeError):
+                continue
+            if p.is_dir():
+                roots.append(p)
+        return tuple(roots)
+
+    if agent_loop is not None:
+        if (
+            session_manager is not None
+            and callable(getattr(agent_loop, "register_runtime_context_provider", None))
+        ):
+            try:
+                agent_loop.register_runtime_context_provider(
+                    make_project_context_provider(session_manager, projects)
+                )
+            except Exception as exc:
+                logger.warning("failed to register project context provider: {}", exc)
+        if callable(getattr(agent_loop, "set_workspace_extra_read_dirs", None)):
+            try:
+                agent_loop.set_workspace_extra_read_dirs(_project_extra_read_dirs)
+            except Exception as exc:
+                logger.warning("failed to register project folder read access: {}", exc)
     http = GatewayHTTPHandler(
         config=config,
         session_manager=session_manager,

@@ -1,6 +1,9 @@
 from pathlib import Path
 
-from nanobot.security.workspace_access import workspace_sandbox_status
+from nanobot.security.workspace_access import (
+    WorkspaceScopeResolver,
+    workspace_sandbox_status,
+)
 
 
 def test_workspace_sandbox_disabled(tmp_path: Path) -> None:
@@ -66,3 +69,39 @@ def test_workspace_sandbox_false_env_does_not_enforce(tmp_path: Path) -> None:
 
     assert status.level == "application"
     assert status.enforced is False
+
+
+def test_resolver_applies_extra_read_dirs_from_provider(tmp_path: Path) -> None:
+    folder = tmp_path / "project-folder"
+    folder.mkdir()
+
+    resolver = WorkspaceScopeResolver(
+        default_workspace=tmp_path,
+        default_restrict_to_workspace=True,
+        extra_read_dirs_for=lambda metadata: (folder,),
+    )
+
+    scope = resolver.for_turn(
+        channel="websocket",
+        message_metadata=None,
+        session_metadata={"project_id": "abc"},
+    )
+
+    assert scope.extra_read_dirs == (folder,)
+    assert scope.restrict_to_workspace is True
+
+
+def test_resolver_ignores_extra_read_dirs_for_non_webui_channel(tmp_path: Path) -> None:
+    resolver = WorkspaceScopeResolver(
+        default_workspace=tmp_path,
+        default_restrict_to_workspace=True,
+        extra_read_dirs_for=lambda metadata: (tmp_path / "nope",),
+    )
+
+    scope = resolver.for_turn(
+        channel="telegram",
+        message_metadata=None,
+        session_metadata={"project_id": "abc"},
+    )
+
+    assert scope.extra_read_dirs == ()

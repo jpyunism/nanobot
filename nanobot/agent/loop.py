@@ -8,7 +8,7 @@ import os
 import time
 from collections.abc import Mapping
 from contextlib import AbstractContextManager, ExitStack, nullcontext, suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 from functools import partial
 from pathlib import Path
@@ -674,6 +674,21 @@ class AgentLoop:
         """Register a provider resolved once before each inbound model turn."""
         if provider not in self._runtime_context_providers:
             self._runtime_context_providers.append(provider)
+
+    def set_workspace_extra_read_dirs(
+        self,
+        provider: Callable[[Any], tuple[Path, ...]],
+    ) -> None:
+        """Grant read-only access to per-turn extra directories (e.g. project folders).
+
+        The provider receives the session metadata for the current turn and
+        returns absolute paths the filesystem tools may read but not write.
+        Only the WebUI-bound loop wires this; the core stays WebUI-agnostic.
+        """
+        self.workspace_scopes = replace(
+            self.workspace_scopes,
+            extra_read_dirs_for=provider,
+        )
 
     def _runtime_events(self) -> RuntimeEventPublisher:
         return ensure_runtime_event_publisher(self)

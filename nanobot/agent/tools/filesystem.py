@@ -145,9 +145,18 @@ class _FsTool(Tool):
         )
 
     def _resolve_read(self, path: str) -> Path:
+        access = current_tool_workspace(
+            self._workspace,
+            restrict_to_workspace=self._restrict_to_workspace,
+            sandbox_restricts_workspace=self._sandbox_restricts_workspace,
+        )
+        extra_read_dirs = [
+            *self._extra_read_allowed_dirs,
+            *access.extra_read_dirs,
+        ]
         return self._resolve_with_extra(
             path,
-            self._extra_read_allowed_dirs,
+            extra_read_dirs,
             self._extra_read_allowed_files,
             include_media_dir=True,
             extra_files_require_allowed_root=True,
