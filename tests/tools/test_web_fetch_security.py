@@ -87,6 +87,53 @@ def _patch_web_fetch_fake_client(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
 
 
 @pytest.mark.asyncio
+async def test_web_fetch_extracts_pdf_content(monkeypatch):
+    """application/pdf responses are routed through PDF extraction."""
+    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
+    seen = {}
+
+    def _fake_extract_pdf(content, url):
+        seen["content"] = content
+        seen["url"] = url
+        return "# Doc\n\nPDF body text"
+
+    monkeypatch.setattr(tool, "_extract_pdf", _fake_extract_pdf)
+
+    class FakeResponse:
+        status_code = 200
+        url = "https://example.com/doc.pdf"
+        content = b"%PDF-1.4 fake bytes"
+        headers = {"content-type": "application/pdf"}
+
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None, **kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", FakeClient)
+    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        result = await tool.execute(url="https://example.com/doc.pdf")
+
+    data = json.loads(result)
+    assert data["extractor"] == "pdf"
+    assert seen["content"] == b"%PDF-1.4 fake bytes"
+    assert "PDF body text" in data["text"]
+
+
+@pytest.mark.asyncio
 async def test_web_fetch_blocks_private_ip():
     tool = WebFetchTool()
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_private):
@@ -308,6 +355,7 @@ async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
         status_code = 200
         url = "https://example.com/page"
         text = "<html><head><title>Test</title></head><body><p>Hello world</p></body></html>"
+        content = text.encode("utf-8")
         headers = {"content-type": "text/html"}
         is_redirect = False
 
@@ -349,6 +397,87 @@ async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_web_fetch_caches_successful_results(monkeypatch):
+    """Repeated fetches of the same URL hit the cache instead of the network."""
+    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
+    calls = {"count": 0}
+
+    class FakeResponse:
+        status_code = 200
+        url = "https://example.com/cached"
+        text = "<html><head><title>C</title></head><body><p>hi</p></body></html>"
+        content = text.encode("utf-8")
+        headers = {"content-type": "text/html"}
+
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None, **kwargs):
+            calls["count"] += 1
+            return FakeResponse()
+
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", FakeClient)
+    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        first = json.loads(await tool.execute(url="https://example.com/cached"))
+        second = json.loads(await tool.execute(url="https://example.com/cached"))
+
+    assert calls["count"] == 1  # second call served from cache
+    assert first["text"] == second["text"]
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_does_not_cache_errors(monkeypatch):
+    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
+    calls = {"count": 0}
+
+    class FakeErrorResponse:
+        status_code = 500
+        url = "https://example.com/broken"
+
+        def raise_for_status(self):
+            import httpx as _httpx
+
+            raise _httpx.HTTPStatusError(
+                "500 Server Error", request=_httpx.Request("GET", self.url), response=self
+            )
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None, **kwargs):
+            calls["count"] += 1
+            return FakeErrorResponse()
+
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", FakeClient)
+    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        await tool.execute(url="https://example.com/broken")
+        await tool.execute(url="https://example.com/broken")
+
+    assert calls["count"] == 2  # errors are not cached
+
+
+@pytest.mark.asyncio
 async def test_web_fetch_falls_back_when_readability_dependency_is_missing(monkeypatch):
     tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
 
@@ -356,6 +485,7 @@ async def test_web_fetch_falls_back_when_readability_dependency_is_missing(monke
         status_code = 200
         url = "https://example.com/page"
         text = "<html><head><title>Test</title></head><body><p>Hello world</p></body></html>"
+        content = text.encode("utf-8")
         headers = {"content-type": "text/html"}
 
         def raise_for_status(self):

@@ -23,6 +23,7 @@ CATEGORY_IMPORTANCE: dict[str, float] = {
     "user_query": 0.70,
     "assistant_response": 0.60,
     "error_first": 0.55,
+    "tool_result_small": 0.45,
     "tool_result_medium": 0.40,
     "tool_result_large": 0.20,
     "trivia": 0.10,
@@ -121,9 +122,43 @@ def classify_message(msg: dict[str, Any]) -> str:
     return "trivia"
 
 
+# ---------------------------------------------------------------------------
+# Cached classification
+# ---------------------------------------------------------------------------
+
+# Memoize classification by message identity for the lifetime of a turn.
+# Session message dicts are stable within a turn (classification runs after
+# any content normalization), so re-classifying the same dict repeatedly
+# (as snip/compact do) is wasted regex work. Bounded to avoid leaking.
+#
+# Only user/assistant messages are cached: they are small and stable, and
+# are the costly path (3 regex scans). Tool results are large, may be
+# mutated by normalization, and only run a single regex — not worth it.
+#
+# Values keep a strong reference to the message dict so that a freed
+# message's id cannot be recycled by a later allocation and mis-served.
+_CLASSIFY_CACHE: dict[int, tuple[dict[str, Any], str]] = {}
+_CLASSIFY_CACHE_MAX = 2048
+
+
+def _classify_cached(msg: dict[str, Any]) -> str:
+    role = msg.get("role", "")
+    if role not in ("user", "assistant"):
+        return classify_message(msg)
+    key = id(msg)
+    cached = _CLASSIFY_CACHE.get(key)
+    if cached is not None:
+        return cached[1]
+    if len(_CLASSIFY_CACHE) >= _CLASSIFY_CACHE_MAX:
+        _CLASSIFY_CACHE.clear()
+    category = classify_message(msg)
+    _CLASSIFY_CACHE[key] = (msg, category)
+    return category
+
+
 def compute_importance(msg: dict[str, Any], category: str | None = None) -> float:
     """Return importance score 0.0–1.0 for a message."""
-    cat = category or classify_message(msg)
+    cat = category or _classify_cached(msg)
     return CATEGORY_IMPORTANCE.get(cat, 0.3)
 
 

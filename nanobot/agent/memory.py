@@ -300,7 +300,12 @@ class MemoryStore:
                 record["session_key"] = session_key
             with open(self.history_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
-            self._cursor_file.write_text(str(cursor), encoding="utf-8")
+                f.flush()
+                os.fsync(f.fileno())
+            with open(self._cursor_file, "w", encoding="utf-8") as f:
+                f.write(str(cursor))
+                f.flush()
+                os.fsync(f.fileno())
         return cursor
 
     @staticmethod
@@ -400,6 +405,7 @@ class MemoryStore:
     ) -> list[dict[str, Any]]:
         """Return unprocessed history entries safe to inject into a turn prompt."""
         entries = self.read_unprocessed_history(since_cursor=since_cursor)
+        entries = [e for e in entries if not (e.get("content") or "").startswith("[RAW]")]
         if session_key is None:
             return entries
         if not unified_session:
@@ -449,10 +455,31 @@ class MemoryStore:
                 size = f.tell()
                 if size == 0:
                     return None
-                read_size = min(size, 4096)
-                f.seek(size - read_size)
-                data = f.read().decode("utf-8")
-                lines = [line for line in data.split("\n") if line.strip()]
+                # Grow the tail window until it contains at least two newlines,
+                # so the last line is complete and a full prior line boundary is
+                # captured even when a single entry exceeds 4096 bytes. A lone
+                # newline is usually just the trailing terminator of an oversized
+                # last line, leaving nothing but a fragment after trimming.
+                read_size = 4096
+                data = b""
+                windowed = False
+                while read_size < size and data.count(b"\n") < 2:
+                    f.seek(size - read_size)
+                    data = f.read()
+                    read_size *= 2
+                    windowed = True
+                if data.count(b"\n") < 2:
+                    # Oversized single line or tiny file: read the whole thing
+                    # so the last line is not left as an empty fragment.
+                    f.seek(0)
+                    data = f.read()
+                    windowed = False
+                if windowed:
+                    # Trim the possibly-truncated first line (window started mid-line).
+                    first_nl = data.find(b"\n")
+                    if first_nl != -1:
+                        data = data[first_nl:]
+                lines = [line for line in data.decode("utf-8", errors="replace").split("\n") if line.strip()]
                 if not lines:
                     return None
                 parsed = json.loads(lines[-1])
@@ -923,36 +950,6 @@ class Consolidator:
             "last_active": oldest[-1].get("last_active", ""),
         }
         return tiers[:-2] + [merged]
-
-    def _format_hierarchical_summary(self, meta: dict) -> str | None:
-        """Format hierarchical summary tiers into a single prompt string."""
-        tiers = meta.get("tiers")
-        if not tiers:
-            text = meta.get("text")
-            last_active = meta.get("last_active")
-            if text:
-                return f"Previous conversation summary (last active {last_active}):\n{text}"
-            return None
-
-        parts = []
-        for t in tiers:
-            level = t.get("level", "detailed")
-            text = t.get("text", "")
-            last_active = t.get("last_active", "")
-            if level == "detailed":
-                parts.append(f"[Recent] {text}")
-            elif level == "compressed":
-                parts.append(f"[Earlier] {text}")
-            else:
-                parts.append(f"[Old] {text}")
-
-        if not parts:
-            return None
-        last_active = tiers[0].get("last_active", "")
-        return (
-            f"Previous conversation summary (last active {last_active}):\n"
-            + "\n".join(parts)
-        )
 
     def estimate_session_prompt_tokens(
         self,

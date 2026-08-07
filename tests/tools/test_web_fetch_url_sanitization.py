@@ -20,6 +20,7 @@ class FakeResponse:
     status_code = 200
     url = "https://example.com/page"
     text = "<html><head><title>T</title></head><body><p>ok</p></body></html>"
+    content = text.encode("utf-8")
     headers = {"content-type": "text/html"}
     def raise_for_status(self): pass
     def json(self): return {}

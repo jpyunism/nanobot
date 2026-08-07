@@ -41,8 +41,23 @@ A partir del reporte, escribe un **artículo extenso y completo** (no el reporte
 - El artículo debe tener **al menos 5 secciones principales**, con subtítulos claros y transiciones naturales.
 - Incluye ejemplos, cifras, fechas, nombres propios y contexto histórico o de fondo extraídos de las fuentes.
 - Cita las fuentes con enlaces directos en línea o pie de página.
-- **Tags**: 3-8 etiquetas relevantes al final (formato `#tag` o lista).
+- **Tags**: 3-8 etiquetas relevantes (formato `#tag`).
 - Tono acorde a la audiencia.
+
+**Frontmatter obligatorio** al inicio de `articulo.md` (la WebUI lo usa para mostrar título, tags y fuentes):
+```yaml
+---
+title: <título del artículo>
+date: <YYYY-MM-DD>
+tags:
+  - <tag1>
+  - <tag2>
+sources:
+  - <url1>
+  - <url2>
+---
+```
+`date` es la fecha actual; `tags` 3-8; `sources` las URLs de las fuentes consultadas.
 
 Guárdalo con `write_file` en `research/<slug>/articulo.md`.
 
@@ -57,8 +72,12 @@ Cuando termines, responde brevemente en el chat:
 Antes de publicar, **pide confirmación explícita**. Muestra el artículo y pregunta si quiere compartirlo.
 
 Una vez confirmado:
-1. Si `sharemd` no está instalado, instálalo: `npm install -g sharemd` (requiere Node 18+).
-2. Publica el artículo:
+1. Si `sharemd` no está instalado ni disponible en `PATH`, instálalo localmente en el workspace para no tocar el sistema global:
+   ```bash
+   npm install --prefix .workspace_tools sharemd   # o: npx --yes sharemd ... para una ejecución puntual
+   ```
+   Si no hay Node 18+ disponible o la instalación falla, dilo al operador y entrega la ruta local del artículo en su lugar.
+2. Publica el artículo (usa la ruta local si instalaste en `--prefix`):
    ```bash
    sharemd research/<slug>/articulo.md
    ```

@@ -24,6 +24,8 @@ if TYPE_CHECKING:
 class AutoCompact:
     _RECENT_SUFFIX_MESSAGES = 8
     _INTERNAL_SESSION_PREFIXES = ("dream:",)
+    _SUMMARIES_MAX = 64
+    _LIST_TTL_S = 30.0
 
     def __init__(self, sessions: SessionManager, consolidator: Consolidator,
                  session_ttl_minutes: int = 0):
@@ -32,6 +34,7 @@ class AutoCompact:
         self._ttl = session_ttl_minutes
         self._archiving: set[str] = set()
         self._summaries: dict[str, tuple[str, datetime]] = {}
+        self._list_cache: tuple[float, list[dict]] | None = None
 
     def _is_expired(self, ts: datetime | str | None,
                     now: datetime | None = None) -> bool:
@@ -40,6 +43,22 @@ class AutoCompact:
         if isinstance(ts, str):
             ts = datetime.fromisoformat(ts)
         return ((now or datetime.now()) - ts).total_seconds() >= self._ttl * 60
+
+    def _cached_list_sessions(self, now: datetime | None = None) -> list[dict]:
+        """Return the session list, cached for a short TTL.
+
+        `check_expired` runs every idle second; `list_sessions()` globs the
+        sessions dir and scans up to 200 records per file. Cache to avoid the
+        repeated O(sessions × 200) scan when nothing changed in the window.
+        """
+        now = now or datetime.now()
+        if self._list_cache is not None:
+            ts, cached = self._list_cache
+            if (now.timestamp() - ts) < self._LIST_TTL_S:
+                return cached
+        sessions = self.sessions.list_sessions()
+        self._list_cache = (now.timestamp(), sessions)
+        return sessions
 
     def _has_compactable_idle_tail(self, key: str) -> bool:
         session = self.sessions.get_or_create(key)
@@ -111,7 +130,7 @@ class AutoCompact:
     ) -> None:
         """Schedule archival for idle sessions, skipping those with in-flight agent tasks."""
         now = datetime.now()
-        for info in self.sessions.list_sessions():
+        for info in self._cached_list_sessions(now):
             key = info.get("key", "")
             if not key or self._is_internal_session(key) or key in self._archiving:
                 continue
@@ -144,6 +163,9 @@ class AutoCompact:
             if summary and summary != "(nothing)":
                 meta = session.metadata.get("_last_summary")
                 if isinstance(meta, dict):
+                    if len(self._summaries) >= self._SUMMARIES_MAX:
+                        # Evict oldest by insertion order (dict preserves it).
+                        self._summaries.pop(next(iter(self._summaries)), None)
                     self._summaries[key] = (
                         meta["text"],
                         datetime.fromisoformat(meta["last_active"]),

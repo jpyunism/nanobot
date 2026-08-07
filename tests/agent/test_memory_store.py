@@ -161,6 +161,20 @@ class TestHistoryWithCursor:
 
         assert [e["content"] for e in entries] == ["unified entry", "own cron entry"]
 
+    def test_prompt_history_filters_raw_archive_fallbacks(self, store):
+        store.append_history("valid summary", session_key="cli:test")
+        store.append_history("[RAW] 3 messages\n...", session_key="cli:test")
+        store.append_history("another valid summary", session_key="cli:test")
+
+        entries = store.read_recent_history_for_prompt(
+            since_cursor=0,
+            session_key="cli:test",
+        )
+        assert [e["content"] for e in entries] == [
+            "valid summary",
+            "another valid summary",
+        ]
+
     def test_read_unprocessed_skips_entries_without_cursor(self, store):
         """Regression: entries missing the cursor key should be silently skipped."""
         store.history_file.write_text(
@@ -345,6 +359,16 @@ class TestDreamCursor:
         store.history_file.write_text("", encoding="utf-8")
 
         assert store.get_latest_cursor() == 0
+
+    def test_read_last_entry_handles_entry_larger_than_initial_window(self, store):
+        store.append_history("small")
+        big = "x" * 20000
+        cursor = store.append_history(big)
+
+        entry = store._read_last_entry()
+        assert entry is not None
+        assert entry["cursor"] == cursor
+        assert entry["content"] == big
 
     def test_matches_next_cursor_minus_one(self, store):
         store.append_history("event 1")
