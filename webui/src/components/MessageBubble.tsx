@@ -277,6 +277,7 @@ export function MessageBubble({
               streaming={!!message.isStreaming}
               preserveStreamingLayout
               onOpenFilePreview={onOpenFilePreview}
+              className="document-reader"
             >
               {message.content}
             </MarkdownText>
