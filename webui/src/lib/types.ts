@@ -216,6 +216,7 @@ export interface ProjectSummary {
   updated_at_ms: number;
   file_count: number;
   byte_count: number;
+  folder_count: number;
 }
 
 export interface ProjectFile {
@@ -227,6 +228,11 @@ export interface ProjectFile {
   created_at_ms: number;
 }
 
+export interface ProjectFolder {
+  path: string;
+  created_at_ms: number;
+}
+
 export interface ProjectDetail {
   id: string;
   name: string;
@@ -235,6 +241,7 @@ export interface ProjectDetail {
   updated_at_ms: number;
   file_count: number;
   byte_count: number;
+  folders: ProjectFolder[];
   files: ProjectFile[];
 }
 

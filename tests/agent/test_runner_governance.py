@@ -736,6 +736,163 @@ def test_governance_repairs_orphans_after_snip():
     )
 
 
+def test_snip_history_drops_tool_calls_when_results_are_dropped(monkeypatch):
+    """Regression: if snip_history drops some tool results but keeps the
+    assistant message that declared multiple tool_calls, the surviving
+    tool_calls become orphans and backfill_missing_tool_results inserts a
+    synthetic '[Tool result unavailable — call was interrupted or lost]'
+    placeholder. The safe fix is to keep each tool_call paired with its
+    result: either retain both or drop the orphaned tool_call from the
+    assistant message.
+
+    This mirrors real sessions restored after a gateway restart, where the
+    checkpoint contains an assistant turn with several read_file calls and
+    only some placeholder results; context compaction then drops the bulky
+    placeholders, leaving the tool_calls declared but unfulfilled.
+    """
+    provider = MagicMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "new msg"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "tc_1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+                {"id": "tc_2", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+                {"id": "tc_3", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "tc_1", "name": "read_file", "content": "result one"},
+        {"role": "tool", "tool_call_id": "tc_2", "name": "read_file", "content": "result two"},
+        {"role": "tool", "tool_call_id": "tc_3", "name": "read_file", "content": "large tool output" * 100},
+        {"role": "assistant", "content": "final answer"},
+    ]
+
+    spec = make_run_spec(provider,
+        initial_messages=messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        context_window_tokens=2000,
+        context_block_limit=250,
+        max_tokens=100,
+    )
+
+    # Force snip_history to activate. Budget fits the user message, the cheap
+    # assistant turn with three tool_calls, the two small tool results, and the
+    # final assistant answer, but not the large third tool result. This leaves
+    # tc_3 declared but without its result, which must never reach the model.
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
+        lambda *_a, **_kw: (500, None),
+    )
+
+    def _estimate_message_tokens(msg):
+        if msg.get("role") == "tool" and msg.get("tool_call_id") == "tc_3":
+            return 300
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            return 10
+        if msg.get("role") == "user":
+            return 100
+        if msg.get("role") == "assistant":
+            return 100
+        return 100
+
+    monkeypatch.setattr(
+        "nanobot.agent.context_governance.estimate_message_tokens",
+        _estimate_message_tokens,
+    )
+
+    trimmed = ContextGovernor().snip_history(_governance_config(provider, tools, spec), messages)
+
+    # Collect which tool_calls are still declared and which results survived.
+    declared_ids = set()
+    for m in trimmed:
+        if m.get("role") == "assistant":
+            for tc in m.get("tool_calls") or []:
+                tid = tc.get("id") if isinstance(tc, dict) else None
+                if tid:
+                    declared_ids.add(str(tid))
+    result_ids = {
+        str(m.get("tool_call_id"))
+        for m in trimmed
+        if m.get("role") == "tool" and m.get("tool_call_id")
+    }
+
+    orphaned = declared_ids - result_ids
+    assert not orphaned, (
+        f"snip_history left tool_call(s) {orphaned} without results; "
+        "prepare_for_model will backfill with 'interrupted or lost'"
+    )
+
+    # The final prepared model messages must not contain a synthetic backfill.
+    prepared = ContextGovernor().prepare_for_model(
+        _governance_config(provider, tools, spec),
+        trimmed,
+        set(),
+    )
+    assert not any(
+        m.get("role") == "tool" and m.get("content") == BACKFILL_CONTENT
+        for m in prepared
+    ), "prepare_for_model backfilled a retained tool_call with 'interrupted or lost'"
+
+
+def test_strip_orphan_tool_calls_removes_calls_without_results():
+    """If context compaction drops tool results but keeps the assistant turn,
+    strip_orphan_tool_calls must drop the orphaned calls so
+    backfill_missing_tool_results cannot insert the synthetic placeholder."""
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "tc_ok", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+                {"id": "tc_lost", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "tc_ok", "name": "read_file", "content": "ok"},
+        {"role": "assistant", "content": "done"},
+    ]
+
+    cleaned = ContextGovernor.strip_orphan_tool_calls(messages)
+    assert any(
+        m.get("role") == "assistant"
+        and any(tc.get("id") == "tc_ok" for tc in (m.get("tool_calls") or []))
+        for m in cleaned
+    ), "valid paired tool_call should survive"
+    assert not any(
+        m.get("role") == "assistant"
+        and any(tc.get("id") == "tc_lost" for tc in (m.get("tool_calls") or []))
+        for m in cleaned
+    ), "orphaned tool_call should be stripped"
+
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    spec = make_run_spec(
+        MagicMock(),
+        model="test-model",
+        max_iterations=1,
+        initial_messages=cleaned,
+        tools=tools,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    prepared = ContextGovernor().prepare_for_model(
+        _governance_config(MagicMock(), tools, spec),
+        cleaned,
+        set(),
+    )
+    assert not any(
+        m.get("role") == "tool" and m.get("content") == BACKFILL_CONTENT
+        for m in prepared
+    ), "prepare_for_model should not backfill after stripping orphaned calls"
+
+
 def test_governance_fallback_still_repairs_orphans():
     """When full governance fails, the fallback must still repair orphans."""
     # Messages with an orphan tool result (no matching assistant tool_call).

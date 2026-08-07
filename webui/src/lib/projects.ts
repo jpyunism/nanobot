@@ -2,6 +2,7 @@ import type {
   ProjectSummary,
   ProjectFile,
   ProjectDetail,
+  ProjectFolder,
 } from "./types";
 import { fetchWithTimeout } from "./http";
 
@@ -169,4 +170,38 @@ export function fileToDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(new Error("file read failed"));
     reader.readAsDataURL(file);
   });
+}
+
+export function addProjectFolder(
+  base: string,
+  token: string,
+  projectId: string,
+  path: string,
+): Promise<ProjectFolder> {
+  return request<ProjectFolder>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/folders/add`,
+    token,
+    {
+      headers: {
+        "X-Nanobot-Project-Data": JSON.stringify({ path }),
+      },
+    },
+  );
+}
+
+export function removeProjectFolder(
+  base: string,
+  token: string,
+  projectId: string,
+  path: string,
+): Promise<{ ok: true; path: string }> {
+  return request<{ ok: true; path: string }>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/folders/remove`,
+    token,
+    {
+      headers: {
+        "X-Nanobot-Project-Data": JSON.stringify({ path }),
+      },
+    },
+  );
 }

@@ -1317,6 +1317,14 @@
       "remove": "Eliminar archivo",
       "empty": "Todavía no hay archivos."
     },
+    "folders": {
+      "title": "Carpetas",
+      "add": "Añadir",
+      "adding": "Añadiendo…",
+      "placeholder": "/ruta/absoluta/a/carpeta",
+      "remove": "Eliminar carpeta",
+      "empty": "No hay carpetas asociadas."
+    },
     "bindToChat": "Vincular tema al proyecto"
   },
   "agenda": {

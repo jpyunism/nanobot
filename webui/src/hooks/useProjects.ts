@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  addProjectFolder,
   createProject,
   deleteProject,
   deleteProjectFile,
@@ -9,11 +10,12 @@ import {
   listProjectFiles,
   ProjectApiError,
   readProjectFile,
+  removeProjectFolder,
   updateProject,
   uploadProjectFile,
 } from "@/lib/projects";
 import { notifyProjectsChanged } from "@/lib/project-events";
-import type { ProjectDetail, ProjectFile, ProjectSummary } from "@/lib/types";
+import type { ProjectDetail, ProjectFile, ProjectFolder, ProjectSummary } from "@/lib/types";
 
 export type ProjectsState = {
   projects: ProjectSummary[];
@@ -39,6 +41,8 @@ export type ProjectsState = {
     projectId: string,
     fileId: string,
   ) => Promise<ProjectFile & { data_url: string }>;
+  addFolder: (projectId: string, path: string) => Promise<ProjectFolder>;
+  removeFolder: (projectId: string, path: string) => Promise<void>;
 };
 
 export function useProjects(
@@ -144,6 +148,23 @@ export function useProjects(
     [base, token],
   );
 
+  const addFolderFn = useCallback(
+    async (projectId: string, path: string) => {
+      const folder = await addProjectFolder(base, token, projectId, path);
+      notifyProjectsChanged();
+      return folder;
+    },
+    [base, token],
+  );
+
+  const removeFolderFn = useCallback(
+    async (projectId: string, path: string) => {
+      await removeProjectFolder(base, token, projectId, path);
+      notifyProjectsChanged();
+    },
+    [base, token],
+  );
+
   return useMemo(
     () => ({
       projects,
@@ -158,6 +179,8 @@ export function useProjects(
       uploadFile: uploadFileFn,
       removeFile: removeFileFn,
       downloadFile: downloadFileFn,
+      addFolder: addFolderFn,
+      removeFolder: removeFolderFn,
     }),
     [
       projects,
@@ -172,6 +195,8 @@ export function useProjects(
       uploadFileFn,
       removeFileFn,
       downloadFileFn,
+      addFolderFn,
+      removeFolderFn,
     ],
   );
 }

@@ -213,3 +213,51 @@ def test_corrupt_project_json_raises(data_dir: Path) -> None:
     assert c.list_projects() == []
     with pytest.raises(ProjectError):
         c.get_project("broken")
+
+
+def test_add_folder_persists_and_lists(data_dir: Path) -> None:
+    c = WebUIProjectsController(data_dir)
+    s = c.create_project("Demo", "")
+    f = c.add_folder(s.id, "/tmp/alpha")
+    assert f.path == "/tmp/alpha"
+    assert c.list_folders(s.id) == [f]
+    assert c.get_project(s.id).folder_count == 1
+
+
+def test_add_folder_rejects_blank_and_duplicate(data_dir: Path) -> None:
+    c = WebUIProjectsController(data_dir)
+    s = c.create_project("Demo", "")
+    with pytest.raises(ProjectError):
+        c.add_folder(s.id, "   ")
+    c.add_folder(s.id, "/tmp/alpha")
+    with pytest.raises(ProjectError):
+        c.add_folder(s.id, "/tmp/alpha")
+
+
+def test_remove_folder(data_dir: Path) -> None:
+    c = WebUIProjectsController(data_dir)
+    s = c.create_project("Demo", "")
+    c.add_folder(s.id, "/tmp/alpha")
+    c.add_folder(s.id, "/tmp/beta")
+    c.remove_folder(s.id, "/tmp/alpha")
+    assert [f.path for f in c.list_folders(s.id)] == ["/tmp/beta"]
+    with pytest.raises(ProjectError):
+        c.remove_folder(s.id, "/tmp/missing")
+
+
+def test_folder_round_trips_after_reload(data_dir: Path) -> None:
+    c = WebUIProjectsController(data_dir)
+    s = c.create_project("Demo", "")
+    c.add_folder(s.id, "/tmp/alpha")
+    c2 = WebUIProjectsController(data_dir)
+    assert [f.path for f in c2.list_folders(s.id)] == ["/tmp/alpha"]
+
+
+def test_folder_in_detail_payload(data_dir: Path) -> None:
+    from nanobot.webui.projects import project_detail_payload
+
+    c = WebUIProjectsController(data_dir)
+    s = c.create_project("Demo", "")
+    c.add_folder(s.id, "/tmp/alpha")
+    detail = project_detail_payload(c, s.id)
+    assert detail["folders"] == [{"path": "/tmp/alpha", "created_at_ms": detail["folders"][0]["created_at_ms"]}]

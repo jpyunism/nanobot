@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { File as FileIcon, Trash2, Upload } from "lucide-react";
+import { File as FileIcon, Folder, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -21,6 +21,8 @@ export function ProjectDetail({ projectId, state, onClose }: Args) {
   const [instructions, setInstructions] = useState("");
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [folderDraft, setFolderDraft] = useState("");
+  const [addingFolder, setAddingFolder] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,6 +75,34 @@ export function ProjectDetail({ projectId, state, onClose }: Args) {
     setError(null);
     try {
       await state.removeFile(projectId, fileId);
+      const refreshed = await state.load(projectId);
+      setDetail(refreshed);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const onAddFolder = async () => {
+    const path = folderDraft.trim();
+    if (!path) return;
+    setAddingFolder(true);
+    setError(null);
+    try {
+      await state.addFolder(projectId, path);
+      setFolderDraft("");
+      const refreshed = await state.load(projectId);
+      setDetail(refreshed);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAddingFolder(false);
+    }
+  };
+
+  const onRemoveFolder = async (path: string) => {
+    setError(null);
+    try {
+      await state.removeFolder(projectId, path);
       const refreshed = await state.load(projectId);
       setDetail(refreshed);
     } catch (err) {
@@ -136,6 +166,15 @@ export function ProjectDetail({ projectId, state, onClose }: Args) {
           </Button>
         </div>
 
+        <FolderList
+          folders={detail.folders}
+          draft={folderDraft}
+          adding={addingFolder}
+          onDraftChange={setFolderDraft}
+          onAdd={onAddFolder}
+          onRemove={onRemoveFolder}
+        />
+
         <FileList
           files={detail.files}
           uploading={uploading}
@@ -153,6 +192,90 @@ type FileListProps = {
   onUpload: (file: File) => Promise<void>;
   onRemove: (fileId: string) => Promise<void>;
 };
+
+type FolderListProps = {
+  folders: { path: string; created_at_ms: number }[];
+  draft: string;
+  adding: boolean;
+  onDraftChange: (value: string) => void;
+  onAdd: () => Promise<void>;
+  onRemove: (path: string) => Promise<void>;
+};
+
+function FolderList({
+  folders,
+  draft,
+  adding,
+  onDraftChange,
+  onAdd,
+  onRemove,
+}: FolderListProps) {
+  const { t } = useTranslation();
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-sm font-medium text-foreground">
+          {t("projects.folders.title", { defaultValue: "Folders" })}
+        </h3>
+      </div>
+      <form
+        className="mb-2 flex items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void onAdd();
+        }}
+      >
+        <Input
+          value={draft}
+          onChange={(e) => onDraftChange(e.target.value)}
+          placeholder={t("projects.folders.placeholder", {
+            defaultValue: "/absolute/path/to/folder",
+          })}
+          aria-label={t("projects.folders.add", { defaultValue: "Add folder" })}
+          className="h-8 text-xs"
+        />
+        <Button
+          type="submit"
+          size="sm"
+          disabled={adding || !draft.trim()}
+          className="shrink-0"
+        >
+          {adding
+            ? t("projects.folders.adding", { defaultValue: "Adding…" })
+            : t("projects.folders.add", { defaultValue: "Add" })}
+        </Button>
+      </form>
+      {folders.length === 0 ? (
+        <p className="rounded-md border border-dashed border-border/60 bg-muted/10 px-3 py-6 text-center text-xs text-muted-foreground">
+          {t("projects.folders.empty", { defaultValue: "No folders associated." })}
+        </p>
+      ) : (
+        <ul className="grid gap-1">
+          {folders.map((f) => (
+            <li
+              key={f.path}
+              className="flex items-center gap-2 rounded-md border border-border/40 bg-muted/10 px-3 py-2 text-xs"
+            >
+              <Folder className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+              <span className="flex-1 truncate font-medium text-foreground">
+                {f.path}
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void onRemove(f.path)}
+                aria-label={t("projects.folders.remove", { defaultValue: "Remove folder" })}
+                className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+              >
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 function FileList({ files, uploading, onUpload, onRemove }: FileListProps) {
   const { t } = useTranslation();

@@ -48,6 +48,16 @@ def test_compile_project_context_returns_none_for_empty_project(data_dir: Path) 
     assert compile_project_context(c, s.id) is None
 
 
+def test_compile_project_context_includes_folders(data_dir: Path) -> None:
+    c = WebUIProjectsController(data_dir)
+    s = c.create_project("alpha", "")
+    c.add_folder(s.id, "/tmp/alpha")
+    block = compile_project_context(c, s.id)
+    assert block is not None
+    assert '<folder path="/tmp/alpha" />' in block.content
+    assert "<folders>" in block.content
+
+
 def test_compile_project_context_truncates_to_budget(data_dir: Path) -> None:
     c = WebUIProjectsController(data_dir)
     s = c.create_project("huge", "x" * 20_000)

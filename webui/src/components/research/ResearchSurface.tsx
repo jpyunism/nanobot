@@ -12,6 +12,7 @@ import {
   Share2,
   Sparkles,
   Telescope,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MarkdownText } from "@/components/MarkdownText";
@@ -19,6 +20,7 @@ import { useClient } from "@/providers/ClientProvider";
 import { useResearch } from "@/hooks/useResearch";
 import {
   createWorkspaceDirectory,
+  deleteWorkspaceEntry,
   fetchWorkspaceList,
   fetchWorkspaceRead,
 } from "@/lib/api";
@@ -55,6 +57,7 @@ export function ResearchSurface({ onBackToChat }: Props) {
   const [shareError, setShareError] = useState<string | null>(null);
   const [composerText, setComposerText] = useState("");
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -171,6 +174,29 @@ export function ResearchSurface({ onBackToChat }: Props) {
     research.clearAssistant();
   }, [composerText, research]);
 
+  const handleDelete = useCallback(
+    async (project: ResearchProject) => {
+      if (!window.confirm(t("research.deleteConfirm", { defaultValue: "¿Eliminar esta investigación?" }))) {
+        return;
+      }
+      setDeleting(project.path);
+      setError(null);
+      try {
+        const res = await deleteWorkspaceEntry(token, project.path);
+        if (res.error) {
+          setError(res.error);
+        } else {
+          await load();
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setDeleting(null);
+      }
+    },
+    [token, load, t],
+  );
+
   const focusComposer = useCallback(() => {
     composerRef.current?.focus();
   }, []);
@@ -203,6 +229,8 @@ export function ResearchSurface({ onBackToChat }: Props) {
           onRefresh={() => void load()}
           onFocusComposer={focusComposer}
           onOpenProject={openProject}
+          onDelete={handleDelete}
+          deleting={deleting}
           composerRef={composerRef}
           composerText={composerText}
           setComposerText={setComposerText}
@@ -223,6 +251,8 @@ function ListView({
   onRefresh,
   onFocusComposer,
   onOpenProject,
+  onDelete,
+  deleting,
   composerRef,
   composerText,
   setComposerText,
@@ -237,6 +267,8 @@ function ListView({
   onRefresh: () => void;
   onFocusComposer: () => void;
   onOpenProject: (p: ResearchProject, kind: "articulo" | "reporte") => Promise<void>;
+  onDelete: (p: ResearchProject) => Promise<void>;
+  deleting: string | null;
   composerRef: React.Ref<HTMLTextAreaElement>;
   composerText: string;
   setComposerText: (s: string) => void;
@@ -343,6 +375,22 @@ function ListView({
                     <FileText className="h-4 w-4" />
                     {t("research.readReport", { defaultValue: "Leer reporte" })}
                   </Button>
+                  <div className="ml-auto">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void onDelete(project)}
+                      disabled={deleting === project.path}
+                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      aria-label={t("research.delete", { defaultValue: "Eliminar" })}
+                    >
+                      {deleting === project.path ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
                 </div>
               </li>
             ))}
@@ -467,8 +515,8 @@ function DetailView({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 py-6">
-        <div className="mx-auto max-w-3xl">
+      <div className="flex-1 overflow-y-auto bg-muted/30">
+        <div className="mx-auto max-w-3xl px-6 py-8">
           {shareError ? (
             <div className="mb-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
               {shareError}
@@ -481,8 +529,29 @@ function DetailView({
               {t("research.loadingDocument", { defaultValue: "Cargando documento…" })}
             </div>
           ) : content ? (
-            <article className="prose prose-sm dark:prose-invert max-w-none">
-              <MarkdownText>{content.content}</MarkdownText>
+            <article className="relative overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm">
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-primary/[0.06] to-transparent"
+              />
+              <div
+                aria-hidden
+                className="h-1 w-full bg-gradient-to-r from-primary via-primary/60 to-transparent"
+              />
+              <div className="relative px-6 py-8 sm:px-10 sm:py-10">
+                <header className="mb-8 border-b border-border/60 pb-7">
+                  <div className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-primary">
+                    <FileText className="h-3.5 w-3.5" />
+                    {project?.name ?? t("research.document", { defaultValue: "Documento" })}
+                  </div>
+                  <h1 className="text-2xl font-semibold leading-snug tracking-tight text-foreground sm:text-3xl">
+                    {content.title}
+                  </h1>
+                </header>
+                <div className="document-reader">
+                  <MarkdownText>{content.content}</MarkdownText>
+                </div>
+              </div>
             </article>
           ) : null}
         </div>

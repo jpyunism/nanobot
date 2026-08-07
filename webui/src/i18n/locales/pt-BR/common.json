@@ -1317,6 +1317,14 @@
       "remove": "Remove file",
       "empty": "No files yet."
     },
+    "folders": {
+      "title": "Folders",
+      "add": "Add",
+      "adding": "Adding…",
+      "placeholder": "/absolute/path/to/folder",
+      "remove": "Remove folder",
+      "empty": "No folders associated."
+    },
     "bindToChat": "Bind chat to project"
   },
   "agenda": {

@@ -562,6 +562,12 @@ class GatewayHTTPHandler:
         m = re.match(r"^/api/projects/([^/]+)/files/([^/]+)/delete$", got)
         if m:
             return self._handle_projects_file_delete(request, m.group(1), m.group(2))
+        m = re.match(r"^/api/projects/([^/]+)/folders/add$", got)
+        if m:
+            return self._handle_projects_folder_add(request, m.group(1))
+        m = re.match(r"^/api/projects/([^/]+)/folders/remove$", got)
+        if m:
+            return self._handle_projects_folder_remove(request, m.group(1))
         return None
 
     def _handle_projects_list(self, request: WsRequest) -> Response:
@@ -708,6 +714,42 @@ class GatewayHTTPHandler:
         except ProjectError as exc:
             return _http_error(404, str(exc))
         return _http_json_response({"ok": True, "id": file_id})
+
+    def _handle_projects_folder_add(
+        self, request: WsRequest, project_id: str
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(
+            request, _PROJECT_DATA_HEADER, _PROJECT_DATA_HEADER_MAX_BYTES
+        )
+        if err is not None:
+            return err
+        path = (body.get("path") or "") if isinstance(body, dict) else ""
+        try:
+            folder = self.projects.add_folder(project_id, path)
+        except ProjectError as exc:
+            return _http_error(400, str(exc))
+        return _http_json_response(
+            {"path": folder.path, "created_at_ms": folder.created_at_ms}
+        )
+
+    def _handle_projects_folder_remove(
+        self, request: WsRequest, project_id: str
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(
+            request, _PROJECT_DATA_HEADER, _PROJECT_DATA_HEADER_MAX_BYTES
+        )
+        if err is not None:
+            return err
+        path = (body.get("path") or "") if isinstance(body, dict) else ""
+        try:
+            self.projects.remove_folder(project_id, path)
+        except ProjectError as exc:
+            return _http_error(404, str(exc))
+        return _http_json_response({"ok": True, "path": path})
 
     # -- Research routes -----------------------------------------------------
 

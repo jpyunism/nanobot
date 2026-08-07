@@ -13,6 +13,11 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from nanobot.agent.message_classifier import (
+    compute_importance,
+    detect_session_type,
+    find_repeated_errors,
+)
 from nanobot.utils.helpers import (
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
@@ -21,15 +26,6 @@ from nanobot.utils.helpers import (
     truncate_text,
 )
 from nanobot.utils.runtime import ensure_nonempty_tool_result
-
-from nanobot.agent.message_classifier import (
-    CATEGORY_IMPORTANCE,
-    adaptive_recent_count,
-    classify_message,
-    compute_importance,
-    detect_session_type,
-    find_repeated_errors,
-)
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -107,6 +103,7 @@ class ContextGovernor:
         updated = self.compact_inflight_overflow(config, updated, compacted_tool_call_ids)
         updated = self.snip_history(config, updated)
         updated = self.drop_orphan_tool_results(updated)
+        updated = self.strip_orphan_tool_calls(updated)
         return self.backfill_missing_tool_results(updated)
 
     @staticmethod
@@ -317,6 +314,69 @@ class ContextGovernor:
                 "content": BACKFILL_CONTENT,
             })
             offset += 1
+        return updated
+
+    @staticmethod
+    def strip_orphan_tool_calls(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Remove tool_calls from assistant turns whose results were dropped.
+
+        Context compaction (snip_history, session file caps) can drop bulky
+        tool results while preserving the cheap assistant turn that declared
+        the calls. Without this guard, backfill_missing_tool_results would
+        later insert a synthetic '[Tool result unavailable — call was
+        interrupted or lost]' placeholder, misleading the model into thinking
+        the tools failed when they actually ran. Dropping the orphaned calls
+        keeps the conversation legal and honest.
+        """
+        fulfilled: set[str] = set()
+        for msg in messages:
+            if msg.get("role") == "tool":
+                tid = msg.get("tool_call_id")
+                if tid:
+                    fulfilled.add(str(tid))
+
+        updated: list[dict[str, Any]] | None = None
+        for idx, msg in enumerate(messages):
+            if msg.get("role") != "assistant":
+                if updated is not None:
+                    updated.append(msg)
+                continue
+
+            calls = msg.get("tool_calls") or []
+            if not calls:
+                if updated is not None:
+                    updated.append(msg)
+                continue
+
+            kept = [
+                tc for tc in calls
+                if isinstance(tc, dict) and str(tc.get("id", "")) in fulfilled
+            ]
+            if len(kept) == len(calls):
+                if updated is not None:
+                    updated.append(msg)
+                continue
+
+            if updated is None:
+                updated = [dict(m) for m in messages[:idx]]
+
+            repaired = dict(msg)
+            if kept:
+                repaired["tool_calls"] = kept
+            else:
+                repaired.pop("tool_calls", None)
+
+            # An assistant turn that is left with neither content nor valid
+            # tool_calls is itself invalid upstream; drop it entirely.
+            has_content = bool(repaired.get("content"))
+            if not kept and not has_content:
+                continue
+            updated.append(repaired)
+
+        if updated is None:
+            return messages
         return updated
 
     def apply_tool_result_budget(

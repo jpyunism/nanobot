@@ -40,6 +40,7 @@ class ProjectSummary:
     updated_at_ms: int
     file_count: int
     byte_count: int
+    folder_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,12 @@ class ProjectFile:
     name: str
     mime_type: str
     size: int
+    created_at_ms: int
+
+
+@dataclass(frozen=True)
+class ProjectFolder:
+    path: str
     created_at_ms: int
 
 
@@ -126,6 +133,9 @@ class WebUIProjectsController:
 
     def _file_data_path(self, project_id: str, file_id: str) -> Path:
         return self._files_dir(project_id) / f"{file_id}.bin"
+
+    def _folders_path(self, project_id: str) -> Path:
+        return self._project_dir(project_id) / "folders.json"
 
     def list_projects(self) -> list[ProjectSummary]:
         out: list[ProjectSummary] = []
@@ -283,6 +293,64 @@ class WebUIProjectsController:
             data_path.unlink()
         self._touch_project(project_id)
 
+    def list_folders(self, project_id: str) -> list[ProjectFolder]:
+        if not self._meta_path(project_id).is_file():
+            raise ProjectError(f"project not found: {project_id}")
+        data = _read_json(self._folders_path(project_id))
+        raw = data.get("folders", [])
+        out: list[ProjectFolder] = []
+        for entry in raw if isinstance(raw, list) else []:
+            if not isinstance(entry, dict):
+                continue
+            path = entry.get("path")
+            if not isinstance(path, str) or not path.strip():
+                continue
+            out.append(
+                ProjectFolder(
+                    path=path.strip(),
+                    created_at_ms=int(entry.get("created_at_ms", 0)),
+                )
+            )
+        return out
+
+    def add_folder(self, project_id: str, path: str) -> ProjectFolder:
+        if not self._meta_path(project_id).is_file():
+            raise ProjectError(f"project not found: {project_id}")
+        clean = (path or "").strip()
+        if not clean:
+            raise ProjectError("folder path is required")
+        if "\0" in clean:
+            raise ProjectError("folder path contains invalid characters")
+        folders = self.list_folders(project_id)
+        if any(f.path == clean for f in folders):
+            raise ProjectError("folder already associated")
+        folder = ProjectFolder(path=clean, created_at_ms=_now_ms())
+        self._write_folders(project_id, [*folders, folder])
+        self._touch_project(project_id)
+        return folder
+
+    def remove_folder(self, project_id: str, path: str) -> None:
+        if not self._meta_path(project_id).is_file():
+            raise ProjectError(f"project not found: {project_id}")
+        clean = (path or "").strip()
+        folders = self.list_folders(project_id)
+        remaining = [f for f in folders if f.path != clean]
+        if len(remaining) == len(folders):
+            raise ProjectError(f"folder not found: {clean}")
+        self._write_folders(project_id, remaining)
+        self._touch_project(project_id)
+
+    def _write_folders(self, project_id: str, folders: list[ProjectFolder]) -> None:
+        _write_json(
+            self._folders_path(project_id),
+            {
+                "folders": [
+                    {"path": f.path, "created_at_ms": f.created_at_ms}
+                    for f in folders
+                ]
+            },
+        )
+
     def _unique_id(self, name: str) -> str:
         base = _slugify_id(name.lower().replace(" ", "-"))
         candidate = base
@@ -322,6 +390,7 @@ class WebUIProjectsController:
             updated_at_ms=int(meta.get("updated_at_ms", 0)),
             file_count=file_count,
             byte_count=byte_count,
+            folder_count=len(self.list_folders(meta.get("id", pdir.name))),
         )
 
 
@@ -339,6 +408,7 @@ def projects_list_payload(controller: WebUIProjectsController) -> dict[str, Any]
                 "updated_at_ms": s.updated_at_ms,
                 "file_count": s.file_count,
                 "byte_count": s.byte_count,
+                "folder_count": s.folder_count,
             }
             for s in controller.list_projects()
         ]
@@ -358,6 +428,10 @@ def project_detail_payload(
         "updated_at_ms": s.updated_at_ms,
         "file_count": s.file_count,
         "byte_count": s.byte_count,
+        "folders": [
+            {"path": f.path, "created_at_ms": f.created_at_ms}
+            for f in controller.list_folders(project_id)
+        ],
         "files": [
             {
                 "id": f.id,

@@ -100,13 +100,21 @@ def compile_project_context(
         files = controller.list_files(project_id)
     except ProjectError:
         files = []
+    try:
+        folders = controller.list_folders(project_id)
+    except ProjectError:
+        folders = []
 
     instructions = (summary.instructions_md or "").strip()
     file_lines = [
         f"<file name={json.dumps(f.name)} mime={json.dumps(f.mime_type)} size={int(f.size)} />"
         for f in files
     ]
-    if not instructions and not file_lines:
+    folder_lines = [
+        f"<folder path={json.dumps(f.path)} />"
+        for f in folders
+    ]
+    if not instructions and not file_lines and not folder_lines:
         return None
 
     body_lines = [
@@ -116,6 +124,10 @@ def compile_project_context(
         body_lines.append("<instructions>")
         body_lines.append(instructions)
         body_lines.append("</instructions>")
+    if folder_lines:
+        body_lines.append("<folders>")
+        body_lines.extend(folder_lines)
+        body_lines.append("</folders>")
     if file_lines:
         body_lines.append("<files>")
         body_lines.extend(file_lines)
@@ -129,6 +141,7 @@ def compile_project_context(
         "This chat is bound to a project. Treat the project metadata as the user's standing intent for this conversation.",
         body,
         "Use the file names to decide whether to read any of them via your tools when the user asks.",
+        "Use the folder paths to locate and read relevant files when the user asks about them.",
     ])
     return RuntimeContextBlock(source=PROJECT_CONTEXT_SOURCE, content=content)
 
