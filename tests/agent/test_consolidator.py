@@ -570,8 +570,8 @@ class TestCompactIdleSession:
     async def test_archives_prefix_keeps_suffix(
         self, real_consolidator, mock_provider, runtime
     ):
-        """20 user/assistant turns → compact with max_suffix=8 → messages ≤ 8,
-        last_consolidated=0, _last_summary stored."""
+        """20 user/assistant turns → compact with max_suffix=8 → prefix consolidated
+        via last_consolidated, messages preserved on disk, _last_summary stored."""
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="Summary of old conversation.", finish_reason="stop"
         )
@@ -590,8 +590,9 @@ class TestCompactIdleSession:
         assert result == "Summary of old conversation."
 
         reloaded = sessions.get_or_create("cli:test")
-        assert len(reloaded.messages) <= 8
-        assert reloaded.last_consolidated == 0
+        # Messages stay on disk; last_consolidated advanced past the archived prefix.
+        assert len(reloaded.messages) == 40
+        assert reloaded.last_consolidated == 32
         meta = reloaded.metadata.get("_last_summary")
         assert meta is not None
         assert meta["text"] == "Summary of old conversation."
@@ -725,7 +726,7 @@ class TestCompactIdleSession:
     async def test_llm_failure_still_truncates(
         self, real_consolidator, mock_provider, store, runtime
     ):
-        """LLM raises RuntimeError → raw_archive fires, session still truncated, returns None."""
+        """LLM raises RuntimeError → raw_archive fires, session NOT truncated, returns None."""
         mock_provider.chat_with_retry.side_effect = RuntimeError("LLM unavailable")
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("cli:fail")
@@ -743,9 +744,10 @@ class TestCompactIdleSession:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert any("[RAW]" in e["content"] for e in entries)
 
-        # Session should still be truncated
+        # Session is NOT truncated on LLM failure — no context lost.
         reloaded = sessions.get_or_create("cli:fail")
-        assert len(reloaded.messages) <= 4
+        assert len(reloaded.messages) == 20
+        assert reloaded.last_consolidated == 0
 
     @pytest.mark.asyncio
     async def test_respects_last_consolidated(
@@ -802,7 +804,11 @@ class TestCompactIdleSession:
         assert result == "Tail summary."
 
         reloaded = sessions.get_or_create("cli:noncontiguous")
-        assert [m["content"] for m in reloaded.messages] == [
+        # Messages preserved on disk; last_consolidated advanced to the retained suffix.
+        assert len(reloaded.messages) == 25
+        assert reloaded.last_consolidated == 14
+        history = reloaded.get_history()
+        assert [m["content"] for m in history] == [
             "user-14",
             "assistant-00",
             "assistant-01",
@@ -952,7 +958,7 @@ class TestConsolidatorSessionRefresh:
         # Simulate: background consolidation captures old reference
         old_ref = session
 
-        # AutoCompact runs first and truncates to 8
+        # AutoCompact runs first and advances last_consolidated past the prefix
         await consolidator.compact_idle_session(
             "cli:test",
             runtime=runtime,
@@ -967,8 +973,9 @@ class TestConsolidatorSessionRefresh:
         )
 
         session_after = sessions.get_or_create("cli:test")
-        # Messages should still be truncated (not restored to 40)
-        assert len(session_after.messages) <= 8
+        # Prefix stays consolidated (not restored): messages preserved, cursor advanced.
+        assert len(session_after.messages) == 40
+        assert session_after.last_consolidated >= 32
 
 
 class TestRawArchiveTruncation:

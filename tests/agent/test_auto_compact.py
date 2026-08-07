@@ -128,8 +128,10 @@ def _make_fake_compact(
                 "last_active": last_active.isoformat(),
             }
 
-        session.messages = kept
-        session.last_consolidated = 0
+        # Mirror compact_idle_session: advance last_consolidated instead of
+        # truncating session.messages, so the WebUI keeps the full thread.
+        if s is not None and archive_msgs:
+            session.last_consolidated += len(archive_msgs)
         loop.sessions.save(session)
         return s
 
@@ -333,9 +335,13 @@ class TestAutoCompact:
         # Adaptive window: 6 turns (12 msgs) of low-density trivia → min_count=4
         assert len(archived_messages) == 8
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == 4
-        assert session_after.messages[0]["content"] == "msg user 4"
-        assert session_after.messages[-1]["content"] == "msg assistant 5"
+        # Messages preserved on disk; last_consolidated advanced past the archived prefix
+        assert len(session_after.messages) == 12
+        assert session_after.last_consolidated == 8
+        # get_history exposes only the unconsolidated suffix
+        history = session_after.get_history()
+        assert history[0]["content"] == "msg user 4"
+        assert history[-1]["content"] == "msg assistant 5"
         await loop.close_mcp()
 
     @pytest.mark.asyncio
@@ -352,19 +358,19 @@ class TestAutoCompact:
         await loop.auto_compact._archive("cli:test", runtime=loop.llm_runtime())
 
         session_after = loop.sessions.get_or_create("cli:test")
-        # Adaptive window keeps fewer messages for low-density sessions,
-        # but extend_to_user ensures "record this" and all paired tool results survive
-        assert len(session_after.messages) >= 4
-        assert session_after.messages[0]["content"] == "record this"
-        assert session_after.messages[-1]["content"] == "done"
+        # Everything preserved on disk; the retained suffix via get_history must
+        # include "record this" and all paired tool results.
+        history = session_after.get_history()
+        assert history[0]["content"] == "record this"
+        assert history[-1]["content"] == "done"
         tool_results = {
             m.get("tool_call_id")
-            for m in session_after.messages
+            for m in history
             if m.get("role") == "tool"
         }
         assert all(
             tc["id"] in tool_results
-            for m in session_after.messages
+            for m in history
             for tc in (m.get("tool_calls") or [])
         )
         await loop.close_mcp()
@@ -387,7 +393,8 @@ class TestAutoCompact:
         assert entry is not None
         assert entry[0] == "User said hello."
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == 4  # adaptive: 12 low-density msgs → min_count=4
+        # Messages preserved on disk; last_consolidated advanced past the prefix
+        assert session_after.last_consolidated == 8  # adaptive: 12 msgs → min_count=4 → 8 archived
         await loop.close_mcp()
 
     @pytest.mark.asyncio
@@ -468,7 +475,10 @@ class TestAutoCompactIdleDetection:
         session_after = loop.sessions.get_or_create("cli:test")
         # 6 turns = 12 msgs, adaptive low-density → min_count=4 → 8 archived
         assert len(archived_messages) == 8
-        assert not any(m["content"] == "old user 0" for m in session_after.messages)
+        # Old prefix is consolidated (excluded from LLM history), but preserved on disk
+        assert session_after.last_consolidated == 8
+        history = session_after.get_history()
+        assert not any(m["content"] == "old user 0" for m in history)
         assert any(m["content"] == "new msg" for m in session_after.messages)
         await loop.close_mcp()
 
@@ -594,9 +604,11 @@ class TestAutoCompactSystemMessages:
         await loop._process_message(msg)
 
         session_after = loop.sessions.get_or_create("cli:test")
+        # Old prefix consolidated (excluded from LLM history), preserved on disk
+        history = session_after.get_history()
         assert not any(
             m["content"] == "old user 0"
-            for m in session_after.messages
+            for m in history
         )
         await loop.close_mcp()
 
@@ -620,7 +632,8 @@ class TestAutoCompactEdgeCases:
         await loop.auto_compact._archive("cli:test", runtime=loop.llm_runtime())
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == 4  # adaptive: 12 low-density msgs → min_count=4
+        # Messages preserved on disk; last_consolidated advanced past the archived prefix
+        assert session_after.last_consolidated == 8  # adaptive: 12 msgs → min_count=4
         # "(nothing)" summary should not be stored
         assert "cli:test" not in loop.auto_compact._summaries
 
@@ -628,7 +641,7 @@ class TestAutoCompactEdgeCases:
 
     @pytest.mark.asyncio
     async def test_auto_compact_archive_failure_still_keeps_recent_suffix(self, tmp_path):
-        """Auto-new should keep the recent suffix even if LLM archive falls back to raw dump."""
+        """On LLM failure, compact_idle_session keeps the session intact (no context loss)."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 6, prefix="important")
@@ -641,7 +654,9 @@ class TestAutoCompactEdgeCases:
         await loop.auto_compact._archive("cli:test", runtime=loop.llm_runtime())
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == 4  # adaptive: 12 low-density msgs → min_count=4
+        # LLM failed → archive returned None → no cursor advance, all messages preserved
+        assert session_after.last_consolidated == 0
+        assert len(session_after.messages) == 12
 
         await loop.close_mcp()
 
@@ -853,7 +868,8 @@ class TestProactiveAutoCompact:
         await self._run_check_expired(loop)
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == 4  # adaptive: 10 low-density msgs → min_count=4
+        # Messages preserved; last_consolidated advanced past the 6 archived
+        assert session_after.last_consolidated == 6
         assert len(archived_messages) == 6  # 10 total - 4 kept = 6 archived
         entry = loop.auto_compact._summaries.get("cli:test")
         assert entry is not None
@@ -1036,9 +1052,10 @@ class TestProactiveAutoCompact:
 
         assert _fake_compact.state["count"] == 1
         s1_after = loop.sessions.get_or_create("cli:expired_idle")
-        assert len(s1_after.messages) == 4  # adaptive: 12 low-density msgs → min_count=4
+        # Archived: last_consolidated advanced past the 8 archived, messages preserved
+        assert s1_after.last_consolidated == 8
         s2_after = loop.sessions.get_or_create("cli:expired_active")
-        assert len(s2_after.messages) == 12  # Preserved
+        assert len(s2_after.messages) == 12  # Preserved, not archived
         s3_after = loop.sessions.get_or_create("cli:recent")
         assert len(s3_after.messages) == 1  # Preserved
         await loop.close_mcp()
@@ -1165,7 +1182,7 @@ class TestSummaryPersistence:
 
         # prepare_session should recover summary from metadata
         reloaded = loop.sessions.get_or_create("cli:test")
-        assert len(reloaded.messages) == 4  # adaptive: 12 low-density msgs → min_count=4
+        assert reloaded.last_consolidated == 8  # prefix consolidated (messages preserved)
         _, summary = loop.auto_compact.prepare_session(reloaded, "cli:test")
 
         assert summary is not None

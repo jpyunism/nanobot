@@ -1609,7 +1609,45 @@ class AgentLoop:
     async def _state_compact(self, ctx: TurnContext) -> str:
         ctx.session, pending = self.auto_compact.prepare_session(ctx.session, ctx.session_key)
         ctx.pending_summary = pending
+        if pending:
+            # Show a one-shot archived-context notice in the WebUI thread so the
+            # user sees where the older conversation was summarized. Guarded by a
+            # per-summary marker (metadata returns the summary every turn after a
+            # restart, so we must not re-emit the notice on every message).
+            summary_meta = ctx.session.metadata.get("_last_summary")
+            summary_id = (
+                summary_meta.get("last_active")
+                if isinstance(summary_meta, dict) and summary_meta.get("last_active")
+                else pending
+            )
+            if ctx.session.metadata.get("_summary_notice_active") != summary_id:
+                self._write_transcript_archived_notice(ctx, pending)
+                ctx.session.metadata["_summary_notice_active"] = summary_id
+                self.sessions.save(ctx.session)
         return "ok"
+
+    def _write_transcript_archived_notice(self, ctx, summary: str) -> None:
+        """Emit a visible ``system`` notice in the WebUI transcript thread."""
+        try:
+            from nanobot.webui.transcript import append_transcript_object
+        except Exception:
+            return
+        try:
+            webui_key = self._webui_session_key(ctx.session_key)
+            _, chat_id = self._channel_chat_id_from_session_key(ctx.session_key)
+        except Exception:
+            return
+        append_transcript_object(
+            webui_key,
+            {
+                "event": "message",
+                "chat_id": chat_id,
+                "role": "system",
+                "kind": "notice",
+                "text": f"[Contexto archivado]\n{summary}",
+                "created_at_ms": int(time.time() * 1000),
+            },
+        )
 
     async def _state_command(self, ctx: TurnContext) -> str:
         if ctx.kind is TurnKind.SYSTEM:

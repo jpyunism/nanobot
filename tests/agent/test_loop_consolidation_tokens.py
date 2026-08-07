@@ -275,3 +275,37 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
     assert "llm" in order
     assert order.index("consolidate") < order.index("llm")
     assert archived_session_keys == ["cli:test"]
+
+
+@pytest.mark.asyncio
+async def test_state_compact_emits_archived_notice_once(tmp_path, monkeypatch) -> None:
+    """_state_compact shows a one-shot archived-context notice in the WebUI thread."""
+    loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
+    session = loop.sessions.get_or_create("cli:test")
+    session.metadata["_last_summary"] = {
+        "text": "User discussed project status.",
+        "last_active": "2026-01-01T00:00:00",
+    }
+    loop.sessions.save(session)
+
+    emitted: list[dict] = []
+    monkeypatch.setattr(
+        "nanobot.webui.transcript.append_transcript_object",
+        lambda _key, obj: emitted.append(obj),
+    )
+    ctx = MagicMock()
+    ctx.session = session
+    ctx.session_key = "cli:test"
+
+    await loop._state_compact(ctx)
+    # Notice emitted once with the summary text.
+    assert len(emitted) == 1
+    assert emitted[0]["role"] == "system"
+    assert emitted[0]["kind"] == "notice"
+    assert "User discussed project status." in emitted[0]["text"]
+    # Pending summary still handed to the LLM context.
+    assert ctx.pending_summary is not None
+
+    # Second _state_compact with the same summary must NOT re-emit.
+    await loop._state_compact(ctx)
+    assert len(emitted) == 1

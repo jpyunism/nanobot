@@ -1175,12 +1175,18 @@ class Consolidator:
         runtime: LLMRuntime,
         max_suffix: int = 8,
     ) -> str | None:
-        """Hard-truncate an idle session under the consolidation lock.
+        """Archive an idle session's prefix without deleting the messages from disk.
 
         Used by AutoCompact so all session mutation goes through a single
         lock-protected path.  Returns the summary text on success, ``None``
         if the LLM failed (raw_archive fallback), or ``""`` if there was
         nothing to archive.
+
+        The archived prefix is preserved in ``session.messages`` (so the WebUI
+        can paginate it and nothing is lost) and excluded from the LLM context
+        by advancing ``last_consolidated`` instead of truncating the list.  The
+        physical file cap (``enforce_file_cap`` / ``FILE_MAX_MESSAGES``) remains
+        the only thing that ever removes old rows.
         """
         lock = self.get_lock(session_key)
         async with lock:
@@ -1208,7 +1214,6 @@ class Consolidator:
                 self.sessions.save(session)
                 return ""
 
-            last_active = session.updated_at
             summary: str | None = ""
             if messages_to_remove:
                 # Summarize the retained suffix too, but only remove/raw-dump
@@ -1223,22 +1228,25 @@ class Consolidator:
             if summary and summary != "(nothing)":
                 self._persist_last_summary(session, summary)
 
-            # Only truncate if the summary succeeded (truthy) or there was nothing to archive.
-            # If archive() returned None (LLM failed), keep the session intact so the
-            # next turn doesn't lose context without a summary to inject.
+            # Only advance last_consolidated if the summary succeeded (truthy) or
+            # there was nothing to archive. If archive() returned None (LLM failed),
+            # keep last_consolidated where it was so the next turn doesn't lose
+            # context without a summary to inject.
             if summary is not None:
-                session.messages = messages_to_keep
-                session.last_consolidated = 0
+                if messages_to_remove:
+                    # Start of the retained suffix = end of the archived prefix.
+                    session.last_consolidated = (
+                        session.last_consolidated + len(messages_to_remove)
+                    )
                 self.sessions.save(session)
 
             if messages_to_remove:
                 logger.info(
-                    "Idle-session compact for {}: archived={}, kept={}, summary={}, truncated={}",
+                    "Idle-session compact for {}: archived={}, kept={}, summary={}",
                     session_key,
                     len(messages_to_remove),
                     len(messages_to_keep),
                     bool(summary),
-                    summary is not None,
                 )
 
             return summary
