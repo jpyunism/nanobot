@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import os
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -424,6 +425,11 @@ class AgentRunner:
         had_injections = False
         injection_cycles = 0
         compacted_tool_call_ids: set[str] = set()
+        # ponytail: detect identical consecutive tool calls (model stuck in a
+        # read_file/exec loop). Track the last call signature and count repeats.
+        last_tool_signature: str | None = None
+        repeat_count = 0
+        repeat_nudge_done = False
         governance_config = ContextGovernanceConfig(
             provider=spec.runtime.provider,
             model=spec.runtime.model,
@@ -474,6 +480,51 @@ class AgentRunner:
 
             if response.should_execute_tools:
                 context.tool_calls = list(response.tool_calls)
+
+                # ponytail: detect repeated tool calls on the same target — the
+                # model is stuck in a loop (e.g. read_file force:true same path
+                # 80×, or grep with slightly different patterns on the same file).
+                # Signature = tool name + target (path/command). Variations in
+                # other args (limit, offset, pattern) don't break the detection.
+                sig = _tool_call_signature(response.tool_calls)
+                if sig == last_tool_signature:
+                    repeat_count += 1
+                else:
+                    last_tool_signature = sig
+                    repeat_count = 1
+                if repeat_count >= _REPEAT_TOOL_HARD_LIMIT:
+                    logger.warning(
+                        "Repeated tool call loop detected ({}x) for {}; stopping turn",
+                        repeat_count,
+                        spec.session_key or "default",
+                    )
+                    final_content = (
+                        "Detecté que estoy repitiendo la misma llamada a tool sin "
+                        "avanzar. Voy a parar aquí. ¿Puedes darme más contexto o "
+                        "guiarme sobre cómo proceder?"
+                    )
+                    stop_reason = "repeated_tool_loop"
+                    self._append_final_message(messages, final_content)
+                    context.final_content = final_content
+                    context.stop_reason = stop_reason
+                    break
+                if repeat_count >= _REPEAT_TOOL_NUDGE_LIMIT and not repeat_nudge_done:
+                    repeat_nudge_done = True
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "Estás repitiendo la misma llamada a tool con los mismos "
+                            "argumentos. El archivo/resultado no va a cambiar. Avanza "
+                            "al siguiente paso, usa otra tool, o explica al operador "
+                            "qué necesitas para continuar."
+                        ),
+                    })
+                    logger.warning(
+                        "Repeated tool call nudge injected ({}x) for {}",
+                        repeat_count,
+                        spec.session_key or "default",
+                    )
+
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=True)
 
@@ -1522,3 +1573,48 @@ class AgentRunner:
         if current:
             batches.append(current)
         return batches
+
+
+# ponytail: repeated identical tool call detection — the model is stuck in a
+# loop calling read_file/exec with the same args. Nudge at 3, hard stop at 5.
+_REPEAT_TOOL_NUDGE_LIMIT = 3
+_REPEAT_TOOL_HARD_LIMIT = 5
+
+
+def _tool_call_signature(tool_calls: list[ToolCallRequest]) -> str:
+    """Canonical signature for a batch of tool calls to detect repetition.
+
+    Uses (tool_name, target) where target is the primary path/command the tool
+    operates on. Variations in secondary args (limit, offset, pattern, force)
+    don't change the signature, so the model can't evade detection by tweaking
+    a minor arg on the same file/command.
+    """
+    parts: list[str] = []
+    for tc in tool_calls:
+        parts.append(f"{tc.name}:{_tool_target(tc)}")
+    parts.sort()
+    return "|".join(parts)
+
+
+def _tool_target(tc: ToolCallRequest) -> str:
+    """Extract the primary target (path/command) from a tool call's args."""
+    args = tc.arguments
+    if not isinstance(args, dict):
+        return str(args)
+    # path-bearing tools: read_file, edit_file, list_dir, find_files, write_file
+    path = args.get("path")
+    if isinstance(path, str):
+        return path
+    # exec / shell tools
+    command = args.get("command")
+    if isinstance(command, str):
+        return command
+    # web tools
+    url = args.get("url")
+    if isinstance(url, str):
+        return url
+    # fallback: all args canonicalized
+    try:
+        return json.dumps(args, sort_keys=True, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(args)
