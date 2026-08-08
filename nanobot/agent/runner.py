@@ -500,8 +500,8 @@ class AgentRunner:
                     )
                     final_content = (
                         "Detecté que estoy repitiendo la misma llamada a tool sin "
-                        "avanzar. Voy a parar aquí. ¿Puedes darme más contexto o "
-                        "guiarme sobre cómo proceder?"
+                        "avanzar. Voy a revisar el contexto de lo que estaba haciendo "
+                        "para retomar el objetivo y continuar."
                     )
                     stop_reason = "repeated_tool_loop"
                     self._append_final_message(messages, final_content)
@@ -514,9 +514,10 @@ class AgentRunner:
                         "role": "user",
                         "content": (
                             "Estás repitiendo la misma llamada a tool con los mismos "
-                            "argumentos. El archivo/resultado no va a cambiar. Avanza "
-                            "al siguiente paso, usa otra tool, o explica al operador "
-                            "qué necesitas para continuar."
+                            "argumentos. El archivo/resultado no va a cambiar. "
+                            "Revisa el contexto de lo que estabas haciendo, retoma "
+                            "el objetivo de la tarea y avanza al siguiente paso con "
+                            "otra tool o enfoque."
                         ),
                     })
                     logger.warning(
