@@ -1830,15 +1830,6 @@ class AgentLoop:
             ctx.session.enforce_file_cap(
                 on_archive=partial(self.context.memory.raw_archive, session_key=ctx.session_key)
             )
-            self._schedule_background(
-                self.consolidator.maybe_consolidate_by_tokens(
-                    ctx.session,
-                    runtime=ctx.runtime,
-                    replay_max_messages=replay_max_messages_for_context(
-                        ctx.runtime.context_window_tokens
-                    ),
-                )
-            )
         self._clear_pending_user_turn(ctx.session)
         self._clear_runtime_checkpoint(ctx.session)
         self.sessions.save(ctx.session)

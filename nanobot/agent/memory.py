@@ -773,11 +773,6 @@ class Consolidator:
 
     _MAX_CONSOLIDATION_ROUNDS = 5
 
-    # Hierarchical summary tiers: each tier compresses more aggressively
-    _SUMMARY_TIER_LABELS = ["detailed", "compressed", "ultra"]
-    _SUMMARY_TIER_MAX_CHARS = [2000, 800, 300]
-    _SUMMARY_TIER_KEEP_RECENT = [12, 8, 4]
-
     _SAFETY_BUFFER = 1024  # extra headroom for tokenizer estimation drift
 
     def __init__(
@@ -903,53 +898,11 @@ class Consolidator:
 
     def _persist_last_summary(self, session: Session, summary: str | None) -> None:
         if summary and summary != "(nothing)":
-            # Hierarchical: merge new summary into existing tiers
-            existing = session.metadata.get("_last_summary")
-            if isinstance(existing, dict) and "tiers" in existing:
-                tiers = list(existing["tiers"])
-                # Push current summary as new detailed tier, shift others down
-                tiers.insert(0, {
-                    "text": summary,
-                    "level": "detailed",
-                    "last_active": session.updated_at.isoformat(),
-                })
-                # Merge/compress older tiers
-                tiers = self._merge_summary_tiers(tiers)
-            else:
-                tiers = [{
-                    "text": summary,
-                    "level": "detailed",
-                    "last_active": session.updated_at.isoformat(),
-                }]
             session.metadata["_last_summary"] = {
-                "tiers": tiers,
                 "text": summary,
                 "last_active": session.updated_at.isoformat(),
             }
             self.sessions.save(session)
-
-    @staticmethod
-    def _merge_summary_tiers(
-        tiers: list[dict],
-    ) -> list[dict]:
-        """Merge summary tiers, keeping at most 3 levels.
-
-        When a 4th tier would be created, merge the two oldest into one
-        compressed tier.
-        """
-        if len(tiers) <= 3:
-            return tiers
-        # Merge the two oldest tiers into one compressed
-        oldest = tiers[-2:]
-        merged_text = " | ".join(
-            t["text"][:400] for t in oldest if t.get("text")
-        )
-        merged = {
-            "text": merged_text[:800],
-            "level": "compressed",
-            "last_active": oldest[-1].get("last_active", ""),
-        }
-        return tiers[:-2] + [merged]
 
     def estimate_session_prompt_tokens(
         self,

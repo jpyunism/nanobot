@@ -13,11 +13,6 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from nanobot.agent.message_classifier import (
-    compute_importance,
-    detect_session_type,
-    find_repeated_errors,
-)
 from nanobot.utils.helpers import (
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
@@ -39,17 +34,6 @@ COMPACTABLE_TOOLS = frozenset({
     "web_search", "web_fetch", "list_dir", "list_exec_sessions",
 })
 
-# Session-type-aware compaction aggressiveness
-SESSION_TYPE_AGGRESSION: dict[str, float] = {
-    "code": 0.75,       # keep more context for coding sessions
-    "casual": 0.95,     # compact aggressively for casual chat
-    "pr_review": 0.70,  # keep diffs and comments
-    "research": 0.80,   # keep sources and findings
-    "general": 0.85,    # default
-}
-
-# Importance threshold below which messages are compaction candidates
-LOW_IMPORTANCE_THRESHOLD = 0.3
 # read_file is the recovery path for persisted results; exempting it prevents persist->read->persist loops.
 TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS = frozenset({"read_file"})
 BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
@@ -100,11 +84,26 @@ class ContextGovernor:
         updated = self.drop_orphan_tool_results(updated)
         updated = self.backfill_missing_tool_results(updated)
         updated = self.apply_tool_result_budget(config, updated)
-        updated = self.compact_inflight_overflow(config, updated, compacted_tool_call_ids)
-        updated = self.snip_history(config, updated)
-        updated = self.drop_orphan_tool_results(updated)
-        updated = self.strip_orphan_tool_calls(updated)
-        return self.backfill_missing_tool_results(updated)
+
+        # ponytail: gate the two expensive passes (inflight compact + snip) behind
+        # a single token estimate. Each pass re-estimates internally, so when we
+        # already fit the budget we skip both and avoid redundant tokenization.
+        budget = self.input_budget(config)
+        overflow = False
+        if budget > 0:
+            tools = config.tools.get_definitions()
+            estimate, _ = estimate_prompt_tokens_chain(
+                config.provider, config.model, updated, tools,
+            )
+            overflow = estimate > budget
+
+        if overflow:
+            updated = self.compact_inflight_overflow(config, updated, compacted_tool_call_ids)
+            updated = self.snip_history(config, updated)
+            updated = self.drop_orphan_tool_results(updated)
+            updated = self.strip_orphan_tool_calls(updated)
+            return self.backfill_missing_tool_results(updated)
+        return updated
 
     @staticmethod
     def input_budget(config: ContextGovernanceConfig) -> int:
@@ -440,7 +439,7 @@ class ContextGovernor:
             if updated is messages:
                 updated = [dict(m) for m in messages]
             compacted_tool_call_ids.add(tool_call_id)
-            self._compact_tool_result_at(updated, idx)
+            self._compact_tool_result_at(config, updated, idx)
             estimate, source = estimate_prompt_tokens_chain(
                 config.provider,
                 config.model,
@@ -497,119 +496,21 @@ class ContextGovernor:
         )
         remaining_budget = max(0, budget - max(system_tokens, fixed_tokens))
 
-        # --- Smart snip: classify and prioritize ---
-        session_type = detect_session_type(non_system)
-        aggression = SESSION_TYPE_AGGRESSION.get(session_type, 0.85)
-        target_budget = int(remaining_budget * aggression)
-
-        # Detect repeated errors so we can drop duplicates
-        repeated_error_indices = find_repeated_errors(non_system)
-
-        # Score each message by importance
-        scored: list[tuple[int, float, dict[str, Any]]] = []
-        for idx, msg in enumerate(non_system):
-            importance = compute_importance(msg)
-            if idx in repeated_error_indices:
-                importance = min(importance, 0.05)  # penalize repeated errors
-            scored.append((idx, importance, msg))
-
-        # Always keep the last user message (anchor)
-        last_user_idx = -1
-        for idx in range(len(non_system) - 1, -1, -1):
-            if non_system[idx].get("role") == "user":
-                last_user_idx = idx
-                break
-
-        # Sort by importance descending, but keep original order for same-importance
-        scored.sort(key=lambda x: (-x[1], x[0]))
-
+        # ponytail: chronological tail-truncation replaces importance-based
+        # reordering. The session summary already covers evicted messages, so
+        # we just keep the most recent tail that fits the budget — preserving
+        # temporal coherence the model was already following.
         kept: list[dict[str, Any]] = []
         kept_tokens = 0
-        kept_indices: set[int] = set()
-
-        for idx, importance, msg in scored:
+        for msg in reversed(non_system):
             msg_tokens = estimate_message_tokens(msg)
-            if kept_tokens + msg_tokens > target_budget:
-                # If it's high importance, still try to keep it by dropping low-importance
-                if importance >= 0.7:
-                    # Try to make room by dropping lowest-importance kept
-                    dropped = self._drop_lowest_importance(
-                        kept, kept_indices, kept_tokens,
-                        msg_tokens, target_budget, importance,
-                        non_system,
-                    )
-                    if dropped:
-                        kept, kept_indices, kept_tokens = dropped
-                    else:
-                        continue
-                else:
-                    continue
+            if kept and kept_tokens + msg_tokens > remaining_budget:
+                break
             kept.append(msg)
-            kept_indices.add(idx)
             kept_tokens += msg_tokens
-
-        # Ensure last user message is always present
-        if last_user_idx >= 0 and last_user_idx not in kept_indices:
-            last_msg = non_system[last_user_idx]
-            last_tokens = estimate_message_tokens(last_msg)
-            # Drop lowest-importance kept to make room
-            while kept and kept_tokens + last_tokens > target_budget:
-                lowest = min(
-                    ((i, m) for i, m in enumerate(kept) if i != last_user_idx),
-                    key=lambda x: compute_importance(x[1]),
-                    default=None,
-                )
-                if lowest is None:
-                    break
-                li, lm = lowest
-                kept_tokens -= estimate_message_tokens(lm)
-                kept.pop(li)
-            kept.append(last_msg)
-            kept_tokens += last_tokens
-
-        # Restore original order
-        kept.sort(key=lambda m: non_system.index(m) if m in non_system else 0)
+        kept.reverse()
 
         return system_messages + self._legal_history_tail(kept, non_system)
-
-    @staticmethod
-    def _drop_lowest_importance(
-        kept: list[dict[str, Any]],
-        kept_indices: set[int],
-        kept_tokens: int,
-        needed_tokens: int,
-        target_budget: int,
-        incoming_importance: float,
-        non_system: list[dict[str, Any]],
-    ) -> tuple[list[dict[str, Any]], set[int], int] | None:
-        """Try to drop low-importance kept messages to make room for a high-importance one."""
-        if not kept:
-            return None
-        # Find kept messages with lower importance than incoming
-        candidates = [
-            (i, m) for i, m in enumerate(kept)
-            if compute_importance(m) < incoming_importance - 0.1
-        ]
-        if not candidates:
-            return None
-        candidates.sort(key=lambda x: compute_importance(x[1]))
-        new_kept = list(kept)
-        new_indices = set(kept_indices)
-        new_tokens = kept_tokens
-        for _ci, cm in candidates:
-            if new_tokens + needed_tokens <= target_budget:
-                break
-            cm_tokens = estimate_message_tokens(cm)
-            new_tokens -= cm_tokens
-            new_kept.remove(cm)
-            # Find and remove the original index
-            for orig_idx in list(new_indices):
-                if non_system[orig_idx] is cm:
-                    new_indices.discard(orig_idx)
-                    break
-        if new_tokens + needed_tokens <= target_budget:
-            return new_kept, new_indices, new_tokens
-        return None
 
     @staticmethod
     def _tool_result_compaction_message(message: dict[str, Any]) -> str:
@@ -655,7 +556,11 @@ class ContextGovernor:
             if not tool_call_id or str(tool_call_id) not in compacted_tool_call_ids:
                 continue
             compaction_message = self._tool_result_compaction_message(msg)
-            if msg.get("content") == compaction_message:
+            current = msg.get("content")
+            if current == compaction_message:
+                continue
+            # ponytail: already offloaded to disk — don't re-destroy the reference.
+            if isinstance(current, str) and "Full output saved to:" in current:
                 continue
             if updated is messages:
                 updated = [dict(m) for m in messages]
@@ -685,23 +590,42 @@ class ContextGovernor:
         if not compactable:
             return []
 
-        # --- Smart ordering: compact low-importance results first ---
-        # Score each candidate by importance (lower = compact first)
-        scored: list[tuple[float, int, str]] = []
+        # ponytail: order by content size descending (biggest first = most
+        # token savings per compaction). Replaces importance-based ordering
+        # whose regex heuristic was fragile and locale-specific.
+        scored: list[tuple[int, int, str]] = []
         for idx, tid in compactable:
-            msg = messages[idx]
-            importance = compute_importance(msg)
-            scored.append((importance, idx, tid))
+            content = messages[idx].get("content")
+            size = len(content) if isinstance(content, str) else 0
+            scored.append((size, idx, tid))
 
-        # Sort by importance ascending (lowest first), then by position
-        scored.sort(key=lambda x: (x[0], x[1]))
+        # Sort by size descending (biggest first), then by position
+        scored.sort(key=lambda x: (-x[0], x[1]))
 
-        # Keep recent high-importance results unless we're in hard overflow
+        # Keep recent results unless we're in hard overflow
         primary_count = max(0, len(scored) - MICROCOMPACT_KEEP_RECENT)
-        primary = [(idx, tid) for _imp, idx, tid in scored[:primary_count]]
-        fallback = [(idx, tid) for _imp, idx, tid in scored[primary_count:]]
+        primary = [(idx, tid) for _size, idx, tid in scored[:primary_count]]
+        fallback = [(idx, tid) for _size, idx, tid in scored[primary_count:]]
 
         return primary + fallback
 
-    def _compact_tool_result_at(self, messages: list[dict[str, Any]], idx: int) -> None:
-        messages[idx]["content"] = self._tool_result_compaction_message(messages[idx])
+    def _compact_tool_result_at(
+        self,
+        config: ContextGovernanceConfig,
+        messages: list[dict[str, Any]],
+        idx: int,
+    ) -> None:
+        msg = messages[idx]
+        content = msg.get("content")
+        if isinstance(content, str) and config.workspace is not None:
+            offloaded = maybe_persist_tool_result(
+                config.workspace,
+                config.session_key,
+                str(msg.get("tool_call_id") or f"tool_{idx}"),
+                content,
+                max_chars=1,  # force offload; candidates are already > MICROCOMPACT_MIN_CHARS
+            )
+            if offloaded != content:
+                messages[idx]["content"] = offloaded
+                return
+        messages[idx]["content"] = self._tool_result_compaction_message(msg)

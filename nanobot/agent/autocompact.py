@@ -10,12 +10,6 @@ from loguru import logger
 
 from nanobot.session.manager import Session, SessionManager
 
-from nanobot.agent.message_classifier import (
-    adaptive_recent_count,
-    compute_importance,
-    detect_session_type,
-)
-
 if TYPE_CHECKING:
     from nanobot.agent.memory import Consolidator
     from nanobot.utils.llm_runtime import LLMRuntime
@@ -66,8 +60,7 @@ class AutoCompact:
         if not tail:
             return False
 
-        # Use adaptive window based on information density
-        window = adaptive_recent_count(tail)
+        window = self._RECENT_SUFFIX_MESSAGES
         probe = Session(
             key=session.key,
             messages=tail,
@@ -89,34 +82,12 @@ class AutoCompact:
 
     @staticmethod
     def _format_hierarchical_summary_from_meta(meta: dict) -> str | None:
-        """Format hierarchical summary tiers from session metadata."""
-        tiers = meta.get("tiers")
-        if not tiers:
-            text = meta.get("text")
-            last_active = meta.get("last_active")
-            if text:
-                return f"Previous conversation summary (last active {last_active}):\n{text}"
-            return None
-
-        parts = []
-        for t in tiers:
-            level = t.get("level", "detailed")
-            text = t.get("text", "")
-            last_active = t.get("last_active", "")
-            if level == "detailed":
-                parts.append(f"[Recent] {text}")
-            elif level == "compressed":
-                parts.append(f"[Earlier] {text}")
-            else:
-                parts.append(f"[Old] {text}")
-
-        if not parts:
-            return None
-        last_active = tiers[0].get("last_active", "")
-        return (
-            f"Previous conversation summary (last active {last_active}):\n"
-            + "\n".join(parts)
-        )
+        """Format summary from session metadata."""
+        text = meta.get("text")
+        last_active = meta.get("last_active")
+        if text and last_active:
+            return f"Previous conversation summary (last active {last_active}):\n{text}"
+        return None
 
     @classmethod
     def _is_internal_session(cls, key: str) -> bool:
@@ -153,8 +124,7 @@ class AutoCompact:
             return
         try:
             session = self.sessions.get_or_create(key)
-            tail = list(session.messages[session.last_consolidated:])
-            window = adaptive_recent_count(tail)
+            window = self._RECENT_SUFFIX_MESSAGES
             summary = await self.consolidator.compact_idle_session(
                 key,
                 runtime=runtime,
@@ -193,9 +163,4 @@ class AutoCompact:
             formatted = self._format_hierarchical_summary_from_meta(meta)
             if formatted:
                 return session, formatted
-            # Fallback to flat format for backward compat
-            text = meta.get("text")
-            last_active = meta.get("last_active")
-            if text and last_active:
-                return session, self._format_summary(text, datetime.fromisoformat(last_active))
         return session, None

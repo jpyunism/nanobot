@@ -1411,7 +1411,7 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
     assert request.metadata == {"subagent_task_id": "sub-1"}
     assert request.turn_id
     record_runtime.assert_called_once_with("cli:test", runtime)
-    assert len(loop.consolidator.maybe_consolidate_by_tokens.call_args_list) == 2
+    assert len(loop.consolidator.maybe_consolidate_by_tokens.call_args_list) == 1
     assert all(
         call.kwargs["runtime"] is runtime
         for call in loop.consolidator.maybe_consolidate_by_tokens.call_args_list

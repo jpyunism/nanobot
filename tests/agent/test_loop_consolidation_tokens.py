@@ -225,7 +225,7 @@ async def test_preflight_consolidation_receives_pending_summary(tmp_path) -> Non
         runtime=runtime,
         replay_max_messages=replay_max_messages_for_context(runtime.context_window_tokens),
     )
-    assert len(loop.consolidator.maybe_consolidate_by_tokens.call_args_list) == 2
+    assert len(loop.consolidator.maybe_consolidate_by_tokens.call_args_list) == 1
     assert all(
         call.kwargs["runtime"] is runtime
         for call in loop.consolidator.maybe_consolidate_by_tokens.call_args_list
