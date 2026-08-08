@@ -969,6 +969,39 @@ def _webui_channel_enabled(config: Config) -> bool:
     return bool(WebSocketConfig.model_validate(current).enabled)
 
 
+def _cleanup_orphan_webui_transcripts(session_manager: Any, workspace: Path) -> None:
+    """Delete WebUI transcripts whose session files no longer exist."""
+    from nanobot.config.paths import get_webui_dir
+
+    sessions_dir = getattr(session_manager, "sessions_dir", None)
+    if sessions_dir is None:
+        return
+    session_keys: set[str] = set()
+    decode = getattr(session_manager, "_decode_storage_key", None)
+    for f in sessions_dir.glob("*.jsonl"):
+        if decode:
+            decoded = decode(f.stem)
+            if decoded:
+                session_keys.add(decoded)
+
+    webui_dir = get_webui_dir()
+    if not webui_dir.is_dir():
+        return
+    removed = 0
+    for t in list(webui_dir.glob("websocket_*.jsonl")) + list(webui_dir.glob("websocket_*.json")):
+        uuid = t.stem.replace("websocket_", "")
+        session_key = f"websocket:{uuid}"
+        if session_key in session_keys:
+            continue
+        try:
+            t.unlink()
+            removed += 1
+        except OSError:
+            pass
+    if removed:
+        logger.info("Cleaned {} orphan WebUI transcripts", removed)
+
+
 def _prepare_webui_bundle_for_gateway(
     config: Config,
     *,
@@ -1728,6 +1761,7 @@ def _run_gateway(
             console.print(f"[red]Error: {exc}[/red]")
             raise typer.Exit(1) from exc
     session_manager = SessionManager(config.workspace_path)
+    _cleanup_orphan_webui_transcripts(session_manager, config.workspace_path)
 
     # Self-heal the gateway state file with the current PID after any restart.
     from nanobot.config.loader import get_config_path

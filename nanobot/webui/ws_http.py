@@ -1163,6 +1163,15 @@ class GatewayHTTPHandler:
                     self.cron_service.remove_job(job.id)
         deleted = self.session_manager.delete_session(decoded_key)
         delete_webui_thread(decoded_key)
+        # ponytail: invalidate the WebUI session list index cache so deleted
+        # sessions don't reappear in the sidebar before the next reconciliation.
+        try:
+            from nanobot.webui.session_list_index import _index_path
+            idx = _index_path(self.session_manager.sessions_dir)
+            if idx.is_file():
+                idx.unlink()
+        except OSError:
+            pass
         return _http_json_response({"deleted": bool(deleted)})
 
     def _resolve_session_for_project(self, key: str) -> tuple[Any | None, str | None, Response | None]:
