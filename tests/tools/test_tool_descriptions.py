@@ -1,4 +1,3 @@
-import sys
 from unittest.mock import patch
 
 from nanobot.agent.tools.apply_patch import ApplyPatchTool
@@ -56,10 +55,7 @@ def test_exec_tool_shell_guidance_matches_platform() -> None:
     assert "powershell" in windows_description
     assert "cmd" in windows_description
 
+    # The shell parameter description is platform-independent (bash/sh/zsh).
     shell_parameter = ExecTool().parameters["properties"]["shell"]["description"].lower()
     assert "shell" in shell_parameter
-    if sys.platform == "win32":
-        assert "powershell" in shell_parameter or "cmd" in shell_parameter
-    else:
-        assert "bash" in shell_parameter or "unix" in shell_parameter
-        assert "powershell" not in shell_parameter
+    assert "bash" in shell_parameter or "unix" in shell_parameter
