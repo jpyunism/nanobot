@@ -156,12 +156,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
 
     @property
     def description(self) -> str:
-        return (
-            "Create one sustained goal for the current session when Goal Runtime Guidance asks "
-            "you to record it. Consolidate relevant prior discussion into a durable objective "
-            "that is self-contained, bounded, safe under repetition, and explicit about "
-            "completion criteria. Do not retry after a successful creation."
-        )
+        return "Create a sustained goal for the session. Self-contained, bounded, explicit completion criteria."
 
     def runtime_context_provider(self):
         return self._provide_runtime_context
@@ -286,12 +281,7 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
 
     @property
     def description(self) -> str:
-        return (
-            "Update the active sustained goal. Use action='complete' only after the objective "
-            "is actually achieved and verified. Use action='cancel' when the user cancels, "
-            "action='block' when progress is genuinely blocked, and action='replace' only when "
-            "the requested objective changes."
-        )
+        return "Update active goal. Actions: complete, cancel, block, replace."
 
     async def execute(
         self,

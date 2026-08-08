@@ -124,8 +124,8 @@ def test_run_cli_app_description_names_only_settings_installed_apps(tmp_path: Pa
 
     tool = CliAppsTool(workspace=workspace)
 
-    assert "Settings CLI Apps: drawio" in tool.description
-    assert "ordinary system CLIs such as git, gh" in tool.description
+    assert "drawio" in tool.description
+    assert "Not for system CLIs" in tool.description
 
 
 def test_cli_app_tool_provides_context_only_for_attachment(tmp_path: Path) -> None:

@@ -104,16 +104,10 @@ class CliAppsTool(Tool):
         except Exception:
             installed = []
         installed_note = (
-            f" Installed Settings CLI Apps: {', '.join(installed)}."
-            if installed
-            else " No Settings CLI Apps are currently installed."
+            f" Installed: {', '.join(installed)}." if installed
+            else " No CLI Apps installed."
         )
-        return (
-            "Run a CLI App that the user explicitly installed in Settings or attached as @app. "
-            "Do not use this for ordinary system CLIs such as git, gh, python, npm, or brew; "
-            "unknown names are rejected. Execution uses argv, not shell."
-            + installed_note
-        )
+        return "Run a Settings CLI App or @app. Not for system CLIs. Uses argv." + installed_note
 
     def runtime_context_provider(self):
         return self._provide_runtime_context

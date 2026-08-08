@@ -43,15 +43,10 @@ class RunWorkflowTool(Tool):
 
     @property
     def description(self) -> str:
-        base = (
-            "Run a named workflow in the background. "
-            "Workflows are deterministic multi-step orchestrations built from "
-            "subagents (sequential, parallel, or pipelined). "
-            "The workflow reports its result back when done; the chat stays usable meanwhile."
-        )
+        base = "Run a named workflow in the background (multi-step subagent orchestration)."
         names = self._runner.list_workflow_names() if self._runner else []
         if names:
-            base += f" Available workflows: {', '.join(names)}."
+            base += f" Available: {', '.join(names)}."
         return base
 
     async def execute(self, workflow: str, args: str = "", **kwargs: Any) -> str:

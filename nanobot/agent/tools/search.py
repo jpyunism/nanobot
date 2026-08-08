@@ -130,13 +130,7 @@ class FindFilesTool(_SearchTool):
 
     @property
     def description(self) -> str:
-        return (
-            "Find files by path fragment, glob, or file type. "
-            "Use this before read_file when you need to locate files, and "
-            "prefer it over shell find/ls for ordinary workspace discovery. "
-            "Returns workspace-relative paths and skips common dependency/build "
-            "directories."
-        )
+        return "Find files by path fragment, glob, or type. Returns relative paths, skips deps/build dirs."
 
     @property
     def read_only(self) -> bool:
@@ -292,12 +286,8 @@ class GrepTool(_SearchTool):
     @property
     def description(self) -> str:
         return (
-            "Search file contents with a regex pattern. "
-            "Default output_mode is files_with_matches (file paths only); "
-            "use content mode for matching lines with context. Prefer this "
-            "over shell grep for ordinary workspace searches. "
-            "Binary and file-size limits are enforced by the tool; explicit file paths "
-            "use a larger bounded limit than directory searches. Supports glob/type filtering."
+            "Search file contents with regex. Default: file paths only; "
+            "content mode for matching lines. Supports glob/type filtering."
         )
 
     @property

@@ -137,36 +137,16 @@ class MyTool(Tool):
     @property
     def description(self) -> str:
         base = (
-            "Check and set your own runtime state.\n"
-            "Actions: check, set.\n"
-            "- check (no key): full config overview — start here.\n"
-            "- check (key): drill into a value. Dot-paths allowed "
-            "(e.g. '_last_usage.prompt_tokens', 'web_config.enable').\n"
-            "- set (key, value): change config or store notes in your scratchpad. "
-            "Scratchpad keys persist across turns but not restarts.\n"
-            "Key values: _current_iteration (current progress), "
-            "max_iterations - _current_iteration = remaining iterations.\n"
-            "Current routing metadata is available read-only via request.channel, "
-            "request.chat_id, and request.sender_id.\n"
-            "Use model_preset for session-scoped model or context changes; direct "
-            "model/context_window_tokens writes are disabled during active sessions.\n"
-            "Note: web_config and exec_config are readable but read-only.\n"
-            "\n"
-            "When to use:\n"
-            "- User asks about your model, settings, or token usage → check that key.\n"
-            "- User asks to switch to a named model preset → set model_preset to that preset name.\n"
-            "- A tool fails or behaves unexpectedly → check the related config to diagnose.\n"
-            "- User asks you to remember a preference for this session → set to store it in your scratchpad.\n"
-            "- About to start a large task → check context_window_tokens and max_iterations first."
+            "Check/set runtime state. Actions: check, set.\n"
+            "check: config overview or drill into a dot-path key.\n"
+            "set: change config or store scratchpad notes (persist across turns).\n"
+            "Key values: _current_iteration, max_iterations.\n"
+            "Use model_preset for session-scoped model changes."
         )
         if not self._modify_allowed:
-            base += "\nREAD-ONLY MODE: set is disabled."
+            base += "\nREAD-ONLY: set is disabled."
         else:
-            base += (
-                "\nIMPORTANT: Before setting state, predict the potential impact. "
-                "If the operation could cause crashes or instability "
-                "(e.g. changing model), warn the user first."
-            )
+            base += "\nWarn before risky changes (e.g. switching model)."
         return base
 
     @property

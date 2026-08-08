@@ -50,11 +50,7 @@ class TtsTool(Tool):
 
     @property
     def description(self) -> str:
-        return (
-            "Synthesize speech from text using Microsoft edge-tts and return a local audio file path. "
-            "Use the 'message' tool with media=[<returned path>] to deliver the audio to the user. "
-            "The audio is re-encoded to a WhatsApp-mobile-friendly MP3 so it plays on phones and desktop."
-        )
+        return "Text-to-speech via edge-tts. Returns audio path. Use message tool with media=[path] to deliver."
 
     async def execute(
         self,

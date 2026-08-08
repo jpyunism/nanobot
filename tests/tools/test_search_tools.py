@@ -322,7 +322,7 @@ async def test_grep_uses_a_larger_bounded_limit_for_an_explicit_file(
 def test_grep_description_keeps_size_thresholds_implementation_specific(tmp_path: Path) -> None:
     tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
 
-    assert "limits are enforced by the tool" in tool.description
+    assert "regex" in tool.description
     assert "2 MB" not in tool.description
     assert "100 MB" not in tool.description
 

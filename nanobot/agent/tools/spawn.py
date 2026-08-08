@@ -40,10 +40,7 @@ if TYPE_CHECKING:
             default=False,
         ),
         model_preset=StringSchema(
-            description=(
-                "Optional named model preset to run the subagent with (e.g. 'kimi', "
-                "'minimax', 'qwen'). Defaults to the parent session's preset."
-            ),
+            description="Model preset for the subagent (kimi, minimax, qwen). Defaults to parent.",
         ),
         required=["task"],
     )
@@ -65,12 +62,8 @@ class SpawnTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Spawn a subagent to handle a task in the background. "
-            "Use this for complex or time-consuming tasks that can run independently. "
-            "Set wait=true for a consultation whose result must inform the current turn. "
-            "The subagent will complete the task and report back when done. "
-            "For deliverables or existing projects, inspect the workspace first "
-            "and use a dedicated subdirectory when helpful."
+            "Spawn a subagent for background tasks. Set wait=true for "
+            "consultations whose result must inform the current turn."
         )
 
     async def execute(

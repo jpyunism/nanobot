@@ -18,36 +18,17 @@ from nanobot.webui.agenda_api import (
 )
 
 _AGENDA_PARAMETERS = tool_parameters_schema(
-    action=StringSchema(
-        "Action to perform",
-        enum=["add", "list", "update", "delete"],
-    ),
-    id=StringSchema(
-        "REQUIRED when action='update' or action='delete'. Appointment ID."
-    ),
-    title=StringSchema(
-        "REQUIRED when action='add'. Short human-readable title for the appointment."
-    ),
-    date=StringSchema(
-        "REQUIRED when action='add'. Appointment date as YYYY-MM-DD."
-    ),
-    time=StringSchema(
-        "Time as HH:MM (24-hour). Omit or set to null for all-day appointments."
-    ),
-    all_day=StringSchema(
-        "Set to 'true' for an all-day appointment (time becomes null).",
-        enum=["true", "false"],
-    ),
-    notes=StringSchema("Longer description or notes for the appointment."),
-    category=StringSchema(
-        "Category of the appointment.",
-        enum=["personal", "work", "health", "reminder", "journal", "other"],
-    ),
-    color=StringSchema(
-        "Optional hex color (e.g. #ef4444). Defaults to category color if omitted."
-    ),
+    action=StringSchema("Action", enum=["add", "list", "update", "delete"]),
+    id=StringSchema("Appointment ID (update/delete)."),
+    title=StringSchema("Appointment title (add)."),
+    date=StringSchema("Date YYYY-MM-DD (add)."),
+    time=StringSchema("Time HH:MM or null for all-day."),
+    all_day=StringSchema("All-day flag: 'true'/'false'.", enum=["true", "false"]),
+    notes=StringSchema("Description/notes."),
+    category=StringSchema("Category.", enum=["personal", "work", "health", "reminder", "journal", "other"]),
+    color=StringSchema("Hex color (e.g. #ef4444). Defaults to category color."),
     required=["action"],
-    description="Action-specific parameters: action='add' requires title and date; action='update' and action='delete' require id. Use action='list' to see all appointments.",
+    description="Manage appointments. add requires title+date; update/delete require id.",
 )
 
 

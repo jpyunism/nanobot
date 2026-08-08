@@ -23,48 +23,19 @@ from nanobot.webui.todos_api import (
 )
 
 _TODOS_PARAMETERS = tool_parameters_schema(
-    action=StringSchema(
-        "Action to perform",
-        enum=["add_list", "list_lists", "add_item", "list_items", "update_item", "delete_item", "delete_list"],
-    ),
-    slug=StringSchema(
-        "List slug. REQUIRED for add_item/list_items/update_item/delete_item/delete_list. "
-        "For add_list, used as explicit slug; omit to auto-generate from name."
-    ),
-    name=StringSchema(
-        "REQUIRED when action='add_list'. Display name for the new list."
-    ),
-    text=StringSchema(
-        "REQUIRED when action='add_item'. Text of the todo item."
-    ),
-    item_id=StringSchema(
-        "REQUIRED when action='update_item' or action='delete_item'. Item ID."
-    ),
-    done=BooleanSchema(
-        description="Set true/false to mark item completion (update_item only)."
-    ),
-    due_date=StringSchema(
-        "Optional due date as YYYY-MM-DD (add_item or update_item)."
-    ),
-    link=StringSchema(
-        "Optional URL to associate with the item (add_item or update_item)."
-    ),
-    price_clp=NumberSchema(
-        "Optional price in Chilean pesos (add_item or update_item)."
-    ),
-    notes=StringSchema(
-        "Optional longer notes for the item (add_item or update_item)."
-    ),
-    assignee=StringSchema(
-        "Optional assignee (add_item or update_item). Defaults to the current user."
-    ),
+    action=StringSchema("Action", enum=["add_list", "list_lists", "add_item", "list_items", "update_item", "delete_item", "delete_list"]),
+    slug=StringSchema("List slug (required for item/list operations)"),
+    name=StringSchema("List display name (add_list)"),
+    text=StringSchema("Todo item text (add_item)"),
+    item_id=StringSchema("Item ID (update_item/delete_item)"),
+    done=BooleanSchema(description="Mark completion (update_item)."),
+    due_date=StringSchema("Due date YYYY-MM-DD (add/update_item)"),
+    link=StringSchema("URL to associate (add/update_item)"),
+    price_clp=NumberSchema("Price in CLP (add/update_item)."),
+    notes=StringSchema("Notes (add/update_item)."),
+    assignee=StringSchema("Assignee (add/update_item)."),
     required=["action"],
-    description=(
-        "Manage todo lists and items. "
-        "Lists are identified by a slug (auto-generated from name). "
-        "Items are identified by item_id. "
-        "Use list_lists to discover available lists and their slugs."
-    ),
+    description="Manage todo lists and items. Use list_lists to discover slugs.",
 )
 
 

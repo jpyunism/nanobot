@@ -268,16 +268,9 @@ class ReadFileTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Read a file (text, image, or document). "
-            "Text output format: LINE_NUM|CONTENT. "
-            "Images return visual content for analysis. "
-            "Supports PDF, DOCX, XLSX, PPTX documents. "
-            "Use find_files/list_dir first when the path is uncertain. "
-            "Read the relevant range before editing so replacements or patches "
-            "are based on current content. "
-            "Use offset and limit for large text files. "
-            "Use force=true to re-read content even if unchanged. "
-            "Reads exceeding ~128K chars are truncated."
+            "Read a file (text/image/document). Output: LINE_NUM|CONTENT. "
+            "Supports PDF/DOCX/XLSX/PPTX. Use offset/limit for large files, "
+            "force=true to re-read unchanged files. Max ~128K chars."
         )
 
     @property
@@ -495,12 +488,7 @@ class WriteFileTool(_FsTool):
 
     @property
     def description(self) -> str:
-        return (
-            "Create a new file or intentionally replace an entire file with "
-            "the provided content. Overwrites existing files and creates parent "
-            "directories as needed. For code changes or partial edits, prefer "
-            "apply_patch; use edit_file only for small exact replacements."
-        )
+        return "Create or fully replace a file. Prefer apply_patch for code changes."
 
     async def execute(self, path: str | None = None, content: str | None = None, **kwargs: Any) -> str:
         try:
@@ -836,14 +824,9 @@ class EditFileTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Perform a small, exact replacement in one file by replacing "
-            "old_text with new_text. Use this for narrow text substitutions "
-            "with old_text copied from read_file. For multi-file, structural, "
-            "or generated code edits, prefer apply_patch. If old_text matches "
-            "multiple times, provide more context or set occurrence, line_hint, "
-            "replace_all, and expected_replacements. When editing from numbered "
-            "read_file output, set line_hint to the exact target line. "
-            "Shows closest-match diagnostics on failure."
+            "Exact text replacement in one file: old_text → new_text. "
+            "For multi-file/structural edits use apply_patch. "
+            "Use occurrence/line_hint/replace_all for multiple matches."
         )
 
     @staticmethod
@@ -1069,11 +1052,7 @@ class ListDirTool(_FsTool):
 
     @property
     def description(self) -> str:
-        return (
-            "List the contents of a directory. "
-            "Set recursive=true to explore nested structure. "
-            "Common noise directories (.git, node_modules, __pycache__, etc.) are auto-ignored."
-        )
+        return "List directory contents. recursive=true for nested. Auto-ignores .git/node_modules/etc."
 
     @property
     def read_only(self) -> bool:

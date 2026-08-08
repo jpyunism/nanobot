@@ -433,46 +433,33 @@ def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
 
 @tool_parameters(
     tool_parameters_schema(
-        session_id=StringSchema("Session id returned by exec when yield_time_ms is used."),
-        chars=StringSchema(
-            "Bytes/text to write to stdin. Omit or pass an empty string to only poll recent output.",
-            nullable=True,
-        ),
-        close_stdin=BooleanSchema(
-            description="Close stdin after writing chars. Useful for commands waiting for EOF.",
-            default=False,
-        ),
-        terminate=BooleanSchema(
-            description="Terminate the running exec session.",
-            default=False,
-        ),
+        session_id=StringSchema("Session ID from exec with yield_time_ms."),
+        chars=StringSchema("Text to write to stdin. Empty to poll only.", nullable=True),
+        close_stdin=BooleanSchema(description="Close stdin after writing.", default=False),
+        terminate=BooleanSchema(description="Terminate the session.", default=False),
         yield_time_ms=IntegerSchema(
             DEFAULT_YIELD_MS,
-            description="Milliseconds to wait before returning recent output (default 1000, max 30000).",
+            description="Ms to wait before returning output (default 1000).",
             minimum=0,
             maximum=MAX_YIELD_MS,
         ),
-        wait_for=StringSchema(
-            "Optional text to wait for in output before returning. "
-            "Useful for interactive commands and dev servers.",
-            nullable=True,
-        ),
+        wait_for=StringSchema("Text to wait for in output.", nullable=True),
         wait_timeout_ms=IntegerSchema(
             DEFAULT_WAIT_FOR_MS,
-            description="Maximum milliseconds to wait for wait_for text (default 10000, max 120000).",
+            description="Max ms to wait for wait_for (default 10000).",
             minimum=0,
             maximum=MAX_WAIT_FOR_MS,
             nullable=True,
         ),
         max_output_chars=IntegerSchema(
             DEFAULT_MAX_OUTPUT_CHARS,
-            description="Maximum output characters to return from this poll (default 10000, max 50000).",
+            description="Max output chars to return (default 10000).",
             minimum=1000,
             maximum=MAX_OUTPUT_CHARS,
         ),
         max_output_tokens=IntegerSchema(
             DEFAULT_MAX_OUTPUT_CHARS,
-            description="Compatibility alias for max_output_chars. The current runtime uses a character budget.",
+            description="Alias for max_output_chars.",
             minimum=1000,
             maximum=MAX_OUTPUT_CHARS,
             nullable=True,
@@ -518,12 +505,9 @@ class WriteStdinTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Interact with a running exec session created by exec with "
-            "yield_time_ms. Use chars='' to poll without writing, chars to send "
-            "stdin, close_stdin=true to send EOF, or terminate=true to stop the "
-            "process. Use wait_for with wait_timeout_ms for dev servers, test "
-            "watchers, and prompts where you need to wait for expected output. "
-            "Do not use this to start new commands; start them with exec."
+            "Interact with a running exec session. chars='' to poll, chars to "
+            "write stdin, close_stdin=true for EOF, terminate=true to stop. "
+            "wait_for with wait_timeout_ms for dev servers/prompts."
         )
 
     async def execute(
@@ -657,12 +641,7 @@ class ListExecSessionsTool(Tool):
 
     @property
     def description(self) -> str:
-        return (
-            "List active long-running exec sessions, including session_id, cwd, "
-            "elapsed time, idle time, remaining timeout, and command preview. "
-            "Use this to recover a session_id after context shifts before "
-            "polling, writing stdin, or terminating with write_stdin."
-        )
+        return "List active exec sessions (session_id, cwd, command preview)."
 
     @property
     def read_only(self) -> bool:
