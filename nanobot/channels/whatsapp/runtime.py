@@ -68,6 +68,7 @@ class _NeonizeAPI(NamedTuple):
     PairStatusEv: Any
     StreamErrorEv: Any
     build_jid: Any
+    Message: Any
 
 
 class _MediaInfo(NamedTuple):
@@ -109,6 +110,7 @@ def _load_neonize() -> _NeonizeAPI:
             PairStatusEv,
             StreamErrorEv,
         )
+        from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import Message
         from neonize.utils.jid import build_jid
     except ImportError as exc:
         raise RuntimeError(
@@ -127,6 +129,7 @@ def _load_neonize() -> _NeonizeAPI:
         PairStatusEv=PairStatusEv,
         StreamErrorEv=StreamErrorEv,
         build_jid=build_jid,
+        Message=Message,
     )
     return _NEONIZE_API
 
@@ -830,7 +833,13 @@ class WhatsAppChannel(BaseChannel):
             content = f"{mention} {content}"
         try:
             if content:
-                await client.send_message(to, content)
+                # Pass a pre-built Message(conversation=...) so neonize skips its
+                # live _parse_group_mention / _generate_link_preview (both do
+                # get_group_info() network calls that fail silently under a
+                # "live but silent" reconnect, dropping the send). Build it here
+                # so text with a mention prefix still becomes plain conversation.
+                msg_obj = _load_neonize().Message(conversation=content)
+                await client.send_message(to, msg_obj)
         except Exception as exc:
             cls_name = type(exc).__name__
             if cls_name == "SendMessageError" and "463" in str(exc):

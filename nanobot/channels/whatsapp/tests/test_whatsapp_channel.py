@@ -30,6 +30,9 @@ class _Proto:
     def HasField(self, name: str) -> bool:  # noqa: N802 - protobuf compatibility
         return _is_set(getattr(self, name, None))
 
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _Proto) and self.__dict__ == other.__dict__
+
     def ListFields(self):  # noqa: N802 - protobuf compatibility
         return [
             (SimpleNamespace(name=name), value)
@@ -48,6 +51,10 @@ def _is_set(value) -> bool:
 
 def _jid(user: str, server: str) -> _Proto:
     return _Proto(User=user, Server=server, IsEmpty=False)
+
+
+def _message_with_conversation(content: str) -> _Proto:
+    return _Proto(conversation=content)
 
 
 def _event(
@@ -113,6 +120,7 @@ def _patch_neonize_api(monkeypatch) -> None:
             PairStatusEv=object(),
             StreamErrorEv=object(),
             build_jid=lambda user, server="s.whatsapp.net": (user, server),
+            Message=lambda **kw: _Proto(**kw),
         ),
     )
 
@@ -731,7 +739,7 @@ async def test_send_text_uses_neonize_send_message(monkeypatch) -> None:
 
     await ch.send(OutboundMessage(channel="whatsapp", chat_id="12345@s.whatsapp.net", content="hi"))
 
-    client.send_message.assert_awaited_once_with(("12345", "s.whatsapp.net"), "hi")
+    client.send_message.assert_awaited_once_with(("12345", "s.whatsapp.net"), _message_with_conversation("hi"))
 
 
 @pytest.mark.asyncio
@@ -1028,7 +1036,7 @@ async def test_send_resolves_lid_chat_to_phone(monkeypatch) -> None:
         )
     )
 
-    client.send_message.assert_awaited_once_with(("56975746099", "s.whatsapp.net"), "hola")
+    client.send_message.assert_awaited_once_with(("56975746099", "s.whatsapp.net"), _message_with_conversation("hola"))
 
 
 def test_whatsapp_session_key_isolates_group_members() -> None:
@@ -1522,7 +1530,7 @@ async def test_unauthorized_dm_uses_base_pairing_flow(monkeypatch) -> None:
     client.download_any.assert_not_awaited()
     client.send_message.assert_awaited_once()
     assert client.send_message.await_args.args[0] == ("blocked", "s.whatsapp.net")
-    assert "ABCD-EFGH" in client.send_message.await_args.args[1]
+    assert "ABCD-EFGH" in client.send_message.await_args.args[1].conversation
 
 
 def test_reset_database_removes_sqlite_sidecars(tmp_path) -> None:
