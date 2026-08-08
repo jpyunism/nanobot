@@ -39,7 +39,7 @@ MIN_REPLAY_MAX_MESSAGES = 120
 REPLAY_TOKENS_PER_MESSAGE = 100
 _MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
 _LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
-_TOOL_CALL_ECHO_RE = re.compile(r'^\s*(?:generate_image|message)\([^)]*\)\s*$')
+
 _SESSION_PREVIEW_MAX_CHARS = 120
 _SESSION_LIST_PREVIEW_MAX_RECORDS = 200
 _SESSION_LIST_PREVIEW_MAX_CHARS = 1_000_000
@@ -75,7 +75,6 @@ def _sanitize_assistant_replay_text(content: str) -> str:
         line
         for line in content.splitlines()
         if not _LOCAL_IMAGE_BREADCRUMB_RE.match(line)
-        and not _TOOL_CALL_ECHO_RE.match(line)
     ]
     return "\n".join(lines).strip()
 
@@ -250,9 +249,14 @@ class Session:
                 if not any(key in message for key in ("tool_calls", "reasoning_content", "thinking_blocks")):
                     continue
             entry: dict[str, Any] = {"role": message["role"], "content": content}
-            for key in ("tool_calls", "tool_call_id", "name", "reasoning_content", "thinking_blocks"):
+            for key in ("tool_calls", "tool_call_id", "name", "thinking_blocks"):
                 if key in message:
                     entry[key] = message[key]
+            # ponytail: don't replay reasoning_content to the model — it's
+            # chain-of-thought from previous turns that bloats context and
+            # causes the model to re-read its own old reasoning instead of
+            # acting on the current turn. Persisted on disk for audit/UI, but
+            # stripped from LLM history.
             out.append(entry)
 
         if max_tokens > 0 and out:

@@ -256,12 +256,13 @@ def test_get_history_preserves_reasoning_content():
 
     history = session.get_history(max_messages=500)
 
+    # reasoning_content is persisted but NOT replayed to the model (stripped
+    # from get_history to avoid bloating context with old chain-of-thought).
     assert history == [
         {"role": "user", "content": "hi"},
         {
             "role": "assistant",
             "content": "done",
-            "reasoning_content": "hidden chain of thought",
             "thinking_blocks": [{
                 "type": "thinking",
                 "thinking": "hidden chain of thought",
@@ -644,7 +645,15 @@ def test_get_history_sanitizes_existing_assistant_replay_artifacts():
 
     history = session.get_history(max_messages=500)
 
-    assert history == [{"role": "assistant", "content": "来了 🎨"}]
+    # Message Time prefix and image breadcrumbs are stripped, but tool-call
+    # echoes like generate_image(...)/message(...) are preserved so the model
+    # keeps the context of what it wrote.
+    assert history == [
+        {
+            "role": "assistant",
+            "content": "来了 🎨\n\ngenerate_image(\"16:9\")\nmessage(\"来了 🎨\")",
+        }
+    ]
 
 
 def test_get_history_respects_max_tokens(monkeypatch):
