@@ -80,6 +80,9 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -122,6 +125,14 @@ jobs:
         with:
           bun-version: 1.3.6
 
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('webui/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
       - name: Verify npm lockfile
         working-directory: webui
         run: npm ci --ignore-scripts --dry-run
@@ -141,6 +152,33 @@ jobs:
       - name: Build WebUI
         working-directory: webui
         run: bun run build
+
+  security:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Audit Python dependencies (pip-audit)
+        run: uv run --no-sync pip-audit
+
+      - name: Audit Python dependencies (osv-scanner)
+        uses: google/osv-scanner/actions/scanner@v1
+        with:
+          scan-args: |-
+            --lockfile=uv.lock
 
   docker:
     runs-on: ubuntu-latest
