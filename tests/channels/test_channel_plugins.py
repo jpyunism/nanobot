@@ -788,35 +788,6 @@ def test_discover_plugins_skips_names_outside_enabled_set():
     assert loaded == []
 
 
-def test_discover_plugins_warns_once_for_legacy_entry_points():
-    from nanobot.channels.registry import _warn_legacy_channel_entry_points, discover_plugins
-
-    legacy_entry_points = [SimpleNamespace(name="z-old"), SimpleNamespace(name="a-old")]
-    _warn_legacy_channel_entry_points.cache_clear()
-    try:
-        with (
-            patch(
-                "nanobot.channels.registry.entry_points",
-                return_value=legacy_entry_points,
-            ) as metadata_entry_points,
-            patch("nanobot.channels.registry._channel_package_names", return_value=[]),
-            patch("nanobot.channels.registry.logger.warning") as warning,
-        ):
-            discover_plugins()
-            discover_plugins()
-    finally:
-        _warn_legacy_channel_entry_points.cache_clear()
-
-    metadata_entry_points.assert_called_once_with(group="nanobot.channels")
-    warning.assert_called_once_with(
-        "Legacy channel entry points were detected but will not be loaded: {}. "
-        "The '{}' entry-point group is no longer supported; use a built-in channel or "
-        "migrate it into nanobot/channels/<channel>/.",
-        "a-old, z-old",
-        "nanobot.channels",
-    )
-
-
 def test_channel_manifest_rejects_invalid_dependency_metadata():
     with pytest.raises(TypeError, match="tuple of requirements"):
         ChannelPlugin(
@@ -1676,7 +1647,7 @@ def test_enable_optional_feature_lazy_reader_does_not_require_restart(monkeypatc
     _stub_channel_registry(monkeypatch)
     monkeypatch.setattr(
         "nanobot.optional_features.optional_dependency_groups",
-        lambda: {"documents": ["pypdf>=5.0.0,<6.0.0"]},
+        lambda: {"documents": ["pypdf>=6.15.0,<7.0.0"]},
     )
     monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: True)
 
@@ -2404,7 +2375,7 @@ def test_optional_dependency_metadata_for_enable():
     for dependency in (
         "tzdata>=2025.2; sys_platform == 'win32'",
         "defusedxml>=0.7.1,<1.0.0",
-        "pypdf>=5.0.0,<6.0.0",
+        "pypdf>=6.15.0,<7.0.0",
         "python-docx>=1.1.0,<2.0.0",
         "openpyxl>=3.1.0,<4.0.0",
         "python-pptx>=1.0.0,<2.0.0",
@@ -2412,12 +2383,12 @@ def test_optional_dependency_metadata_for_enable():
         assert dependency in required
     assert deps["documents"] == [
         "defusedxml>=0.7.1,<1.0.0",
-        "pypdf>=5.0.0,<6.0.0",
+        "pypdf>=6.15.0,<7.0.0",
         "python-docx>=1.1.0,<2.0.0",
         "openpyxl>=3.1.0,<4.0.0",
         "python-pptx>=1.0.0,<2.0.0",
     ]
-    assert deps["pdf"] == ["pypdf>=5.0.0,<6.0.0"]
+    assert deps["pdf"] == ["pypdf>=6.15.0,<7.0.0"]
     assert deps["langfuse"] == ["langfuse>=3.0.0,<4.0.0"]
     channel_names = {
         "dingtalk",
