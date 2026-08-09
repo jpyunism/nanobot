@@ -2975,3 +2975,117 @@ def test_bootstrap_secret_also_enforced_on_localhost(bus: MagicMock) -> None:
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
     resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_agenda_routes_crud(tmp_path: Path) -> None:
+    """The agenda HTTP routes create, list, fetch, update, and delete appointments."""
+    bus = MagicMock()
+    bus.publish_inbound = AsyncMock()
+    channel = _ch(bus, workspace_path=tmp_path, port=29940)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        auth = {"Authorization": f"Bearer {token}"}
+        data = {"X-Nanobot-Agenda-Data": json.dumps(
+            {"title": "Dentist", "date": "2026-08-10", "time": "09:30"}
+        )}
+        create = await _http_get("http://127.0.0.1:29940/api/agenda/create", headers={**auth, **data})
+        assert create.status_code == 201
+        appt = create.json()["appointment"]
+        appt_id = appt["id"]
+
+        listing = await _http_get("http://127.0.0.1:29940/api/agenda", headers=auth)
+        assert listing.status_code == 200
+        assert any(a["id"] == appt_id for a in listing.json()["appointments"])
+
+        fetched = await _http_get(
+            f"http://127.0.0.1:29940/api/agenda/{appt_id}", headers=auth
+        )
+        assert fetched.status_code == 200
+        assert fetched.json()["appointment"]["title"] == "Dentist"
+
+        update_data = {"X-Nanobot-Agenda-Data": json.dumps({"title": "Dentist Updated"})}
+        updated = await _http_get(
+            f"http://127.0.0.1:29940/api/agenda/{appt_id}/update",
+            headers={**auth, **update_data},
+        )
+        assert updated.status_code == 200
+        assert updated.json()["appointment"]["title"] == "Dentist Updated"
+
+        deleted = await _http_get(
+            f"http://127.0.0.1:29940/api/agenda/{appt_id}/delete", headers=auth
+        )
+        assert deleted.status_code == 200
+
+        listing2 = await _http_get("http://127.0.0.1:29940/api/agenda", headers=auth)
+        assert listing2.json()["appointments"] == []
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_agenda_routes_require_token(tmp_path: Path) -> None:
+    bus = MagicMock()
+    bus.publish_inbound = AsyncMock()
+    channel = _ch(bus, workspace_path=tmp_path, port=29941)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        resp = await _http_get("http://127.0.0.1:29941/api/agenda")
+        assert resp.status_code == 401
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_todo_routes_crud(tmp_path: Path) -> None:
+    """The todo HTTP routes create, list, fetch, itemize, and migrate."""
+    bus = MagicMock()
+    bus.publish_inbound = AsyncMock()
+    channel = _ch(bus, workspace_path=tmp_path, port=29942)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        auth = {"Authorization": f"Bearer {token}"}
+
+        create_data = {"X-Nanobot-Todo-Data": json.dumps({"name": "Groceries"})}
+        create = await _http_get(
+            "http://127.0.0.1:29942/api/todos/create", headers={**auth, **create_data}
+        )
+        assert create.status_code == 201
+        slug = create.json()["slug"]
+
+        listing = await _http_get("http://127.0.0.1:29942/api/todos", headers=auth)
+        assert listing.status_code == 200
+        assert any(entry["slug"] == slug for entry in listing.json()["lists"])
+
+        item_data = {"X-Nanobot-Todo-Data": json.dumps({"text": "Milk"})}
+        item = await _http_get(
+            f"http://127.0.0.1:29942/api/todos/{slug}/items", headers={**auth, **item_data}
+        )
+        assert item.status_code == 201
+
+        users = await _http_get("http://127.0.0.1:29942/api/todos/_users", headers=auth)
+        assert users.status_code == 200
+
+        migrate = await _http_get("http://127.0.0.1:29942/api/todos/migrate", headers=auth)
+        assert migrate.status_code == 200
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_todo_routes_require_token(tmp_path: Path) -> None:
+    bus = MagicMock()
+    bus.publish_inbound = AsyncMock()
+    channel = _ch(bus, workspace_path=tmp_path, port=29943)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        resp = await _http_get("http://127.0.0.1:29943/api/todos")
+        assert resp.status_code == 401
+    finally:
+        await channel.stop()
+        await server_task
