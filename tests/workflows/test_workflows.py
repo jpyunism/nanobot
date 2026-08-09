@@ -88,6 +88,20 @@ def _runner(tmp_path: Path) -> WorkflowRunner:
     )
 
 
+def _runner_with_builtins(tmp_path: Path) -> WorkflowRunner:
+    bus = MagicMock()
+    bus.publish_inbound = AsyncMock()
+    subagents = MagicMock()
+    subagents.run_inline = AsyncMock(side_effect=lambda task, **kw: f"[{task}]")
+    loader = WorkflowLoader(tmp_path)
+    return WorkflowRunner(
+        subagents=subagents,
+        bus=bus,
+        loader=loader,
+        workspace=tmp_path,
+    )
+
+
 async def _wait_done(runner: WorkflowRunner, timeout: float = 5.0) -> None:
     deadline = asyncio.get_event_loop().time() + timeout
     while runner._running and asyncio.get_event_loop().time() < deadline:
@@ -297,3 +311,80 @@ async def test_workflow_command_registered_on_router(tmp_path: Path) -> None:
     out = await router.dispatch(ctx)
     assert out is not None
     assert "Available workflows" in out.content or "No workflows available." in out.content
+
+
+async def _run_builtin(tmp_path: Path, name: str, args: dict[str, str]) -> str:
+    """Run a builtin workflow to completion and return the announced result text."""
+    runner = _runner_with_builtins(tmp_path)
+    runtime = MagicMock()
+    await runner.start(
+        name=name,
+        args=args,
+        runtime=runtime,
+        session_key="cli:direct",
+        channel="cli",
+        chat_id="direct",
+    )
+    await _wait_done(runner)
+    msg = runner.bus.publish_inbound.await_args.args[0]
+    return msg.content
+
+
+@pytest.mark.asyncio
+async def test_code_review_workflow_runs_parallel_reviews(tmp_path: Path) -> None:
+    content = await _run_builtin(tmp_path, "code_review", {"range": "HEAD~1..HEAD"})
+    assert "Workflow `code_review` completed successfully" in content
+    assert "CORRECTNESS:" in content
+    assert "SECURITY:" in content
+    assert "STYLE:" in content
+
+
+@pytest.mark.asyncio
+async def test_debug_issue_workflow_runs_phases(tmp_path: Path) -> None:
+    content = await _run_builtin(tmp_path, "debug_issue", {"symptom": "login fails"})
+    assert "Workflow `debug_issue` completed successfully" in content
+
+
+@pytest.mark.asyncio
+async def test_debug_issue_workflow_requires_symptom(tmp_path: Path) -> None:
+    content = await _run_builtin(tmp_path, "debug_issue", {})
+    assert "No symptom provided" in content
+
+
+@pytest.mark.asyncio
+async def test_feature_plan_workflow_runs_phases(tmp_path: Path) -> None:
+    content = await _run_builtin(tmp_path, "feature_plan", {"feature": "add dark mode"})
+    assert "Workflow `feature_plan` completed successfully" in content
+
+
+@pytest.mark.asyncio
+async def test_feature_plan_workflow_requires_feature(tmp_path: Path) -> None:
+    content = await _run_builtin(tmp_path, "feature_plan", {})
+    assert "No feature provided" in content
+
+
+@pytest.mark.asyncio
+async def test_generate_tests_workflow_runs_phases(tmp_path: Path) -> None:
+    content = await _run_builtin(tmp_path, "generate_tests", {"path": "nanobot/utils/helpers.py"})
+    assert "Workflow `generate_tests` completed successfully" in content
+
+
+@pytest.mark.asyncio
+async def test_generate_tests_workflow_requires_path(tmp_path: Path) -> None:
+    content = await _run_builtin(tmp_path, "generate_tests", {})
+    assert "No path provided" in content
+
+
+@pytest.mark.asyncio
+async def test_research_plan_workflow_runs_parallel(tmp_path: Path) -> None:
+    content = await _run_builtin(tmp_path, "research_plan", {"topic": "async internals"})
+    assert "Workflow `research_plan` completed successfully" in content
+    assert "BRIEF:" in content
+    assert "RISKS:" in content
+    assert "IMPLEMENTATION:" in content
+
+
+@pytest.mark.asyncio
+async def test_research_plan_workflow_requires_topic(tmp_path: Path) -> None:
+    content = await _run_builtin(tmp_path, "research_plan", {})
+    assert "No topic provided" in content
