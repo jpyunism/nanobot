@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
@@ -68,6 +68,7 @@ class ContextGovernanceConfig:
     context_block_limit: int | None = None
     max_tokens: int | None = None
     inflight_start_index: int = 0
+    on_snip: Callable[[list[dict[str, Any]], str | None], None] | None = None
 
 
 class ContextGovernor:
@@ -509,6 +510,16 @@ class ContextGovernor:
             kept.append(msg)
             kept_tokens += msg_tokens
         kept.reverse()
+
+        # ponytail: the tail-truncation drops messages from the model-facing
+        # copy. When a snip callback is wired, hand the dropped messages to it
+        # so they can be archived (LLM summary) instead of silently lost from
+        # the working context. The persisted transcript is untouched either way.
+        if config.on_snip is not None:
+            kept_ids = {id(m) for m in kept}
+            dropped = [m for m in non_system if id(m) not in kept_ids]
+            if dropped:
+                config.on_snip(dropped, config.session_key)
 
         return system_messages + self._legal_history_tail(kept, non_system)
 

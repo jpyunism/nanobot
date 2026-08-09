@@ -63,6 +63,10 @@ class ContextBuilder:
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
+        # Cache of the static system-prompt prefix, keyed by a signature of the
+        # source files' mtimes. Invalidated automatically when any of AGENTS.md,
+        # SOUL.md, USER.md, MEMORY.md, or a skill file changes.
+        self._static_prompt_cache: dict[tuple[str, str], tuple[str, str]] = {}
 
     def build_system_prompt(
         self,
@@ -77,6 +81,41 @@ class ContextBuilder:
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         root = workspace or self.workspace
+        static = self._static_prompt(root, channel)
+        parts = [static]
+
+        # Auto-load the research skill for ephemeral research surface chats.
+        if session_metadata and session_metadata.get("research"):
+            research_content = self.skills.load_skills_for_context(["research"])
+            if research_content:
+                parts.append(f"# Active Skills\n\n{research_content}")
+
+        if session_summary:
+            parts.append(f"[Archived Context Summary]\n\n{session_summary}")
+
+        if include_memory_recent_history and session_key:
+            recent = self._recent_consolidated_history(session_key, unified_session)
+            if recent:
+                parts.append(f"## Recent Consolidated History\n\n{recent}")
+
+        return "\n\n---\n\n".join(parts)
+
+    def _static_prompt(self, root: Path, channel: str | None) -> str:
+        """Build (and cache) the static system-prompt prefix.
+
+        The prefix depends only on files on disk (identity, bootstrap files,
+        memory, skills) plus the channel. It is cached keyed by a signature of
+        the source files' mtimes so repeated turns in a session skip the disk
+        I/O and template rendering. The research skill is excluded here because
+        it is selected per-turn from ``session_metadata``.
+        """
+        cache_key = (str(root), channel or "")
+        cached = self._static_prompt_cache.get(cache_key)
+        if cached is not None:
+            sig, text = cached
+            if sig == self._static_signature(root):
+                return text
+
         parts = [self._get_identity(channel=channel, workspace=root)]
 
         bootstrap = self._load_bootstrap_files(root)
@@ -90,11 +129,6 @@ class ContextBuilder:
             parts.append(f"# Memory\n\n{memory}")
 
         always_skills = self.skills.get_always_skills()
-        # Auto-load the research skill for ephemeral research surface chats.
-        if session_metadata and session_metadata.get("research"):
-            research_name = "research"
-            if research_name not in always_skills:
-                always_skills = [*always_skills, research_name]
         if always_skills:
             always_content = self.skills.load_skills_for_context(always_skills)
             if always_content:
@@ -104,10 +138,56 @@ class ContextBuilder:
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
-        if session_summary:
-            parts.append(f"[Archived Context Summary]\n\n{session_summary}")
+        text = "\n\n---\n\n".join(parts)
+        self._static_prompt_cache[cache_key] = (self._static_signature(root), text)
+        return text
 
-        return "\n\n---\n\n".join(parts)
+    def _static_signature(self, root: Path) -> str:
+        """Return a signature of the static prompt's source files' mtimes."""
+        paths = [
+            root / "AGENTS.md",
+            self.workspace / "SOUL.md",
+            self.workspace / "USER.md",
+            self.memory.memory_file,
+        ]
+        for skill_dir in (self.workspace / "skills", self.skills.builtin_skills):
+            if skill_dir.is_dir():
+                paths.extend(skill_dir.glob("*/SKILL.md"))
+        sig = []
+        for path in paths:
+            try:
+                sig.append(f"{path}:{path.stat().st_mtime_ns}")
+            except OSError:
+                sig.append(f"{path}:missing")
+        return "|".join(sig)
+
+    def _recent_consolidated_history(
+        self,
+        session_key: str,
+        unified_session: bool,
+    ) -> str:
+        """Render unprocessed consolidation summaries from history.jsonl.
+
+        These are the LLM-produced summaries written by ``Consolidator.archive``
+        that Dream has not yet folded into long-term memory. Injecting them keeps
+        the agent's working context continuous across compaction without waiting
+        for the next Dream cycle.
+        """
+        entries = self.memory.read_recent_history_for_prompt(
+            since_cursor=self.memory.get_last_dream_cursor(),
+            session_key=session_key,
+            unified_session=unified_session,
+        )
+        if not entries:
+            return ""
+        lines = []
+        for entry in entries:
+            content = entry.get("content", "")
+            if not isinstance(content, str) or not content.strip():
+                continue
+            ts = entry.get("timestamp", "")
+            lines.append(f"[{ts}] {content.strip()}")
+        return "\n\n".join(lines)
 
     def _get_identity(self, channel: str | None = None, workspace: Path | None = None) -> str:
         """Get the core identity section."""

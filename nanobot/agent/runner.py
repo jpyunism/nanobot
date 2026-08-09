@@ -125,6 +125,7 @@ class AgentRunSpec:
     goal_active_predicate: Callable[[], bool] | None = None
     goal_continue_message: GoalContinueMessage | None = None
     finalize_on_max_iterations: bool = True
+    on_snip: Callable[[list[dict[str, Any]], str | None], None] | None = None
 
 
 @dataclass(slots=True)
@@ -441,6 +442,7 @@ class AgentRunner:
             context_block_limit=spec.context_block_limit,
             max_tokens=spec.runtime.generation.max_tokens,
             inflight_start_index=len(spec.initial_messages),
+            on_snip=spec.on_snip,
         )
 
         for iteration in range(spec.max_iterations):

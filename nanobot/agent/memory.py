@@ -419,13 +419,37 @@ class MemoryStore:
         ]
 
     def compact_history(self) -> None:
-        """Drop oldest entries if the file exceeds *max_history_entries*."""
+        """Drop oldest entries if the file exceeds *max_history_entries*.
+
+        Entries are dropped by retention priority rather than blindly by age:
+        ``[skip]``/``[ephemeral]`` first, then ``[supplemental]``, then the
+        oldest of what remains. ``[critical]`` and ``[permanent]`` entries are
+        never dropped, so compaction cannot silently discard the most valuable
+        consolidated facts.
+        """
         if self.max_history_entries <= 0:
             return
         entries = self._read_entries()
         if len(entries) <= self.max_history_entries:
             return
-        kept = entries[-self.max_history_entries:]
+
+        def _priority(entry: dict[str, Any]) -> int:
+            content = entry.get("content", "")
+            if not isinstance(content, str):
+                return 0
+            if "[critical]" in content or "[permanent]" in content:
+                return 3
+            if "[skip]" in content or "[ephemeral]" in content:
+                return 0
+            if "[supplemental]" in content:
+                return 1
+            return 2
+
+        # Stable sort by priority ascending (drop lowest first), then by age.
+        ordered = sorted(enumerate(entries), key=lambda e: (_priority(e[1]), e[0]))
+        to_drop = len(entries) - self.max_history_entries
+        drop_indices = {idx for idx, _ in ordered[:to_drop]}
+        kept = [e for idx, e in enumerate(entries) if idx not in drop_indices]
         self._write_entries(kept)
 
     # -- JSONL helpers -------------------------------------------------------

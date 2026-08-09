@@ -379,7 +379,7 @@ class AgentLoop:
 
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
-        self.sessions.set_file_cap_archiver(self.context.memory.raw_archive)
+        self.sessions.set_file_cap_archiver(self._archive_file_cap)
         self.tools = ToolRegistry()
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
@@ -1091,6 +1091,7 @@ class AgentLoop:
                     session_metadata=session_metadata,
                     message_metadata=metadata,
                 ),
+                on_snip=self._archive_sniped,
             ))
         finally:
             turn_scope_stack.close()
@@ -1397,6 +1398,72 @@ class AgentLoop:
         task = asyncio.create_task(coro)
         self._background_tasks.append(task)
         task.add_done_callback(self._background_tasks.remove)
+
+    def _archive_file_cap(self, messages: list[dict], *, session_key: str | None = None) -> None:
+        """Archive file-cap overflow with an LLM summary instead of a raw dump.
+
+        Called synchronously from ``SessionManager.save()`` (via
+        ``enforce_file_cap``), so the LLM summarization is scheduled as a
+        background task. ``Consolidator.archive`` already falls back to
+        ``raw_archive`` when the LLM call fails, so no context is lost even if
+        the provider is degraded.
+        """
+        if not messages:
+            return
+        try:
+            session = self.sessions.get_or_create(session_key) if session_key else None
+            runtime = self.runtime_for_session(session) if session is not None else self.llm_runtime()
+        except Exception:
+            logger.warning(
+                "File-cap archive: could not resolve runtime for {}; raw-archiving",
+                session_key,
+                exc_info=True,
+            )
+            self.context.memory.raw_archive(messages, session_key=session_key)
+            return
+        self._schedule_background(
+            self._archive_with_llm(messages, runtime=runtime, session_key=session_key)
+        )
+
+    def _archive_sniped(self, messages: list[dict], session_key: str | None = None) -> None:
+        """Archive messages dropped by in-flight context snip with an LLM summary.
+
+        ``snip_history`` truncates the model-facing copy when the prompt would
+        overflow. The persisted transcript is untouched, but without archiving
+        the dropped messages would never reach the LLM again. Schedule the same
+        LLM-summarizing archive used by file-cap overflow; ``Consolidator.archive``
+        falls back to ``raw_archive`` if the provider is degraded.
+        """
+        if not messages:
+            return
+        try:
+            session = self.sessions.get_or_create(session_key) if session_key else None
+            runtime = self.runtime_for_session(session) if session is not None else self.llm_runtime()
+        except Exception:
+            logger.warning(
+                "Snip archive: could not resolve runtime for {}; raw-archiving",
+                session_key,
+                exc_info=True,
+            )
+            self.context.memory.raw_archive(messages, session_key=session_key)
+            return
+        self._schedule_background(
+            self._archive_with_llm(messages, runtime=runtime, session_key=session_key)
+        )
+
+    async def _archive_with_llm(
+        self,
+        messages: list[dict],
+        *,
+        runtime: LLMRuntime,
+        session_key: str | None,
+    ) -> None:
+        """Run the LLM archive, tolerating a non-awaitable consolidator (tests)."""
+        result = self.consolidator.archive(messages, runtime=runtime, session_key=session_key)
+        if asyncio.iscoroutine(result):
+            await result
+        else:
+            self.context.memory.raw_archive(messages, session_key=session_key)
 
     def stop(self) -> None:
         """Stop the agent loop."""
@@ -1828,7 +1895,7 @@ class AgentLoop:
         ctx.delivery.record_latency(ctx.turn_latency_ms)
         if not ctx.ephemeral:
             ctx.session.enforce_file_cap(
-                on_archive=partial(self.context.memory.raw_archive, session_key=ctx.session_key)
+                on_archive=partial(self._archive_file_cap, session_key=ctx.session_key)
             )
         self._clear_pending_user_turn(ctx.session)
         self._clear_runtime_checkpoint(ctx.session)
