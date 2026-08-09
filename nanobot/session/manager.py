@@ -486,14 +486,6 @@ class SessionManager:
         """Get the collision-resistant workspace path for a session."""
         return self.sessions_dir / f"{self._storage_key(key)}.jsonl"
 
-    def _get_legacy_lossy_path(self, key: str) -> Path:
-        """Previous workspace session path using lossy ':' to '_' replacement."""
-        return self.sessions_dir / f"{safe_filename(key.replace(':', '_'))}.jsonl"
-
-    def _get_legacy_session_path(self, key: str) -> Path:
-        """Legacy global session path (~/.nanobot/sessions/)."""
-        return self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
-
     @staticmethod
     def _stored_key_for_path(path: Path) -> str | None:
         """Read the stored session key from a JSONL metadata row, if present."""
@@ -548,39 +540,9 @@ class SessionManager:
         return migrated
 
     def _resolve_session_path(self, key: str, *, migrate: bool = False) -> Path | None:
-        """Resolve a session path, falling back to legacy storage locations."""
+        """Resolve the current storage path for a session, if it exists."""
         path = self._get_session_path(key)
-        if path.exists():
-            return path
-
-        # TODO(v0.3.1): Remove both legacy fallbacks. v0.3.0 is the final
-        # compatibility window for reading and lazily migrating legacy session files.
-        fallback_paths = [
-            (self._get_legacy_lossy_path(key), "legacy lossy path"),
-            (self._get_legacy_session_path(key), "legacy path"),
-        ]
-        for fallback_path, description in fallback_paths:
-            if not fallback_path.exists():
-                continue
-            stored_key = self._stored_key_for_path(fallback_path)
-            if stored_key and stored_key != key:
-                logger.info(
-                    "Skipping session {} from {} because it belongs to {}",
-                    key,
-                    description,
-                    stored_key,
-                )
-                continue
-            if not migrate:
-                return fallback_path
-            try:
-                shutil.move(str(fallback_path), str(path))
-                logger.info("Migrated session {} from {}", key, description)
-            except Exception:
-                logger.exception("Failed to migrate session {}", key)
-                return None
-            return path
-        return None
+        return path if path.exists() else None
 
     def get_or_create(self, key: str) -> Session:
         """
@@ -802,26 +764,20 @@ class SessionManager:
         self._overflow_cache.pop(key, None)
 
     def delete_session(self, key: str) -> bool:
-        """Remove a session from disk (both workspace and legacy locations) and cache.
+        """Remove a session from disk and cache.
 
-        Returns True if at least one JSONL file was found and unlinked.
+        Returns True if the JSONL file was found and unlinked.
         """
-        paths = [
-            self._get_session_path(key),
-            self._get_legacy_lossy_path(key),
-            self._get_legacy_session_path(key),
-        ]
+        path = self._get_session_path(key)
         self.invalidate(key)
-        deleted = False
-        for path in paths:
-            if not path.exists():
-                continue
-            try:
-                path.unlink()
-                deleted = True
-            except OSError as e:
-                logger.warning("Failed to delete session file {}: {}", path, e)
-        return deleted
+        if not path.exists():
+            return False
+        try:
+            path.unlink()
+            return True
+        except OSError as e:
+            logger.warning("Failed to delete session file {}: {}", path, e)
+            return False
 
     def fork_session_before_user_index(
         self,
