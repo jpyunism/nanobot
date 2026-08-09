@@ -514,6 +514,39 @@ class SessionManager:
             return None
         return None
 
+    def migrate_legacy_sessions(self) -> int:
+        """Eagerly move any legacy session files into the current storage layout.
+
+        Scans the legacy global session dir (``~/.nanobot/sessions/``) and any
+        lossy-stemmed files still sitting in the workspace ``sessions_dir``,
+        moving each into its collision-resistant ``<base64url>.jsonl`` path.
+        Idempotent: a file whose target already exists is left untouched.
+        Returns the number of files migrated.
+        """
+        migrated = 0
+        candidates: list[Path] = []
+        if self.legacy_sessions_dir.is_dir():
+            candidates.extend(self.legacy_sessions_dir.glob("*.jsonl"))
+        for path in self.sessions_dir.glob("*.jsonl"):
+            if self._decode_storage_key(path.stem) is None:
+                candidates.append(path)
+        for source in candidates:
+            key = self._stored_key_for_path(source)
+            if not key:
+                logger.debug("Skipping legacy session file without a stored key: {}", source)
+                continue
+            target = self._get_session_path(key)
+            if target.exists():
+                logger.debug("Skipping legacy session {} (target already exists)", key)
+                continue
+            try:
+                shutil.move(str(source), str(target))
+                logger.info("Migrated session {} from {}", key, source)
+                migrated += 1
+            except Exception:
+                logger.exception("Failed to migrate session {} from {}", key, source)
+        return migrated
+
     def _resolve_session_path(self, key: str, *, migrate: bool = False) -> Path | None:
         """Resolve a session path, falling back to legacy storage locations."""
         path = self._get_session_path(key)

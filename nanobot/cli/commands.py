@@ -1413,6 +1413,7 @@ def serve(
     sync_workspace_templates(runtime_config.workspace_path)
     bus = MessageBus()
     session_manager = SessionManager(runtime_config.workspace_path)
+    session_manager.migrate_legacy_sessions()
     try:
         agent_loop = AgentLoop.from_config(
             runtime_config, bus,
@@ -1762,6 +1763,7 @@ def _run_gateway(
             raise typer.Exit(1) from exc
     session_manager = SessionManager(config.workspace_path)
     _cleanup_orphan_webui_transcripts(session_manager, config.workspace_path)
+    session_manager.migrate_legacy_sessions()
 
     # Self-heal the gateway state file with the current PID after any restart.
     from nanobot.config.loader import get_config_path

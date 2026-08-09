@@ -168,3 +168,55 @@ def test_storage_paths_are_distinct_when_keys_collide_under_safe_key(
     assert loaded_second is not None
     assert loaded_first.messages[0]["content"] == "underscore history"
     assert loaded_second.messages[0]["content"] == "colon history"
+
+
+def test_migrate_legacy_sessions_moves_global_legacy_file(tmp_path: Path, monkeypatch) -> None:
+    sm = _manager(tmp_path, monkeypatch)
+    legacy_dir = tmp_path / "legacy_sessions"
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+    legacy_file = legacy_dir / f"{sm.safe_key('telegram:12345')}.jsonl"
+    _write_session_file(legacy_file, "telegram:12345", "legacy history")
+
+    assert sm.migrate_legacy_sessions() == 1
+    assert not legacy_file.exists()
+    assert sm._get_session_path("telegram:12345").exists()
+    loaded = sm._load("telegram:12345")
+    assert loaded is not None
+    assert loaded.messages[0]["content"] == "legacy history"
+
+
+def test_migrate_legacy_sessions_moves_lossy_workspace_file(tmp_path: Path, monkeypatch) -> None:
+    sm = _manager(tmp_path, monkeypatch)
+    lossy_file = sm.sessions_dir / f"{sm.safe_key('websocket:abc')}.jsonl"
+    _write_session_file(lossy_file, "websocket:abc", "lossy history")
+
+    assert sm.migrate_legacy_sessions() == 1
+    assert not lossy_file.exists()
+    assert sm._get_session_path("websocket:abc").exists()
+
+
+def test_migrate_legacy_sessions_is_idempotent(tmp_path: Path, monkeypatch) -> None:
+    sm = _manager(tmp_path, monkeypatch)
+    legacy_dir = tmp_path / "legacy_sessions"
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+    legacy_file = legacy_dir / f"{sm.safe_key('telegram:12345')}.jsonl"
+    _write_session_file(legacy_file, "telegram:12345", "legacy history")
+
+    assert sm.migrate_legacy_sessions() == 1
+    assert sm.migrate_legacy_sessions() == 0
+    assert sm._get_session_path("telegram:12345").exists()
+
+
+def test_migrate_legacy_sessions_skips_when_target_exists(tmp_path: Path, monkeypatch) -> None:
+    sm = _manager(tmp_path, monkeypatch)
+    legacy_dir = tmp_path / "legacy_sessions"
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+    legacy_file = legacy_dir / f"{sm.safe_key('telegram:12345')}.jsonl"
+    _write_session_file(legacy_file, "telegram:12345", "legacy history")
+    _write_session_file(sm._get_session_path("telegram:12345"), "telegram:12345", "newer history")
+
+    assert sm.migrate_legacy_sessions() == 0
+    assert legacy_file.exists()
+    loaded = sm._load("telegram:12345")
+    assert loaded is not None
+    assert loaded.messages[0]["content"] == "newer history"
