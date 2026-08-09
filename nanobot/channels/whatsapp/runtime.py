@@ -69,6 +69,7 @@ class _NeonizeAPI(NamedTuple):
     StreamErrorEv: Any
     build_jid: Any
     Message: Any
+    ExtendedTextMessage: Any
 
 
 class _MediaInfo(NamedTuple):
@@ -110,7 +111,7 @@ def _load_neonize() -> _NeonizeAPI:
             PairStatusEv,
             StreamErrorEv,
         )
-        from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import Message
+        from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import ExtendedTextMessage, Message
         from neonize.utils.jid import build_jid
     except ImportError as exc:
         raise RuntimeError(
@@ -130,6 +131,7 @@ def _load_neonize() -> _NeonizeAPI:
         StreamErrorEv=StreamErrorEv,
         build_jid=build_jid,
         Message=Message,
+        ExtendedTextMessage=ExtendedTextMessage,
     )
     return _NEONIZE_API
 
@@ -833,12 +835,16 @@ class WhatsAppChannel(BaseChannel):
             content = f"{mention} {content}"
         try:
             if content:
-                # Pass a pre-built Message(conversation=...) so neonize skips its
-                # live _parse_group_mention / _generate_link_preview (both do
-                # get_group_info() network calls that fail silently under a
-                # "live but silent" reconnect, dropping the send). Build it here
-                # so text with a mention prefix still becomes plain conversation.
-                msg_obj = _load_neonize().Message(conversation=content)
+                # Send text as a typed extendedTextMessage instead of the plain
+                # `conversation` field. WhatsApp silently drops `conversation`
+                # in group chats, while typed fields (extendedTextMessage,
+                # audioMessage, ...) are delivered reliably — the same path the
+                # media senders use. Build it here so the mention prefix above
+                # still lands in the text.
+                api = _load_neonize()
+                msg_obj = api.Message(
+                    extendedTextMessage=api.ExtendedTextMessage(text=content)
+                )
                 await client.send_message(to, msg_obj)
         except Exception as exc:
             cls_name = type(exc).__name__

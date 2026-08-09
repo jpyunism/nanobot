@@ -54,7 +54,7 @@ def _jid(user: str, server: str) -> _Proto:
 
 
 def _message_with_conversation(content: str) -> _Proto:
-    return _Proto(conversation=content)
+    return _Proto(extendedTextMessage=_Proto(text=content))
 
 
 def _event(
@@ -121,6 +121,7 @@ def _patch_neonize_api(monkeypatch) -> None:
             StreamErrorEv=object(),
             build_jid=lambda user, server="s.whatsapp.net": (user, server),
             Message=lambda **kw: _Proto(**kw),
+            ExtendedTextMessage=lambda **kw: _Proto(**kw),
         ),
     )
 
@@ -1530,7 +1531,7 @@ async def test_unauthorized_dm_uses_base_pairing_flow(monkeypatch) -> None:
     client.download_any.assert_not_awaited()
     client.send_message.assert_awaited_once()
     assert client.send_message.await_args.args[0] == ("blocked", "s.whatsapp.net")
-    assert "ABCD-EFGH" in client.send_message.await_args.args[1].conversation
+    assert "ABCD-EFGH" in client.send_message.await_args.args[1].extendedTextMessage.text
 
 
 def test_reset_database_removes_sqlite_sidecars(tmp_path) -> None:
