@@ -50,7 +50,7 @@ class RemoteInfo:
     date: str | None
 
 
-def _run(cmd: list[str], *, check: bool = False, capture: bool = True) -> subprocess.CompletedProcess:
+def _run(cmd: list[str], *, check: bool = False, capture: bool = True, cwd: str | None = None) -> subprocess.CompletedProcess:
     """Run a subprocess, returning the result without raising on failure."""
     try:
         return subprocess.run(
@@ -58,6 +58,7 @@ def _run(cmd: list[str], *, check: bool = False, capture: bool = True) -> subpro
             check=check,
             capture_output=capture,
             text=True,
+            cwd=cwd,
         )
     except FileNotFoundError:
         return subprocess.CompletedProcess(cmd, 127, "", "command not found")
