@@ -6,6 +6,7 @@ import asyncio
 import dataclasses
 import os
 import time
+import weakref
 from collections.abc import Mapping
 from contextlib import AbstractContextManager, ExitStack, nullcontext, suppress
 from dataclasses import dataclass, field, replace
@@ -418,7 +419,9 @@ class AgentLoop:
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
         self._archive_tasks: list[asyncio.Task] = []
-        self._session_locks: dict[str, asyncio.Lock] = {}
+        self._session_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
+            weakref.WeakValueDictionary()
+        )
         # Per-session pending queues for mid-turn message injection.
         # When a session has an active task, new messages for that session
         # are routed here instead of creating a new task.
@@ -834,7 +837,7 @@ class AgentLoop:
 
         Returns the total number of cancelled tasks + subagents.
         """
-        tasks = self._active_tasks.pop(key, [])
+        tasks = tuple(self._active_tasks.pop(key, []))
         cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
         for t in tasks:
             with suppress(asyncio.CancelledError, Exception):
@@ -1249,7 +1252,7 @@ class AgentLoop:
         session_key = self._effective_session_key(msg)
         if session_key != msg.session_key:
             msg = dataclasses.replace(msg, session_key_override=session_key)
-        lock = self._session_locks.setdefault(session_key, asyncio.Lock())
+        lock = self._get_session_lock(session_key)
         gate = self._concurrency_gate or nullcontext()
 
         delivery = self.turn_delivery_factory.unrouted(msg, session_key)
@@ -1402,6 +1405,14 @@ class AgentLoop:
         task = asyncio.create_task(coro)
         self._background_tasks.append(task)
         task.add_done_callback(self._background_tasks.remove)
+
+    def _get_session_lock(self, session_key: str) -> asyncio.Lock:
+        """Return the shared lock while allowing idle session entries to expire."""
+        lock = self._session_locks.get(session_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._session_locks[session_key] = lock
+        return lock
 
     def _schedule_archive(self, coro) -> None:
         """Schedule an archive task, tracked so callers can await completion."""
@@ -2440,7 +2451,7 @@ class AgentLoop:
             content=content, media=media or [], metadata=metadata,
         )
         # Share the dispatch lock so direct calls serialize with bus turns.
-        lock = self._session_locks.setdefault(session_key, asyncio.Lock())
+        lock = self._get_session_lock(session_key)
         try:
             async with lock:
                 kwargs: dict[str, Any] = {

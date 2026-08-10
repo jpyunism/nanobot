@@ -821,6 +821,8 @@ class EditFileTool(_FsTool):
     def description(self) -> str:
         return (
             "Exact text replacement in one file: old_text → new_text. "
+            "When replacing text in an existing file, old_text and new_text "
+            "must be different. "
             "For multi-file/structural edits use apply_patch. "
             "Use occurrence/line_hint/replace_all for multiple matches."
         )
@@ -851,9 +853,12 @@ class EditFileTool(_FsTool):
                 return ToolResult.error("Error: expected_replacements must be >= 1.")
 
             fp = self._resolve_write(path)
+            file_exists = fp.exists()
+            if file_exists and old_text == new_text:
+                return ToolResult.error("Error: new_text must be different from old_text.")
 
             # Create-file semantics: old_text='' + file doesn't exist → create
-            if not fp.exists():
+            if not file_exists:
                 if old_text == "":
                     fp.parent.mkdir(parents=True, exist_ok=True)
                     fp.write_text(new_text, encoding="utf-8")
