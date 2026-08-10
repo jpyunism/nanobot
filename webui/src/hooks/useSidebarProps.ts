@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { ChatSummary, SidebarStatePayload, WorkspacesPayload } from "@/lib/types";
+import type { ChatSummary, ProjectSummary, SidebarStatePayload, WorkspacesPayload } from "@/lib/types";
 import type { ActionsApi } from "@/hooks/useChatActions";
 import { useProjectNames } from "@/hooks/useProjectNames";
 
@@ -18,6 +18,8 @@ type Args = {
   onOpenTodos: () => void;
   onOpenAgenda: () => void;
   onOpenResearch: () => void;
+  projects: ProjectSummary[];
+  onOpenProject: (id: string | null) => void;
   token: string;
 };
 
@@ -36,6 +38,8 @@ export function useSidebarProps({
   onOpenTodos,
   onOpenAgenda,
   onOpenResearch,
+  projects,
+  onOpenProject,
   token,
 }: Args) {
   const projectNameOverrides = useProjectNames(
@@ -64,6 +68,8 @@ export function useSidebarProps({
       onOpenTodos,
       onOpenAgenda,
       onOpenResearch,
+      projects,
+      onOpenProject,
       onSettingsIntent: utility.onSettingsIntent,
       onOpenSearch: chatActions.onOpenSessionSearch,
       activeUtility:
@@ -103,6 +109,8 @@ export function useSidebarProps({
       onOpenTodos,
       onOpenAgenda,
       onOpenResearch,
+      projects,
+      onOpenProject,
       projectNameOverrides,
     ],
   );

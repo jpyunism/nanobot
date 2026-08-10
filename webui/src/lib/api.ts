@@ -1123,9 +1123,11 @@ export async function fetchWorkspaceList(
   token: string,
   path: string,
   base: string = "",
+  chatId?: string,
 ): Promise<WorkspaceListPayload> {
   const query = new URLSearchParams();
   if (path) query.set("path", path);
+  if (chatId) query.set("chat_id", chatId);
   return request<WorkspaceListPayload>(
     `${base}/api/workspace-browser/list?${query}`,
     token,
@@ -1139,9 +1141,11 @@ export async function fetchWorkspaceRead(
   path: string,
   base: string = "",
   signal?: AbortSignal,
+  chatId?: string,
 ): Promise<WorkspaceReadPayload> {
   const query = new URLSearchParams();
   query.set("path", path);
+  if (chatId) query.set("chat_id", chatId);
   return request<WorkspaceReadPayload>(
     `${base}/api/workspace-browser/read?${query}`,
     token,
@@ -1155,9 +1159,12 @@ export async function writeWorkspaceFile(
   path: string,
   content: string,
   base: string = "",
+  chatId?: string,
 ): Promise<{ success?: boolean; error?: string }> {
+  const query = new URLSearchParams();
+  if (chatId) query.set("chat_id", chatId);
   return request<{ success?: boolean; error?: string }>(
-    `${base}/api/workspace-browser/write`,
+    `${base}/api/workspace-browser/write?${query}`,
     token,
     {
       method: "GET",
@@ -1174,9 +1181,12 @@ export async function renameWorkspaceEntry(
   oldPath: string,
   newName: string,
   base: string = "",
+  chatId?: string,
 ): Promise<{ success?: boolean; error?: string }> {
+  const query = new URLSearchParams();
+  if (chatId) query.set("chat_id", chatId);
   return request<{ success?: boolean; error?: string }>(
-    `${base}/api/workspace-browser/rename`,
+    `${base}/api/workspace-browser/rename?${query}`,
     token,
     {
       method: "GET",
@@ -1193,9 +1203,12 @@ export async function moveWorkspaceEntry(
   sourcePath: string,
   destPath: string,
   base: string = "",
+  chatId?: string,
 ): Promise<{ success?: boolean; error?: string }> {
+  const query = new URLSearchParams();
+  if (chatId) query.set("chat_id", chatId);
   return request<{ success?: boolean; error?: string }>(
-    `${base}/api/workspace-browser/move`,
+    `${base}/api/workspace-browser/move?${query}`,
     token,
     {
       method: "GET",
@@ -1211,9 +1224,12 @@ export async function deleteWorkspaceEntry(
   token: string,
   path: string,
   base: string = "",
+  chatId?: string,
 ): Promise<{ success?: boolean; error?: string }> {
+  const query = new URLSearchParams();
+  if (chatId) query.set("chat_id", chatId);
   return request<{ success?: boolean; error?: string }>(
-    `${base}/api/workspace-browser/delete`,
+    `${base}/api/workspace-browser/delete?${query}`,
     token,
     {
       method: "GET",
@@ -1229,9 +1245,12 @@ export async function createWorkspaceDirectory(
   token: string,
   path: string,
   base: string = "",
+  chatId?: string,
 ): Promise<{ success?: boolean; error?: string }> {
+  const query = new URLSearchParams();
+  if (chatId) query.set("chat_id", chatId);
   return request<{ success?: boolean; error?: string }>(
-    `${base}/api/workspace-browser/mkdir`,
+    `${base}/api/workspace-browser/mkdir?${query}`,
     token,
     {
       method: "GET",
@@ -1248,9 +1267,12 @@ export async function copyWorkspaceEntry(
   sourcePath: string,
   destPath: string,
   base: string = "",
+  chatId?: string,
 ): Promise<{ success?: boolean; error?: string }> {
+  const query = new URLSearchParams();
+  if (chatId) query.set("chat_id", chatId);
   return request<{ success?: boolean; error?: string }>(
-    `${base}/api/workspace-browser/copy`,
+    `${base}/api/workspace-browser/copy?${query}`,
     token,
     {
       method: "GET",
@@ -1267,9 +1289,11 @@ export async function fetchWorkspaceFileBlob(
   path: string,
   base: string = "",
   signal?: AbortSignal,
+  chatId?: string,
 ): Promise<Blob> {
   const query = new URLSearchParams();
   query.set("path", path);
+  if (chatId) query.set("chat_id", chatId);
   const url = `${base}/api/workspace-browser/raw?${query}`;
   const res = await fetchWithTimeout(
     url,

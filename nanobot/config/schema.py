@@ -113,6 +113,7 @@ class AgentDefaults(Base):
     """Default agent configuration."""
 
     workspace: str = "~/.nanobot/workspace"
+    worktree_root: str = "~/.nanobot/worktrees"  # Root dir for git worktrees created by the WebUI kanban
     model_preset: str | None = None  # Active preset name — takes precedence over fields below
     model: str = "anthropic/claude-opus-4-5"
     provider: str = (
@@ -443,6 +444,11 @@ class Config(BaseSettings):
     def workspace_path(self) -> Path:
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
+
+    @property
+    def worktree_root_path(self) -> Path:
+        """Get expanded git worktree root path."""
+        return Path(self.agents.defaults.worktree_root).expanduser()
 
     def _match_provider(
         self, model: str | None = None,

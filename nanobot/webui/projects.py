@@ -61,6 +61,9 @@ class ProjectFolder:
 
 _PROJECTS_DIRNAME = "projects"
 _FILES_DIRNAME = "files"
+_BOARD_FILENAME = "board.json"
+
+_DEFAULT_COLUMNS = ["Backlog", "In Progress", "Review", "Done"]
 
 
 def _slugify_id(raw: str) -> str:
@@ -96,6 +99,31 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def _extract_json_object(text: str) -> dict[str, Any]:
+    """Parse a JSON object from a model reply that may include surrounding text.
+
+    Tries ``json.loads`` on the raw text first, then extracts the first ``{...}``
+    block. Returns {} on failure.
+    """
+    text = (text or "").strip()
+    if not text:
+        return {}
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, ValueError):
+        pass
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return {}
+    try:
+        data = json.loads(text[start : end + 1])
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, ValueError):
+        return {}
+
+
 def _decode_data_url(data_url: str) -> tuple[bytes, str]:
     """Parse ``data:<mime>;base64,<payload>`` into (bytes, mime_type)."""
     if not isinstance(data_url, str) or not data_url.startswith("data:"):
@@ -115,9 +143,12 @@ def _decode_data_url(data_url: str) -> tuple[bytes, str]:
 class WebUIProjectsController:
     """CRUD for project capsules + file storage under ``<data_dir>/webui/projects/``."""
 
-    def __init__(self, data_dir: Path) -> None:
+    def __init__(self, data_dir: Path, worktree_root: Path | None = None) -> None:
         self._root = (data_dir / _PROJECTS_DIRNAME).resolve(strict=False)
         self._root.mkdir(parents=True, exist_ok=True)
+        self._worktree_root = (
+            worktree_root.resolve(strict=False) if worktree_root is not None else None
+        )
 
     def _project_dir(self, project_id: str) -> Path:
         return self._root / project_id
@@ -125,10 +156,87 @@ class WebUIProjectsController:
     def _files_dir(self, project_id: str) -> Path:
         return self._project_dir(project_id) / _FILES_DIRNAME
 
+    def files_dir_for(self, project_id: str) -> Path:
+        """Public accessor for a project's uploaded-files directory."""
+        return self._files_dir(project_id)
+
+    def extra_read_dirs_for(self, project_id: str) -> tuple[Path, ...]:
+        """Read-only roots for a project: uploaded-files dir + associated folders.
+
+        These are exposed to the agent (via ``read_file`` / ``exec``) so it can
+        reach project files while still being confined to the workspace.
+        """
+        roots: list[Path] = []
+        fdir = self._files_dir(project_id)
+        if fdir.is_dir():
+            roots.append(fdir.resolve(strict=False))
+        for folder in self.list_folders(project_id):
+            try:
+                p = Path(folder.path).expanduser().resolve(strict=False)
+            except (OSError, ValueError, RuntimeError):
+                continue
+            if p.is_dir():
+                roots.append(p)
+        return tuple(roots)
+
+    def migrate_worktrees(self) -> dict[str, int]:
+        """Move legacy global-scoped worktrees into per-project subdirs.
+
+        Legacy cards used ``<worktree_root>/<card_id>``; the new layout is
+        ``<worktree_root>/<project_id>/<card_id>``. Rewrites each card's
+        ``worktree_path`` in ``board.json`` and moves the worktree on disk.
+        Skips cards with a running subagent (would break its cwd). Returns
+        ``{"moved": n, "skipped": n}``.
+        """
+        from nanobot.webui.worktrees import move_worktree
+
+        root = self._worktree_root or Path("~/.nanobot/worktrees").expanduser()
+        moved = 0
+        skipped = 0
+        for child in sorted(self._root.iterdir()):
+            if not child.is_dir() or not (child / "project.json").is_file():
+                continue
+            project_id = child.name
+            board = self.get_board(project_id)
+            repo_path = board.get("repo_path")
+            if not repo_path:
+                continue
+            new_parent = root / project_id
+            changed = False
+            for card in board.get("cards", []):
+                wt = card.get("worktree_path")
+                if not wt:
+                    continue
+                old = Path(wt)
+                # Already scoped per-project? Skip.
+                if old.parent == new_parent:
+                    continue
+                if not old.is_dir():
+                    continue
+                if card.get("subagent_task_id"):
+                    skipped += 1
+                    continue
+                new_path = new_parent / old.name
+                if new_path.exists():
+                    skipped += 1
+                    continue
+                try:
+                    move_worktree(Path(repo_path).expanduser(), old, new_path)
+                    card["worktree_path"] = str(new_path)
+                    changed = True
+                    moved += 1
+                except Exception:
+                    skipped += 1
+            if changed:
+                self._write_board(project_id, board)
+                self._touch_project(project_id)
+        return {"moved": moved, "skipped": skipped}
+
     def _meta_path(self, project_id: str) -> Path:
         return self._project_dir(project_id) / "project.json"
 
     def _file_meta_path(self, project_id: str, file_id: str) -> Path:
+        return self._files_dir(project_id) / f"{file_id}.meta.json"
         return self._files_dir(project_id) / f"{file_id}.meta.json"
 
     def _file_data_path(self, project_id: str, file_id: str) -> Path:
@@ -136,6 +244,9 @@ class WebUIProjectsController:
 
     def _folders_path(self, project_id: str) -> Path:
         return self._project_dir(project_id) / "folders.json"
+
+    def _board_path(self, project_id: str) -> Path:
+        return self._project_dir(project_id) / _BOARD_FILENAME
 
     def list_projects(self) -> list[ProjectSummary]:
         out: list[ProjectSummary] = []
@@ -351,6 +462,362 @@ class WebUIProjectsController:
             },
         )
 
+    # ---- Board (kanban of worktrees) ----
+
+    def get_board(self, project_id: str) -> dict[str, Any]:
+        """Return the board for a project, or None-ish empty dict if unset."""
+        if not self._meta_path(project_id).is_file():
+            raise ProjectError(f"project not found: {project_id}")
+        return _read_json(self._board_path(project_id))
+
+    def setup_board(self, project_id: str, repo_path: str) -> dict[str, Any]:
+        """Initialize a board for a project pointing at a git repo."""
+        if not self._meta_path(project_id).is_file():
+            raise ProjectError(f"project not found: {project_id}")
+        clean = (repo_path or "").strip()
+        if not clean:
+            raise ProjectError("repo path is required")
+        board = self.get_board(project_id)
+        if board.get("repo_path"):
+            raise ProjectError("board already configured")
+        board["repo_path"] = clean
+        board["columns"] = [
+            {"id": _slugify_id(name), "name": name} for name in _DEFAULT_COLUMNS
+        ]
+        board["cards"] = []
+        self._write_board(project_id, board)
+        self._touch_project(project_id)
+        return board
+
+    def add_column(self, project_id: str, name: str) -> dict[str, Any]:
+        board = self.get_board(project_id)
+        if not board.get("repo_path"):
+            raise ProjectError("board not configured")
+        clean = (name or "").strip()
+        if not clean:
+            raise ProjectError("column name is required")
+        col = {"id": _slugify_id(clean), "name": clean}
+        board.setdefault("columns", []).append(col)
+        self._write_board(project_id, board)
+        self._touch_project(project_id)
+        return col
+
+    def remove_column(self, project_id: str, column_id: str) -> None:
+        board = self.get_board(project_id)
+        cols = board.get("columns", [])
+        remaining = [c for c in cols if c.get("id") != column_id]
+        if len(remaining) == len(cols):
+            raise ProjectError(f"column not found: {column_id}")
+        board["columns"] = remaining
+        board["cards"] = [c for c in board.get("cards", []) if c.get("column_id") != column_id]
+        self._write_board(project_id, board)
+        self._touch_project(project_id)
+
+    def rename_column(self, project_id: str, column_id: str, name: str) -> dict[str, Any]:
+        board = self.get_board(project_id)
+        clean = (name or "").strip()
+        if not clean:
+            raise ProjectError("column name is required")
+        for col in board.get("columns", []):
+            if col.get("id") == column_id:
+                col["name"] = clean
+                self._write_board(project_id, board)
+                self._touch_project(project_id)
+                return col
+        raise ProjectError(f"column not found: {column_id}")
+
+    def create_card(
+        self,
+        project_id: str,
+        brief: str,
+        column_id: str,
+        title: str = "",
+    ) -> dict[str, Any]:
+        """Create a card and its git worktree. ``brief`` is the user's detailed
+        task description; ``title`` is optional and normally set by the planner."""
+        board = self.get_board(project_id)
+        repo_path = board.get("repo_path")
+        if not repo_path:
+            raise ProjectError("board not configured")
+        clean_brief = (brief or "").strip()
+        if not clean_brief:
+            raise ProjectError("card brief is required")
+        if not any(c.get("id") == column_id for c in board.get("columns", [])):
+            raise ProjectError(f"column not found: {column_id}")
+        card_id = uuid.uuid4().hex[:12]
+        branch = f"card-{card_id}"
+        wt_root = self._worktree_root or Path("~/.nanobot/worktrees").expanduser()
+        wt_path = wt_root / _slugify_id(project_id) / card_id
+        from nanobot.webui.worktrees import create_worktree
+
+        create_worktree(Path(repo_path).expanduser(), branch, wt_path)
+        card = {
+            "id": card_id,
+            "column_id": column_id,
+            "title": (title or "").strip(),
+            "brief": clean_brief,
+            "branch": branch,
+            "worktree_path": str(wt_path),
+            "chat_session_key": None,
+            "subagent_task_id": None,
+            "plan": "",
+            "build_result": "",
+            "review_summary": "",
+            "current_phase": None,
+            "phase_history": [],
+            "created_at_ms": _now_ms(),
+            "updated_at_ms": _now_ms(),
+        }
+        board.setdefault("cards", []).append(card)
+        self._write_board(project_id, board)
+        self._touch_project(project_id)
+        return card
+
+    def move_card(self, project_id: str, card_id: str, column_id: str) -> dict[str, Any]:
+        board = self.get_board(project_id)
+        if not any(c.get("id") == column_id for c in board.get("columns", [])):
+            raise ProjectError(f"column not found: {column_id}")
+        for card in board.get("cards", []):
+            if card.get("id") == card_id:
+                card["column_id"] = column_id
+                card["updated_at_ms"] = _now_ms()
+                self._write_board(project_id, board)
+                self._touch_project(project_id)
+                return card
+        raise ProjectError(f"card not found: {card_id}")
+
+    def set_card_chat(self, project_id: str, card_id: str, session_key: str) -> dict[str, Any]:
+        board = self.get_board(project_id)
+        for card in board.get("cards", []):
+            if card.get("id") == card_id:
+                card["chat_session_key"] = session_key
+                card["updated_at_ms"] = _now_ms()
+                self._write_board(project_id, board)
+                self._touch_project(project_id)
+                return card
+        raise ProjectError(f"card not found: {card_id}")
+
+    def delete_card(self, project_id: str, card_id: str) -> None:
+        board = self.get_board(project_id)
+        cards = board.get("cards", [])
+        target = next((c for c in cards if c.get("id") == card_id), None)
+        if target is None:
+            raise ProjectError(f"card not found: {card_id}")
+        from nanobot.webui.worktrees import remove_worktree
+
+        wt = target.get("worktree_path")
+        if wt:
+            try:
+                remove_worktree(
+                    Path(board["repo_path"]).expanduser(),
+                    Path(wt),
+                    force=True,
+                )
+            except ProjectError:
+                pass
+        board["cards"] = [c for c in cards if c.get("id") != card_id]
+        self._write_board(project_id, board)
+        self._touch_project(project_id)
+
+    def merge_card(self, project_id: str, card_id: str, into: str = "main") -> str:
+        board = self.get_board(project_id)
+        target = next((c for c in board.get("cards", []) if c.get("id") == card_id), None)
+        if target is None:
+            raise ProjectError(f"card not found: {card_id}")
+        from nanobot.webui.worktrees import merge_branch
+
+        return merge_branch(Path(board["repo_path"]).expanduser(), target["branch"], into)
+
+    def spawn_card(
+        self,
+        project_id: str,
+        card_id: str,
+        *,
+        subagent_manager: Any,
+        runtime_resolver: Any,
+    ) -> dict[str, Any]:
+        """Backwards-compatible alias for the build phase."""
+        return self.run_card_phase(
+            project_id,
+            card_id,
+            "build",
+            subagent_manager=subagent_manager,
+            runtime_resolver=runtime_resolver,
+        )
+
+    def run_card_phase(
+        self,
+        project_id: str,
+        card_id: str,
+        phase: str,
+        *,
+        subagent_manager: Any,
+        runtime_resolver: Any,
+    ) -> dict[str, Any]:
+        """Spawn a background subagent to run a card phase (plan/build/validate).
+
+        Returns the card dict with the phase task_id stored. The subagent runs
+        in the card's worktree and announces a structured JSON result which is
+        parsed into the card's ``plan`` / ``build_result`` / ``review_summary``.
+        """
+        board = self.get_board(project_id)
+        target = next((c for c in board.get("cards", []) if c.get("id") == card_id), None)
+        if target is None:
+            raise ProjectError(f"card not found: {card_id}")
+        if target.get("subagent_task_id"):
+            raise ProjectError("card already has a running subagent")
+        if not target.get("chat_session_key"):
+            raise ProjectError("card has no chat session; open the card's chat first")
+
+        from nanobot.security.workspace_access import build_workspace_scope
+
+        scope = build_workspace_scope(
+            target["worktree_path"],
+            "restricted",
+            source_channel="websocket",
+        )
+        extra = self.extra_read_dirs_for(project_id)
+        if extra:
+            from dataclasses import replace
+
+            scope = replace(scope, extra_read_dirs=tuple(extra))
+
+        meta = self._meta_path(project_id)
+        instructions = _read_json(meta).get("instructions_md", "")
+        session_key = target["chat_session_key"]
+        runtime = runtime_resolver(session_key) if callable(runtime_resolver) else None
+        project_id_slug = _slugify_id(project_id)
+
+        if phase == "plan":
+            tool_scope = "plan"
+            label = "planner"
+            task = (
+                "You are the PLANNER for a task card. Read the project files and "
+                f"the worktree at {target['worktree_path']} to understand what is being asked.\n"
+                f"Project instructions:\n{instructions}\n"
+                f"Task brief:\n{target.get('brief', '')}\n"
+                "Produce a complete, step-by-step plan to execute the whole task. "
+                "You may only READ files and think; do not modify or write anything.\n"
+                "Reply with JSON ONLY, no prose around it, in this exact shape:\n"
+                '{"title": "<short card title>", "plan": "<markdown plan>"}'
+            )
+        elif phase == "build":
+            tool_scope = "subagent"
+            label = "builder"
+            task = (
+                "You are the BUILDER for a task card. Follow the plan below exactly "
+                f"and implement the task in the worktree at {target['worktree_path']}.\n"
+                f"Project instructions:\n{instructions}\n"
+                f"Card brief:\n{target.get('brief', '')}\n"
+                f"Plan:\n{target.get('plan', '')}\n"
+                f"You are on branch {target['branch']}. Commit your work on this branch. "
+                "Do not merge or push unless asked.\n"
+                "When done, reply with JSON ONLY in this exact shape:\n"
+                '{"build_result": "<markdown summary of what was implemented and any tests run>"}'
+            )
+        elif phase == "validate":
+            tool_scope = "validator"
+            label = "validator"
+            task = (
+                "You are the VALIDATOR for a task card. Run the project's tests and "
+                "verify the build actually implemented the plan.\n"
+                f"Worktree: {target['worktree_path']}\n"
+                f"Project instructions:\n{instructions}\n"
+                f"Plan:\n{target.get('plan', '')}\n"
+                f"Build result:\n{target.get('build_result', '')}\n"
+                "You may run commands to execute tests (e.g. pytest / npm test) but must NOT "
+                "modify any source files. Write a clear review of whether everything the plan "
+                "promised was done, including test results.\n"
+                "Reply with JSON ONLY in this exact shape:\n"
+                '{"review_summary": "<markdown review>"}'
+            )
+        else:
+            raise ProjectError(f"unknown phase: {phase}")
+
+        task_id = subagent_manager.spawn(
+            task=task,
+            label=f"card-{label}:{project_id_slug}:{card_id[:8]}",
+            origin_channel="websocket",
+            origin_chat_id=session_key,
+            session_key=session_key,
+            workspace_scope=scope,
+            runtime=runtime,
+            tool_scope=tool_scope,
+            extra_metadata={"card_phase": phase, "card_id": card_id, "project_id": project_id},
+            on_announce=self._on_card_phase_announce,
+        )
+        target["subagent_task_id"] = task_id
+        target["current_phase"] = phase
+        history = target.setdefault("phase_history", [])
+        history.append(
+            {
+                "phase": phase,
+                "task_id": task_id,
+                "started_at_ms": _now_ms(),
+                "finished_at_ms": None,
+                "status": "running",
+            }
+        )
+        target["updated_at_ms"] = _now_ms()
+        self._write_board(project_id, board)
+        self._touch_project(project_id)
+        return target
+
+    async def _on_card_phase_announce(self, result: str, metadata: dict[str, Any]) -> None:
+        """Parse a subagent's structured JSON result and write it to board.json."""
+        project_id = metadata.get("project_id")
+        card_id = metadata.get("card_id")
+        phase = metadata.get("card_phase")
+        if not project_id or not card_id or not phase:
+            return
+        parsed: dict[str, Any] = {}
+        try:
+            parsed = _extract_json_object(result)
+        except Exception:
+            parsed = {}
+        try:
+            board = self.get_board(project_id)
+        except ProjectError:
+            return
+        target = next((c for c in board.get("cards", []) if c.get("id") == card_id), None)
+        if target is None:
+            return
+        if phase == "plan":
+            title = str(parsed.get("title") or "").strip()
+            if title:
+                target["title"] = title
+            target["plan"] = str(parsed.get("plan") or result)
+        elif phase == "build":
+            target["build_result"] = str(parsed.get("build_result") or result)
+        elif phase == "validate":
+            target["review_summary"] = str(parsed.get("review_summary") or result)
+        target["subagent_task_id"] = None
+        target["current_phase"] = None
+        for entry in target.setdefault("phase_history", []):
+            if entry.get("task_id") == metadata.get("subagent_task_id"):
+                entry["finished_at_ms"] = _now_ms()
+                entry["status"] = "ok" if parsed else "error"
+        target["updated_at_ms"] = _now_ms()
+        self._write_board(project_id, board)
+        self._touch_project(project_id)
+
+    def card_subagent_status(self, project_id: str, card_id: str, subagent_manager: Any) -> dict[str, Any] | None:
+        """Return the subagent status payload for a card, or None if none."""
+        board = self.get_board(project_id)
+        target = next((c for c in board.get("cards", []) if c.get("id") == card_id), None)
+        if target is None:
+            raise ProjectError(f"card not found: {card_id}")
+        task_id = target.get("subagent_task_id")
+        if not task_id:
+            return None
+        status = subagent_manager.get_status(task_id)
+        if status is None:
+            return None
+        return status.to_payload()
+
+    def _write_board(self, project_id: str, board: dict[str, Any]) -> None:
+        _write_json(self._board_path(project_id), board)
+
     def _unique_id(self, name: str) -> str:
         base = _slugify_id(name.lower().replace(" ", "-"))
         candidate = base
@@ -462,4 +929,15 @@ def project_file_payload(
         + file.mime_type
         + ";base64,"
         + base64.b64encode(payload).decode("ascii"),
+    }
+
+
+def board_payload(controller: WebUIProjectsController, project_id: str) -> dict[str, Any]:
+    """Board payload with a ``configured`` flag so the UI can prompt for setup."""
+    board = controller.get_board(project_id)
+    return {
+        "configured": bool(board.get("repo_path")),
+        "repo_path": board.get("repo_path", ""),
+        "columns": board.get("columns", []),
+        "cards": board.get("cards", []),
     }

@@ -99,6 +99,7 @@ from nanobot.webui.media_gateway import WebUIMediaGateway
 from nanobot.webui.projects import (
     ProjectError,
     WebUIProjectsController,
+    board_payload,
     project_detail_payload,
     project_file_payload,
     projects_list_payload,
@@ -253,6 +254,7 @@ class GatewayHTTPHandler:
         channel_feature_action: Callable[..., Any] | None = None,
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
         subagent_manager: Any | None = None,
+        runtime_resolver: Callable[[str | None], Any] | None = None,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -272,6 +274,7 @@ class GatewayHTTPHandler:
         self.cron_pending_job_ids = cron_pending_job_ids
         self.local_trigger_pending_ids = local_trigger_pending_ids
         self.subagent_manager = subagent_manager
+        self.runtime_resolver = runtime_resolver
         self._log = log
         self._runtime_surface = runtime_surface
 
@@ -568,6 +571,51 @@ class GatewayHTTPHandler:
         m = re.match(r"^/api/projects/([^/]+)/folders/remove$", got)
         if m:
             return self._handle_projects_folder_remove(request, m.group(1))
+        m = re.match(r"^/api/projects/([^/]+)/board$", got)
+        if m:
+            return self._handle_board_get(request, m.group(1))
+        m = re.match(r"^/api/projects/([^/]+)/board/setup$", got)
+        if m:
+            return self._handle_board_setup(request, m.group(1))
+        m = re.match(r"^/api/projects/([^/]+)/board/columns/add$", got)
+        if m:
+            return self._handle_board_column_add(request, m.group(1))
+        m = re.match(r"^/api/projects/([^/]+)/board/columns/([^/]+)/remove$", got)
+        if m:
+            return self._handle_board_column_remove(request, m.group(1), m.group(2))
+        m = re.match(r"^/api/projects/([^/]+)/board/columns/([^/]+)/rename$", got)
+        if m:
+            return self._handle_board_column_rename(request, m.group(1), m.group(2))
+        m = re.match(r"^/api/projects/([^/]+)/board/cards/add$", got)
+        if m:
+            return self._handle_board_card_add(request, m.group(1))
+        m = re.match(r"^/api/projects/([^/]+)/board/cards/([^/]+)/move$", got)
+        if m:
+            return self._handle_board_card_move(request, m.group(1), m.group(2))
+        m = re.match(r"^/api/projects/([^/]+)/board/cards/([^/]+)/chat$", got)
+        if m:
+            return self._handle_board_card_chat(request, m.group(1), m.group(2))
+        m = re.match(r"^/api/projects/([^/]+)/board/cards/([^/]+)/delete$", got)
+        if m:
+            return self._handle_board_card_delete(request, m.group(1), m.group(2))
+        m = re.match(r"^/api/projects/([^/]+)/board/cards/([^/]+)/merge$", got)
+        if m:
+            return self._handle_board_card_merge(request, m.group(1), m.group(2))
+        m = re.match(r"^/api/projects/([^/]+)/board/cards/([^/]+)/spawn$", got)
+        if m:
+            return self._handle_board_card_spawn(request, m.group(1), m.group(2))
+        m = re.match(r"^/api/projects/([^/]+)/board/cards/([^/]+)/plan$", got)
+        if m:
+            return self._handle_board_card_plan(request, m.group(1), m.group(2))
+        m = re.match(r"^/api/projects/([^/]+)/board/cards/([^/]+)/build$", got)
+        if m:
+            return self._handle_board_card_build(request, m.group(1), m.group(2))
+        m = re.match(r"^/api/projects/([^/]+)/board/cards/([^/]+)/validate$", got)
+        if m:
+            return self._handle_board_card_validate(request, m.group(1), m.group(2))
+        m = re.match(r"^/api/projects/([^/]+)/board/cards/([^/]+)/subagent$", got)
+        if m:
+            return self._handle_board_card_subagent(request, m.group(1), m.group(2))
         return None
 
     def _handle_projects_list(self, request: WsRequest) -> Response:
@@ -750,6 +798,207 @@ class GatewayHTTPHandler:
         except ProjectError as exc:
             return _http_error(404, str(exc))
         return _http_json_response({"ok": True, "path": path})
+
+    # -- Board (kanban of worktrees) routes --------------------------------
+
+    def _handle_board_get(self, request: WsRequest, project_id: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            payload = board_payload(self.projects, project_id)
+        except ProjectError as exc:
+            return _http_error(404, str(exc))
+        return _http_json_response(payload)
+
+    def _handle_board_setup(self, request: WsRequest, project_id: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(
+            request, _PROJECT_DATA_HEADER, _PROJECT_DATA_HEADER_MAX_BYTES
+        )
+        if err is not None:
+            return err
+        repo_path = (body.get("repo_path") or "") if isinstance(body, dict) else ""
+        try:
+            self.projects.setup_board(project_id, repo_path)
+        except ProjectError as exc:
+            return _http_error(400, str(exc))
+        return _http_json_response(board_payload(self.projects, project_id))
+
+    def _handle_board_column_add(self, request: WsRequest, project_id: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(
+            request, _PROJECT_DATA_HEADER, _PROJECT_DATA_HEADER_MAX_BYTES
+        )
+        if err is not None:
+            return err
+        name = (body.get("name") or "") if isinstance(body, dict) else ""
+        try:
+            col = self.projects.add_column(project_id, name)
+        except ProjectError as exc:
+            return _http_error(400, str(exc))
+        return _http_json_response(col)
+
+    def _handle_board_column_remove(
+        self, request: WsRequest, project_id: str, column_id: str
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            self.projects.remove_column(project_id, column_id)
+        except ProjectError as exc:
+            return _http_error(404, str(exc))
+        return _http_json_response({"ok": True, "id": column_id})
+
+    def _handle_board_column_rename(
+        self, request: WsRequest, project_id: str, column_id: str
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(
+            request, _PROJECT_DATA_HEADER, _PROJECT_DATA_HEADER_MAX_BYTES
+        )
+        if err is not None:
+            return err
+        name = (body.get("name") or "") if isinstance(body, dict) else ""
+        try:
+            col = self.projects.rename_column(project_id, column_id, name)
+        except ProjectError as exc:
+            return _http_error(404, str(exc))
+        return _http_json_response(col)
+
+    def _handle_board_card_add(self, request: WsRequest, project_id: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(
+            request, _PROJECT_DATA_HEADER, _PROJECT_DATA_HEADER_MAX_BYTES
+        )
+        if err is not None:
+            return err
+        title = (body.get("title") or "") if isinstance(body, dict) else ""
+        brief = (body.get("brief") or "") if isinstance(body, dict) else ""
+        column_id = (body.get("column_id") or "") if isinstance(body, dict) else ""
+        try:
+            card = self.projects.create_card(project_id, brief, column_id, title=title)
+        except ProjectError as exc:
+            return _http_error(400, str(exc))
+        return _http_json_response(card)
+
+    def _handle_board_card_move(
+        self, request: WsRequest, project_id: str, card_id: str
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(
+            request, _PROJECT_DATA_HEADER, _PROJECT_DATA_HEADER_MAX_BYTES
+        )
+        if err is not None:
+            return err
+        column_id = (body.get("column_id") or "") if isinstance(body, dict) else ""
+        try:
+            card = self.projects.move_card(project_id, card_id, column_id)
+        except ProjectError as exc:
+            return _http_error(404, str(exc))
+        return _http_json_response(card)
+
+    def _handle_board_card_chat(
+        self, request: WsRequest, project_id: str, card_id: str
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(
+            request, _PROJECT_DATA_HEADER, _PROJECT_DATA_HEADER_MAX_BYTES
+        )
+        if err is not None:
+            return err
+        session_key = (body.get("session_key") or "") if isinstance(body, dict) else ""
+        if not session_key:
+            return _http_error(400, "session_key is required")
+        try:
+            card = self.projects.set_card_chat(project_id, card_id, session_key)
+        except ProjectError as exc:
+            return _http_error(404, str(exc))
+        return _http_json_response(card)
+
+    def _handle_board_card_delete(
+        self, request: WsRequest, project_id: str, card_id: str
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            self.projects.delete_card(project_id, card_id)
+        except ProjectError as exc:
+            return _http_error(404, str(exc))
+        return _http_json_response({"ok": True, "id": card_id})
+
+    def _handle_board_card_merge(
+        self, request: WsRequest, project_id: str, card_id: str
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        into = request.query.get("into", "main")
+        try:
+            output = self.projects.merge_card(project_id, card_id, into)
+        except ProjectError as exc:
+            return _http_error(400, str(exc))
+        return _http_json_response({"ok": True, "output": output})
+
+    def _handle_board_card_spawn(
+        self, request: WsRequest, project_id: str, card_id: str
+    ) -> Response:
+        return self._run_card_phase(request, project_id, card_id, "build")
+
+    def _handle_board_card_plan(
+        self, request: WsRequest, project_id: str, card_id: str
+    ) -> Response:
+        return self._run_card_phase(request, project_id, card_id, "plan")
+
+    def _handle_board_card_build(
+        self, request: WsRequest, project_id: str, card_id: str
+    ) -> Response:
+        return self._run_card_phase(request, project_id, card_id, "build")
+
+    def _handle_board_card_validate(
+        self, request: WsRequest, project_id: str, card_id: str
+    ) -> Response:
+        return self._run_card_phase(request, project_id, card_id, "validate")
+
+    def _run_card_phase(
+        self, request: WsRequest, project_id: str, card_id: str, phase: str
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        manager = getattr(self, "subagent_manager", None)
+        if manager is None:
+            return _http_error(503, "subagent manager unavailable")
+        try:
+            card = self.projects.run_card_phase(
+                project_id,
+                card_id,
+                phase,
+                subagent_manager=manager,
+                runtime_resolver=self.runtime_resolver,
+            )
+        except ProjectError as exc:
+            return _http_error(400, str(exc))
+        return _http_json_response(card)
+
+    def _handle_board_card_subagent(
+        self, request: WsRequest, project_id: str, card_id: str
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        manager = getattr(self, "subagent_manager", None)
+        if manager is None:
+            return _http_error(503, "subagent manager unavailable")
+        try:
+            status = self.projects.card_subagent_status(project_id, card_id, manager)
+        except ProjectError as exc:
+            return _http_error(404, str(exc))
+        if status is None:
+            return _http_json_response({"status": None})
+        return _http_json_response(status)
 
     # -- Research routes -----------------------------------------------------
 

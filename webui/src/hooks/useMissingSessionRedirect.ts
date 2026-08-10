@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import type { SettingsSectionKey } from "@/lib/types";
 import type { ShellRoute, ShellView } from "@/lib/routing";
 
 type Args = {
@@ -7,7 +6,6 @@ type Args = {
   loading: boolean;
   sessions: { key: string }[];
   view: ShellView;
-  settingsSection: SettingsSectionKey;
   navigate: (route: ShellRoute, options?: { replace?: boolean }) => void;
 };
 
@@ -16,17 +14,15 @@ export function useMissingSessionRedirect({
   loading,
   sessions,
   view,
-  settingsSection,
   navigate,
 }: Args) {
   useEffect(() => {
     if (loading || !activeKey) return;
+    if (view !== "chat") return;
     if (sessions.some((session) => session.key === activeKey)) return;
     navigate(
-      view === "chat"
-        ? { view: "chat", activeKey: null, settingsSection: "overview" }
-        : { view, activeKey: null, settingsSection },
+      { view: "chat", activeKey: null, settingsSection: "overview" },
       { replace: true },
     );
-  }, [activeKey, loading, navigate, sessions, settingsSection, view]);
+  }, [activeKey, loading, navigate, sessions, view]);
 }

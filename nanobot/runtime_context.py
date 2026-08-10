@@ -85,8 +85,8 @@ def compile_project_context(
 ) -> RuntimeContextBlock | None:
     """Render a project's name, instructions, and file list as a runtime block.
 
-    Files are listed by name + mime + size only; the agent uses its own
-    ``read_file`` / ``exec`` tools to open the actual bytes from the chat
+    Files are listed by name + mime + size + on-disk path; the agent uses its
+    own ``read_file`` / ``exec`` tools to open the actual bytes from the chat
     workspace. Returns ``None`` for an unknown project or one with no
     instructions and no files.
     """
@@ -105,9 +105,11 @@ def compile_project_context(
     except ProjectError:
         folders = []
 
+    files_dir = controller.files_dir_for(project_id)
     instructions = (summary.instructions_md or "").strip()
     file_lines = [
-        f"<file name={json.dumps(f.name)} mime={json.dumps(f.mime_type)} size={int(f.size)} />"
+        f"<file name={json.dumps(f.name)} mime={json.dumps(f.mime_type)} "
+        f"size={int(f.size)} id={json.dumps(f.id)} path={json.dumps(str(files_dir / f'{f.id}.bin'))} />"
         for f in files
     ]
     folder_lines = [
@@ -130,6 +132,7 @@ def compile_project_context(
         body_lines.append("</folders>")
     if file_lines:
         body_lines.append("<files>")
+        body_lines.append(f"<files_dir path={json.dumps(str(files_dir))} />")
         body_lines.extend(file_lines)
         body_lines.append("</files>")
 
@@ -140,7 +143,7 @@ def compile_project_context(
     content = wrap_runtime_context_lines([
         "This chat is bound to a project. Treat the project metadata as the user's standing intent for this conversation.",
         body,
-        "Use the file names to decide whether to read any of them via your tools when the user asks.",
+        "Use the file paths to read uploaded project files via your tools when the user asks.",
         "Use the folder paths to locate and read relevant files when the user asks about them.",
     ])
     return RuntimeContextBlock(source=PROJECT_CONTEXT_SOURCE, content=content)

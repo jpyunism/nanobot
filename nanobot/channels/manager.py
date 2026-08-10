@@ -200,6 +200,7 @@ class ChannelManager:
                 session_manager=self._session_manager,
                 static_dist_path=static_path,
                 workspace_path=workspace,
+                worktree_root=self.config.worktree_root_path,
                 default_restrict_to_workspace=self.config.tools.restrict_to_workspace,
                 disabled_skills=set(self.config.agents.defaults.disabled_skills),
                 runtime_model_name=self._webui_runtime_model_name,
@@ -213,6 +214,7 @@ class ChannelManager:
                 channel_runtime_status=self.get_status,
                 agent_loop=getattr(self, "_agent_loop", None),
                 subagent_manager=getattr(self, "_subagent_manager", None),
+                runtime_resolver=self._resolve_subagent_runtime,
                 logger=logger,
             )
             kwargs["gateway"] = gateway
@@ -1028,6 +1030,16 @@ class ChannelManager:
     def get_channel(self, name: str) -> BaseChannel | None:
         """Get a channel by name."""
         return self.channels.get(name)
+
+    def _resolve_subagent_runtime(self, session_key: str | None = None) -> Any:
+        """Resolve an LLM runtime for a subagent spawned from the WebUI."""
+        loop = getattr(self, "_agent_loop", None)
+        if loop is None:
+            return None
+        resolver = getattr(loop, "_resolve_runtime_for_resume", None)
+        if callable(resolver):
+            return resolver(session_key)
+        return None
 
     def get_status(self) -> dict[str, Any]:
         """Return actual runtime state, including enabled runtimes that failed."""

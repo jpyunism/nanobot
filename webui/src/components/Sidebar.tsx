@@ -22,6 +22,7 @@ import type {
   SidebarViewState,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import type { ProjectSummary } from "@/lib/types";
 
 interface SidebarProps {
   sessions: ChatSummary[];
@@ -39,6 +40,8 @@ interface SidebarProps {
   onOpenSettings: () => void;
   onOpenAutomations: () => void;
   onOpenProjects?: () => void;
+  projects?: ProjectSummary[];
+  onOpenProject?: (id: string) => void;
   onOpenWorkspace?: () => void;
   onOpenTodos?: () => void;
   onOpenAgenda?: () => void;
@@ -179,6 +182,22 @@ export function Sidebar(props: SidebarProps) {
             icon={<FolderKanban className="h-4 w-4" />}
           />
         )}
+        {props.projects && props.projects.length > 0 ? (
+          <div className="flex flex-col gap-0.5">
+            {props.projects.slice(0, 8).map((project) => (
+              <button
+                key={project.id}
+                type="button"
+                onClick={() => props.onOpenProject?.(project.id)}
+                className="ml-2 flex items-center gap-2 rounded-md px-2 py-1 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+                title={project.name}
+              >
+                <FolderKanban className="h-3 w-3 shrink-0" aria-hidden />
+                <span className="truncate">{project.name}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
         {props.onOpenWorkspace && (
           <SidebarActionButton
             collapsed={collapsed}

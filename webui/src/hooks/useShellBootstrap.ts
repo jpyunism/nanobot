@@ -18,6 +18,7 @@ import { useHostSidebarLayout } from "@/hooks/useHostSidebarLayout";
 import { useWorkspaceScope } from "@/hooks/useWorkspaceScope";
 import { useTodos } from "@/hooks/useTodos";
 import { useAgenda } from "@/hooks/useAgenda";
+import { useProjects } from "@/hooks/useProjects";
 import { useEphemeralSurfaceCleanup } from "@/hooks/useEphemeralSurfaceCleanup";
 import { useDialogsState } from "@/lib/dialogs";
 import type { RuntimeSurface } from "@/lib/types";
@@ -63,6 +64,7 @@ export function useShellBootstrap({
     onDismissPairingRequest,
   } = pairing;
   const skills = useSkills(token);
+  const projectsState = useProjects("", token);
   const settingsSnapshotApi = useSettingsSnapshot({ token });
   const { snapshot: settingsSnapshot, setSnapshot: setSettingsSnapshot } =
     settingsSnapshotApi;
@@ -100,6 +102,14 @@ export function useShellBootstrap({
     hostSidebarFlowWidth,
     renderHostSidebarFlowContent,
   } = sidebarLayout;
+
+  const onOpenProject = useCallback(
+    (id: string | null) => {
+      setMobileSidebarOpen(false);
+      navigate({ view: "projects", activeKey: id, settingsSection: "overview" });
+    },
+    [navigate, setMobileSidebarOpen],
+  );
 
   const activeSession = useMemo(() => {
     if (!activeKey) return null;
@@ -160,7 +170,6 @@ export function useShellBootstrap({
     loading,
     sessions,
     view,
-    settingsSection: settingsInitialSection,
     navigate,
   });
 
@@ -265,6 +274,8 @@ export function useShellBootstrap({
     onOpenTodos,
     onOpenAgenda,
     onOpenResearch,
+    projects: projectsState.projects,
+    onOpenProject,
     token,
   });
 
@@ -332,6 +343,7 @@ export function useShellBootstrap({
     onOpenTodos,
     onOpenAgenda,
     onOpenResearch,
+    onOpenProject,
   };
 }
 

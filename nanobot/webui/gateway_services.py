@@ -46,6 +46,7 @@ def build_gateway_services(
     session_manager: Any | None,
     static_dist_path: Path | None,
     workspace_path: Path,
+    worktree_root: Path | None = None,
     default_restrict_to_workspace: bool,
     runtime_model_name: Any | None,
     runtime_surface: str,
@@ -59,6 +60,7 @@ def build_gateway_services(
     channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
     agent_loop: Any | None = None,
     subagent_manager: Any | None = None,
+    runtime_resolver: Callable[[str | None], Any] | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
     tokens = GatewayTokenStore()
@@ -82,26 +84,28 @@ def build_gateway_services(
         default_workspace=workspace_path,
         default_restrict_to_workspace=default_restrict_to_workspace,
     )
-    projects = WebUIProjectsController(data_dir=get_data_dir())
+    projects = WebUIProjectsController(
+        data_dir=get_data_dir(),
+        worktree_root=worktree_root,
+    )
+    try:
+        result = projects.migrate_worktrees()
+        if result.get("moved") or result.get("skipped"):
+            logger.info(
+                "Worktree migration: moved={} skipped={}", result.get("moved"), result.get("skipped")
+            )
+    except Exception as exc:
+        logger.warning("Worktree migration failed: {}", exc)
 
     def _project_extra_read_dirs(session_metadata: Any) -> tuple[Path, ...]:
-        """Read-only roots for the project bound to the session's folders."""
+        """Read-only roots for the project bound to the session: uploaded files + folders."""
         project_id = _chat_project_id(session_metadata)
         if not project_id:
             return ()
         try:
-            folders = projects.list_folders(project_id)
+            return projects.extra_read_dirs_for(project_id)
         except Exception:
             return ()
-        roots: list[Path] = []
-        for folder in folders:
-            try:
-                p = Path(folder.path).expanduser().resolve(strict=False)
-            except (OSError, ValueError, RuntimeError):
-                continue
-            if p.is_dir():
-                roots.append(p)
-        return tuple(roots)
 
     if agent_loop is not None:
         if (
@@ -141,6 +145,7 @@ def build_gateway_services(
         channel_feature_action=channel_feature_action,
         channel_runtime_status=channel_runtime_status,
         subagent_manager=subagent_manager,
+        runtime_resolver=runtime_resolver,
         log=logger,
     )
     return GatewayServices(

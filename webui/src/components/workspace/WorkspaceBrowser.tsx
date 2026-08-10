@@ -86,7 +86,15 @@ const VIEW_MODES: { key: WorkspaceViewMode; icon: typeof List; labelKey: string 
   { key: "thumbnails", icon: Image, labelKey: "workspace.viewMode.thumbnails" },
 ];
 
-export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }) {
+export function WorkspaceBrowser({
+  onBackToChat,
+  chatId,
+  rootPath,
+}: {
+  onBackToChat?: () => void;
+  chatId?: string;
+  rootPath?: string;
+}) {
   const { t } = useTranslation();
   const { token } = useClient();
   const base = "";
@@ -143,7 +151,7 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
       setLoading(true);
       setError(null);
       try {
-        const payload: WorkspaceListPayload = await fetchWorkspaceList(token, path, base);
+        const payload: WorkspaceListPayload = await fetchWorkspaceList(token, path, base, chatId);
         if (payload.error) {
           setError(payload.error);
           return;
@@ -186,7 +194,7 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
 
       if (isImageFile(entry.name)) {
         try {
-          const blob = await fetchWorkspaceFileBlob(token, entry.path, base, controller.signal);
+          const blob = await fetchWorkspaceFileBlob(token, entry.path, base, controller.signal, chatId);
           if (controller.signal.aborted) return;
           const url = URL.createObjectURL(blob);
           objectUrls.current.push(url);
@@ -199,7 +207,7 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
       }
 
       try {
-        const payload = await fetchWorkspaceRead(token, entry.path, base, controller.signal);
+        const payload = await fetchWorkspaceRead(token, entry.path, base, controller.signal, chatId);
         if (controller.signal.aborted) return;
         if (payload.error) {
           setError(payload.error);
@@ -215,7 +223,7 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
         setError(err instanceof Error ? err.message : String(err));
       }
     },
-    [token, revokeObjectUrls],
+    [token, revokeObjectUrls, chatId],
   );
 
   const openEntry = useCallback(
@@ -255,7 +263,7 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
     setError(null);
     try {
       const target = currentPath ? `${currentPath}/${name}` : name;
-      const result = await createWorkspaceDirectory(token, target, base);
+      const result = await createWorkspaceDirectory(token, target, base, chatId);
       if (result.error) {
         setError(result.error);
         return;
@@ -267,7 +275,7 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
     } finally {
       setCreatingDir(false);
     }
-  }, [newDirName, currentPath, token, load]);
+  }, [newDirName, currentPath, token, load, chatId]);
 
   const onDelete = useCallback(
     async (entry: WorkspaceEntry) => {
@@ -284,7 +292,7 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
       }
       setError(null);
       try {
-        const result = await deleteWorkspaceEntry(token, entry.path, base);
+        const result = await deleteWorkspaceEntry(token, entry.path, base, chatId);
         if (result.error) {
           setError(result.error);
           return;
@@ -297,7 +305,7 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
         setError(err instanceof Error ? err.message : String(err));
       }
     },
-    [token, currentPath, load, t, selected, closePreview],
+    [token, currentPath, load, t, chatId],
   );
 
   const onRename = useCallback(
@@ -317,7 +325,7 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
       if (!newName || newName === entry.name) return;
       setError(null);
       try {
-        const result = await renameWorkspaceEntry(token, entry.path, newName, base);
+        const result = await renameWorkspaceEntry(token, entry.path, newName, base, chatId);
         if (result.error) {
           setError(result.error);
           return;
@@ -349,7 +357,7 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
       }
       setError(null);
       try {
-        const result = await moveWorkspaceEntry(token, source.path, targetPath, base);
+        const result = await moveWorkspaceEntry(token, source.path, targetPath, base, chatId);
         if (result.error) {
           setError(result.error);
           return;
@@ -374,7 +382,7 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
     }
     setError(null);
     try {
-      const result = await writeWorkspaceFile(token, selected.path, fileContent, base);
+      const result = await writeWorkspaceFile(token, selected.path, fileContent, base, chatId);
       if (result.error) {
         setError(result.error);
         return;
@@ -383,14 +391,14 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [selected, fileContent, token, currentPath, load, t]);
+  }, [selected, fileContent, token, currentPath, load, t, chatId]);
 
   const onDownload = useCallback(async () => {
     if (!selected) return;
     if (downloading) return;
     setDownloading(true);
     try {
-      const blob = await fetchWorkspaceFileBlob(token, selected.path, base);
+      const blob = await fetchWorkspaceFileBlob(token, selected.path, base, undefined, chatId);
       const objectUrl = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = objectUrl;
@@ -404,7 +412,7 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
     } finally {
       setDownloading(false);
     }
-  }, [selected, token, downloading]);
+  }, [selected, token, downloading, chatId]);
 
   const breadcrumb = currentPath ? currentPath.split("/").filter(Boolean) : [];
 
@@ -434,11 +442,17 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">
               {t("workspace.title", { defaultValue: "Workspace" })}
             </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t("workspace.subtitle", {
-                defaultValue: "Browse and edit files in the current workspace.",
-              })}
-            </p>
+            {rootPath ? (
+              <p className="mt-1 truncate font-mono text-xs text-muted-foreground" title={rootPath}>
+                {rootPath}
+              </p>
+            ) : (
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t("workspace.subtitle", {
+                  defaultValue: "Browse and edit files in the current workspace.",
+                })}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <div className="mr-2 flex items-center rounded-md border border-border/60 p-0.5">
@@ -763,7 +777,7 @@ export function WorkspaceBrowser({ onBackToChat }: { onBackToChat?: () => void }
                       </div>
                       <div className="mb-2 flex aspect-square w-full items-center justify-center overflow-hidden rounded-md bg-muted/20">
                         {viewMode === "thumbnails" && !entry.is_directory && isImageFile(entry.name) ? (
-                          <WorkspaceThumbnail token={token} path={entry.path} name={entry.name} />
+                          <WorkspaceThumbnail token={token} path={entry.path} name={entry.name} chatId={chatId} />
                         ) : (
                           <EntryIcon
                             className={cn(
@@ -931,10 +945,12 @@ function WorkspaceThumbnail({
   token,
   path,
   name,
+  chatId,
 }: {
   token: string;
   path: string;
   name: string;
+  chatId?: string;
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -942,7 +958,7 @@ function WorkspaceThumbnail({
   useEffect(() => {
     let objectUrl: string | null = null;
     let cancelled = false;
-    fetchWorkspaceFileBlob(token, path)
+    fetchWorkspaceFileBlob(token, path, "", undefined, chatId)
       .then((blob) => {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
@@ -955,7 +971,7 @@ function WorkspaceThumbnail({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [token, path]);
+  }, [token, path, chatId]);
 
   if (failed || !url) {
     const FallbackIcon = fileIconFor(name);

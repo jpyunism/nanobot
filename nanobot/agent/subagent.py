@@ -550,6 +550,8 @@ class SubagentManager:
         self,
         workspace: Path | None = None,
         tools_config: ToolsConfig | None = None,
+        *,
+        scope: str = "subagent",
     ) -> ToolRegistry:
         """Build an isolated subagent tool registry via ToolLoader."""
         root = self.workspace if workspace is None else workspace
@@ -565,7 +567,7 @@ class SubagentManager:
                 workspace=root,
             ),
         )
-        ToolLoader().load(ctx, registry, scope="subagent")
+        ToolLoader().load(ctx, registry, scope=scope)
         return registry
 
     async def spawn(
@@ -583,6 +585,9 @@ class SubagentManager:
         task_id: str | None = None,
         model_preset: str | None = None,
         initial_messages: list[dict[str, Any]] | None = None,
+        tool_scope: str = "subagent",
+        extra_metadata: dict[str, Any] | None = None,
+        on_announce: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         if runtime is None:
@@ -628,6 +633,9 @@ class SubagentManager:
                 origin_message_id,
                 workspace_scope,
                 initial_messages=initial_messages,
+                tool_scope=tool_scope,
+                extra_metadata=extra_metadata,
+                on_announce=on_announce,
             )
         )
         self._running_tasks[task_id] = bg_task
@@ -667,6 +675,7 @@ class SubagentManager:
         *,
         runtime: LLMRuntime | None = None,
         model_preset: str | None = None,
+        tool_scope: str = "subagent",
     ) -> str:
         """Run a subagent synchronously and return its result to the caller."""
         if runtime is None:
@@ -702,6 +711,7 @@ class SubagentManager:
                 origin_message_id,
                 workspace_scope,
                 announce=False,
+                tool_scope=tool_scope,
             )
         )
         self._running_tasks[task_id] = inline_task
@@ -736,6 +746,9 @@ class SubagentManager:
         *,
         announce: bool = True,
         initial_messages: list[dict[str, Any]] | None = None,
+        tool_scope: str = "subagent",
+        extra_metadata: dict[str, Any] | None = None,
+        on_announce: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
     ) -> str:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -783,7 +796,7 @@ class SubagentManager:
                 cfg = self._subagent_tools_config()
                 cfg.restrict_to_workspace = workspace_scope.restrict_to_workspace
             # Construct from the agent workspace; the bound scope below supplies the project cwd.
-            tools = self._build_tools(tools_config=cfg)
+            tools = self._build_tools(tools_config=cfg, scope=tool_scope)
             system_prompt = self._build_subagent_prompt(workspace=root)
             initial_system_prompt = system_prompt
             if initial_messages:
@@ -864,6 +877,8 @@ class SubagentManager:
                     origin,
                     final_status,
                     origin_message_id,
+                    extra_metadata=extra_metadata,
+                    on_announce=on_announce,
                 )
             return final_result
 
@@ -887,6 +902,8 @@ class SubagentManager:
                     origin,
                     "error",
                     origin_message_id,
+                    extra_metadata=extra_metadata,
+                    on_announce=on_announce,
                 )
             return final_result
 
@@ -910,6 +927,9 @@ class SubagentManager:
         origin: dict[str, str],
         status: str,
         origin_message_id: str | None = None,
+        *,
+        extra_metadata: dict[str, Any] | None = None,
+        on_announce: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
     ) -> None:
         """Announce the subagent result to the main agent via the message bus."""
         status_text = "completed successfully" if status == "ok" else "failed"
@@ -934,6 +954,10 @@ class SubagentManager:
         }
         if origin_message_id:
             metadata["origin_message_id"] = origin_message_id
+        if extra_metadata:
+            metadata.update(extra_metadata)
+        if on_announce is not None:
+            await on_announce(result, metadata)
         msg = InboundMessage(
             channel="system",
             sender_id="subagent",

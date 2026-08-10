@@ -29,6 +29,7 @@ type AgendaProps = React.ComponentProps<typeof AgendaSurface>;
 
 type Args = {
   view: MainView;
+  activeKey: string | null;
   session: ChatSummary | null;
   title: string;
   settingsInitialSection: SettingsProps["initialSection"];
@@ -43,6 +44,7 @@ type Args = {
   onToggleSidebar: () => void;
   onNewChat: () => void;
   onOpenResearch: () => void;
+  onOpenProject: (id: string | null) => void;
   onCreateChat: ThreadProps["onCreateChat"];
   onForkChat: ThreadProps["onForkChat"];
   onTurnEnd: ThreadProps["onTurnEnd"];
@@ -103,7 +105,11 @@ export function MainView(props: Args) {
           />
         </Surface>
       ) : props.view === "projects" ? (
-        <ProjectsSurface onBackToChat={props.onBackToChat} />
+        <ProjectsSurface
+          activeProjectId={props.activeKey}
+          onOpenProject={props.onOpenProject}
+          onBackToChat={props.onBackToChat}
+        />
       ) : props.view === "workspace" ? (
         <WorkspaceBrowser onBackToChat={props.onBackToChat} />
       ) : props.view === "todos" ? (

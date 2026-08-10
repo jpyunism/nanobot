@@ -470,7 +470,7 @@ def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
 class WriteStdinTool(Tool):
     """Write to or poll a running exec session."""
 
-    _scopes = {"core", "subagent"}
+    _scopes = {"core", "subagent", "validator"}
     config_key = "exec"
 
     @classmethod
@@ -605,7 +605,7 @@ class WriteStdinTool(Tool):
 class ListExecSessionsTool(Tool):
     """List active exec sessions."""
 
-    _scopes = {"core", "subagent"}
+    _scopes = {"core", "subagent", "plan", "validator"}
     config_key = "exec"
 
     @classmethod

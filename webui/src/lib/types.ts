@@ -245,6 +245,44 @@ export interface ProjectDetail {
   files: ProjectFile[];
 }
 
+export interface BoardColumn {
+  id: string;
+  name: string;
+}
+
+export interface BoardCardPhaseHistoryEntry {
+  phase: "plan" | "build" | "validate" | string;
+  task_id: string;
+  started_at_ms: number;
+  finished_at_ms?: number | null;
+  status?: "running" | "ok" | "error" | string;
+}
+
+export interface BoardCard {
+  id: string;
+  column_id: string;
+  title: string;
+  branch: string;
+  worktree_path: string;
+  chat_session_key: string | null;
+  subagent_task_id?: string | null;
+  brief?: string;
+  plan?: string;
+  build_result?: string;
+  review_summary?: string;
+  current_phase?: string | null;
+  phase_history?: BoardCardPhaseHistoryEntry[];
+  created_at_ms: number;
+  updated_at_ms: number;
+}
+
+export interface Board {
+  configured: boolean;
+  repo_path: string;
+  columns: BoardColumn[];
+  cards: BoardCard[];
+}
+
 /** Structured UI blob on ``progress`` WS frames; channels may add more ``kind`` values later. */
 export interface AgentUIBlob {
   kind: string;

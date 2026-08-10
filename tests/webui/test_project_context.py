@@ -58,6 +58,20 @@ def test_compile_project_context_includes_folders(data_dir: Path) -> None:
     assert "<folders>" in block.content
 
 
+def test_compile_project_context_includes_file_paths(data_dir: Path) -> None:
+    c = WebUIProjectsController(data_dir)
+    s = c.create_project("alpha", "instructions")
+    f = c.add_file(
+        s.id, "notes.md", "data:text/markdown;base64," + base64.b64encode(b"# notes").decode()
+    )
+    files_dir = c.files_dir_for(s.id)
+    block = compile_project_context(c, s.id)
+    assert block is not None
+    assert f'<files_dir path="{files_dir}" />' in block.content
+    assert f'id="{f.id}"' in block.content
+    assert f'path="{files_dir / f"{f.id}.bin"}"' in block.content
+
+
 def test_compile_project_context_truncates_to_budget(data_dir: Path) -> None:
     c = WebUIProjectsController(data_dir)
     s = c.create_project("huge", "x" * 20_000)

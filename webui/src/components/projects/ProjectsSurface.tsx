@@ -1,15 +1,21 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronLeft, Plus, RefreshCw } from "lucide-react";
+import { ArrowLeft, Plus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useProjects } from "@/hooks/useProjects";
 import { useClient } from "@/providers/ClientProvider";
-import { ProjectDetail } from "@/components/projects/ProjectDetail";
+import { ProjectHub } from "@/components/projects/ProjectHub";
 import type { ProjectSummary } from "@/lib/types";
 
-export function ProjectsSurface({ onBackToChat }: { onBackToChat?: () => void }) {
+type Props = {
+  activeProjectId: string | null;
+  onOpenProject: (id: string | null) => void;
+  onBackToChat?: () => void;
+};
+
+export function ProjectsSurface({ activeProjectId, onOpenProject, onBackToChat }: Props) {
   const { t } = useTranslation();
   const { token } = useClient();
   const base = "";
@@ -19,7 +25,6 @@ export function ProjectsSurface({ onBackToChat }: { onBackToChat?: () => void })
   const [newInstructions, setNewInstructions] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const onCreate = async () => {
@@ -31,12 +36,16 @@ export function ProjectsSurface({ onBackToChat }: { onBackToChat?: () => void })
       setShowCreate(false);
       setNewName("");
       setNewInstructions("");
-      setSelectedId(detail.id);
+      onOpenProject(detail.id);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : String(err));
     } finally {
       setCreating(false);
     }
+  };
+
+  const onBack = () => {
+    onOpenProject(null);
   };
 
   const onDelete = async (id: string) => {
@@ -46,11 +55,20 @@ export function ProjectsSurface({ onBackToChat }: { onBackToChat?: () => void })
     setBusy(true);
     try {
       await state.remove(id);
-      if (selectedId === id) setSelectedId(null);
     } finally {
       setBusy(false);
     }
   };
+
+  if (activeProjectId) {
+    return (
+      <div className="absolute inset-0 flex flex-col overflow-y-auto bg-background">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
+          <ProjectHub projectId={activeProjectId} state={state} onBack={onBack} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="absolute inset-0 flex flex-col overflow-y-auto bg-background">
@@ -61,7 +79,7 @@ export function ProjectsSurface({ onBackToChat }: { onBackToChat?: () => void })
             onClick={onBackToChat}
             className="touch-target -ml-1 mb-1 inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground lg:hidden"
           >
-            <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
+            <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
             {t("settings.backToChat", { defaultValue: "Back to chat" })}
           </button>
         ) : null}
@@ -140,10 +158,7 @@ export function ProjectsSurface({ onBackToChat }: { onBackToChat?: () => void })
                 <Button variant="ghost" onClick={() => setShowCreate(false)}>
                   {t("projects.cancel", { defaultValue: "Cancel" })}
                 </Button>
-                <Button
-                  onClick={onCreate}
-                  disabled={!newName.trim() || creating}
-                >
+                <Button onClick={onCreate} disabled={!newName.trim() || creating}>
                   {creating
                     ? t("projects.creating", { defaultValue: "Creating…" })
                     : t("projects.create", { defaultValue: "Create" })}
@@ -156,8 +171,7 @@ export function ProjectsSurface({ onBackToChat }: { onBackToChat?: () => void })
         {state.projects.length === 0 && !state.loading ? (
           <div className="rounded-lg border border-dashed border-border/60 bg-muted/10 px-6 py-12 text-center text-sm text-muted-foreground">
             {t("projects.empty", {
-              defaultValue:
-                "No projects yet. Click 'New project' to create one.",
+              defaultValue: "No projects yet. Click 'New project' to create one.",
             })}
           </div>
         ) : (
@@ -166,10 +180,7 @@ export function ProjectsSurface({ onBackToChat }: { onBackToChat?: () => void })
               <li key={p.id}>
                 <ProjectCard
                   project={p}
-                  selected={selectedId === p.id}
-                  onSelect={() =>
-                    setSelectedId((current) => (current === p.id ? null : p.id))
-                  }
+                  onOpen={() => onOpenProject(p.id)}
                   onDelete={() => void onDelete(p.id)}
                   busy={busy}
                 />
@@ -177,14 +188,6 @@ export function ProjectsSurface({ onBackToChat }: { onBackToChat?: () => void })
             ))}
           </ul>
         )}
-
-        {selectedId ? (
-          <ProjectDetail
-            projectId={selectedId}
-            state={state}
-            onClose={() => setSelectedId(null)}
-          />
-        ) : null}
       </div>
     </div>
   );
@@ -192,26 +195,20 @@ export function ProjectsSurface({ onBackToChat }: { onBackToChat?: () => void })
 
 type CardProps = {
   project: ProjectSummary;
-  selected: boolean;
   busy: boolean;
-  onSelect: () => void;
+  onOpen: () => void;
   onDelete: () => void;
 };
 
-function ProjectCard({ project, selected, busy, onSelect, onDelete }: CardProps) {
+function ProjectCard({ project, busy, onOpen, onDelete }: CardProps) {
   const { t } = useTranslation();
   const updated = new Date(project.updated_at_ms);
   return (
-    <div
-      className={
-        "group rounded-lg border bg-card p-4 transition-colors " +
-        (selected ? "border-primary" : "border-border/60 hover:border-border")
-      }
-    >
+    <div className="group rounded-lg border border-border/60 bg-card p-4 transition-colors hover:border-border">
       <div className="flex items-start justify-between gap-3">
         <button
           type="button"
-          onClick={onSelect}
+          onClick={onOpen}
           className="flex-1 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
         >
           <div className="font-medium text-foreground">{project.name}</div>

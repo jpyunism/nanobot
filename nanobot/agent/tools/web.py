@@ -315,7 +315,7 @@ def _normalize_volcengine_auth_level(value: Any) -> int | None:
 )
 class WebSearchTool(Tool):
     """Search the web using configured provider."""
-    _scopes = {"core", "subagent"}
+    _scopes = {"core", "subagent", "plan", "validator"}
 
     name = "web_search"
     description = (
@@ -966,7 +966,7 @@ class WebSearchTool(Tool):
 )
 class WebFetchTool(Tool):
     """Fetch and extract content from a URL."""
-    _scopes = {"core", "subagent"}
+    _scopes = {"core", "subagent", "plan", "validator"}
 
     name = "web_fetch"
     description = (

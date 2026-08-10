@@ -96,6 +96,7 @@ export function AppShell({
 
           <MainView
             view={shell.view}
+            activeKey={shell.activeKey}
             session={shell.activeSession}
             title={
               shell.activeSession
@@ -114,6 +115,7 @@ export function AppShell({
             onToggleSidebar={shell.toggleSidebar}
             onNewChat={shell.onNewChat}
             onOpenResearch={shell.onOpenResearch}
+            onOpenProject={shell.onOpenProject}
             onCreateChat={shell.onCreateChat}
             onForkChat={shell.onForkChat}
             onTurnEnd={shell.onTurnEnd}

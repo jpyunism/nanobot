@@ -3,6 +3,9 @@ import type {
   ProjectFile,
   ProjectDetail,
   ProjectFolder,
+  Board,
+  BoardColumn,
+  BoardCard,
 } from "./types";
 import { fetchWithTimeout } from "./http";
 
@@ -203,5 +206,223 @@ export function removeProjectFolder(
         "X-Nanobot-Project-Data": JSON.stringify({ path }),
       },
     },
+  );
+}
+
+// ---- Board (kanban of worktrees) ----
+
+export function fetchBoard(
+  base: string,
+  token: string,
+  projectId: string,
+): Promise<Board> {
+  return request<Board>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/board`,
+    token,
+  );
+}
+
+export function setupBoard(
+  base: string,
+  token: string,
+  projectId: string,
+  repoPath: string,
+): Promise<Board> {
+  return request<Board>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/board/setup`,
+    token,
+    {
+      headers: {
+        "X-Nanobot-Project-Data": JSON.stringify({ repo_path: repoPath }),
+      },
+    },
+  );
+}
+
+export function addBoardColumn(
+  base: string,
+  token: string,
+  projectId: string,
+  name: string,
+): Promise<BoardColumn> {
+  return request<BoardColumn>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/board/columns/add`,
+    token,
+    {
+      headers: {
+        "X-Nanobot-Project-Data": JSON.stringify({ name }),
+      },
+    },
+  );
+}
+
+export function removeBoardColumn(
+  base: string,
+  token: string,
+  projectId: string,
+  columnId: string,
+): Promise<{ ok: true; id: string }> {
+  return request<{ ok: true; id: string }>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/board/columns/${encodeURIComponent(columnId)}/remove`,
+    token,
+  );
+}
+
+export function renameBoardColumn(
+  base: string,
+  token: string,
+  projectId: string,
+  columnId: string,
+  name: string,
+): Promise<BoardColumn> {
+  return request<BoardColumn>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/board/columns/${encodeURIComponent(columnId)}/rename`,
+    token,
+    {
+      headers: {
+        "X-Nanobot-Project-Data": JSON.stringify({ name }),
+      },
+    },
+  );
+}
+
+export function addBoardCard(
+  base: string,
+  token: string,
+  projectId: string,
+  brief: string,
+  columnId: string,
+  title?: string,
+): Promise<BoardCard> {
+  return request<BoardCard>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/board/cards/add`,
+    token,
+    {
+      headers: {
+        "X-Nanobot-Project-Data": JSON.stringify({ brief, column_id: columnId, ...(title ? { title } : {}) }),
+      },
+    },
+  );
+}
+
+export function moveBoardCard(
+  base: string,
+  token: string,
+  projectId: string,
+  cardId: string,
+  columnId: string,
+): Promise<BoardCard> {
+  return request<BoardCard>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/board/cards/${encodeURIComponent(cardId)}/move`,
+    token,
+    {
+      headers: {
+        "X-Nanobot-Project-Data": JSON.stringify({ column_id: columnId }),
+      },
+    },
+  );
+}
+
+export function setBoardCardChat(
+  base: string,
+  token: string,
+  projectId: string,
+  cardId: string,
+  sessionKey: string,
+): Promise<BoardCard> {
+  return request<BoardCard>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/board/cards/${encodeURIComponent(cardId)}/chat`,
+    token,
+    {
+      headers: {
+        "X-Nanobot-Project-Data": JSON.stringify({ session_key: sessionKey }),
+      },
+    },
+  );
+}
+
+export function deleteBoardCard(
+  base: string,
+  token: string,
+  projectId: string,
+  cardId: string,
+): Promise<{ ok: true; id: string }> {
+  return request<{ ok: true; id: string }>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/board/cards/${encodeURIComponent(cardId)}/delete`,
+    token,
+  );
+}
+
+export function mergeBoardCard(
+  base: string,
+  token: string,
+  projectId: string,
+  cardId: string,
+  into: string,
+): Promise<{ ok: true; output: string }> {
+  return request<{ ok: true; output: string }>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/board/cards/${encodeURIComponent(cardId)}/merge?into=${encodeURIComponent(into)}`,
+    token,
+  );
+}
+
+export function spawnBoardCard(
+  base: string,
+  token: string,
+  projectId: string,
+  cardId: string,
+): Promise<BoardCard> {
+  return runCardPhase(base, token, projectId, cardId, "build");
+}
+
+export function planBoardCard(
+  base: string,
+  token: string,
+  projectId: string,
+  cardId: string,
+): Promise<BoardCard> {
+  return runCardPhase(base, token, projectId, cardId, "plan");
+}
+
+export function buildBoardCard(
+  base: string,
+  token: string,
+  projectId: string,
+  cardId: string,
+): Promise<BoardCard> {
+  return runCardPhase(base, token, projectId, cardId, "build");
+}
+
+export function validateBoardCard(
+  base: string,
+  token: string,
+  projectId: string,
+  cardId: string,
+): Promise<BoardCard> {
+  return runCardPhase(base, token, projectId, cardId, "validate");
+}
+
+function runCardPhase(
+  base: string,
+  token: string,
+  projectId: string,
+  cardId: string,
+  phase: string,
+): Promise<BoardCard> {
+  return request<BoardCard>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/board/cards/${encodeURIComponent(cardId)}/${encodeURIComponent(phase)}`,
+    token,
+  );
+}
+
+export function fetchBoardCardSubagent(
+  base: string,
+  token: string,
+  projectId: string,
+  cardId: string,
+): Promise<Record<string, unknown> | { status: null }> {
+  return request<Record<string, unknown> | { status: null }>(
+    `${base}/api/projects/${encodeURIComponent(projectId)}/board/cards/${encodeURIComponent(cardId)}/subagent`,
+    token,
   );
 }

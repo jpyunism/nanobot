@@ -114,6 +114,17 @@ export function readShellRoute(): ShellRoute {
   if (path === "/automations") return { view: "automations", activeKey, settingsSection: "automations" };
   if (path === "/skills") return { view: "skills", activeKey, settingsSection: "skills" };
   if (path === "/projects") return { view: "projects", activeKey, settingsSection: "overview" };
+  if (path.startsWith("/projects/")) {
+    const encoded = path.slice("/projects/".length);
+    try {
+      const id = decodeURIComponent(encoded).trim();
+      return id
+        ? { view: "projects", activeKey: id, settingsSection: "overview" }
+        : { view: "projects", activeKey, settingsSection: "overview" };
+    } catch {
+      return { view: "projects", activeKey, settingsSection: "overview" };
+    }
+  }
   if (path === "/workspace") return { view: "workspace", activeKey, settingsSection: "overview" };
   if (path === "/todos") return { view: "todos", activeKey, settingsSection: "overview" };
   if (path === "/agenda") return { view: "agenda", activeKey, settingsSection: "overview" };
@@ -137,6 +148,12 @@ export function shellRouteHash(route: ShellRoute): string {
     return route.activeKey
       ? `#/chat/${encodeURIComponent(route.activeKey)}`
       : "#/new";
+  }
+  if (route.view === "projects" && route.activeKey) {
+    const params = new URLSearchParams();
+    if (route.settingsSection === "overview") return `#/projects/${encodeURIComponent(route.activeKey)}`;
+    params.set("section", route.settingsSection);
+    return `#/projects/${encodeURIComponent(route.activeKey)}?${params.toString()}`;
   }
   const params = new URLSearchParams();
   if (route.activeKey) params.set("chat", route.activeKey);

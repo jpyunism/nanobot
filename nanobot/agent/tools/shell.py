@@ -142,7 +142,7 @@ class _PreparedCommand:
 )
 class ExecTool(Tool):
     """Tool to execute shell commands."""
-    _scopes = {"core", "subagent"}
+    _scopes = {"core", "subagent", "validator"}
 
     config_key = "exec"
 
@@ -418,6 +418,7 @@ class ExecTool(Tool):
             cwd,
             restrict_to_workspace=access.restrict_to_workspace,
             workspace_root=workspace_root,
+            extra_read_dirs=access.extra_read_dirs,
         )
         if guard_error:
             return guard_error
@@ -714,6 +715,7 @@ class ExecTool(Tool):
         *,
         restrict_to_workspace: bool | None = None,
         workspace_root: str | None = None,
+        extra_read_dirs: tuple[Path, ...] = (),
     ) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
         cmd = command.strip()
@@ -780,6 +782,7 @@ class ExecTool(Tool):
                 allowed = (
                     is_path_within(p, cwd_path)
                     or is_path_within(p, media_path)
+                    or any(is_path_within(p, r) for r in extra_read_dirs)
                 )
                 if not allowed and resolved_workspace is not None:
                     allowed = is_path_within(p, resolved_workspace)

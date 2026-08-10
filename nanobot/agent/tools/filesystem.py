@@ -250,7 +250,7 @@ def _builtin_skill_read_path(path: str) -> Path | None:
 )
 class ReadFileTool(_FsTool):
     """Read file contents with optional line-based pagination."""
-    _scopes = {"core", "subagent"}
+    _scopes = {"core", "subagent", "plan", "validator"}
 
     _MAX_CHARS = 128_000
     _MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024
@@ -1038,7 +1038,7 @@ class EditFileTool(_FsTool):
 )
 class ListDirTool(_FsTool):
     """List directory contents with optional recursion."""
-    _scopes = {"core", "subagent"}
+    _scopes = {"core", "subagent", "plan", "validator"}
 
     _DEFAULT_MAX = 200
     _IGNORE_DIRS = {
