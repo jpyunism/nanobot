@@ -237,7 +237,7 @@ def _select_with_back(
         app.run()
     except Exception:
         logger.exception("Error in select prompt")
-        return None
+        raise
 
     return state["result"]
 

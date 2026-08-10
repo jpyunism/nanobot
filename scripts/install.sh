@@ -313,10 +313,7 @@ if is_fresh_nanobot_install && has_browser_session; then
   info "Falling back to the setup wizard..."
 fi
 
-if [ -t 0 ]; then
-  info "Starting setup wizard..."
-  run_nanobot onboard --wizard
-elif : 2>/dev/null < /dev/tty; then
+if : 2>/dev/null < /dev/tty; then
   info "Starting setup wizard..."
   run_nanobot onboard --wizard < /dev/tty
 else
