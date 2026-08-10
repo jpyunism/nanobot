@@ -41,7 +41,15 @@ import type { SkillDetail, SkillSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
-export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
+export function SkillsCatalogSettings({
+  skills,
+  onRestart,
+  isRestarting = false,
+}: {
+  skills: SkillSummary[];
+  onRestart?: () => void;
+  isRestarting?: boolean;
+}) {
   const { token } = useClient();
   const { t } = useTranslation();
   const [localSkills, setLocalSkills] = useState<SkillSummary[]>(skills);
@@ -149,10 +157,29 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
           </div>
         ) : null}
         {restartRequired ? (
-          <div className="mx-1 mb-1 rounded-[14px] border border-amber-500/20 bg-amber-500/8 px-3 py-2.5 text-[13px] text-amber-800 dark:text-amber-200">
-            {t("settings.skills.restartRequired", {
-              defaultValue: "Restart nanobot to apply skill changes.",
-            })}
+          <div className="mx-1 mb-1 flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-amber-500/20 bg-amber-500/8 px-3 py-2.5 text-[13px] text-amber-800 dark:text-amber-200">
+            <p>
+              {t("settings.skills.restartRequired", {
+                defaultValue: "Restart nanobot to apply skill changes.",
+              })}
+            </p>
+            {onRestart ? (
+              <button
+                type="button"
+                onClick={onRestart}
+                disabled={isRestarting}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[12px] font-medium text-amber-800 transition-colors hover:bg-amber-500/20 disabled:opacity-60 dark:text-amber-200"
+              >
+                {isRestarting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+                )}
+                {isRestarting
+                  ? t("app.system.restarting", { defaultValue: "Restarting…" })
+                  : t("app.system.restart", { defaultValue: "Restart" })}
+              </button>
+            ) : null}
           </div>
         ) : null}
       </section>
