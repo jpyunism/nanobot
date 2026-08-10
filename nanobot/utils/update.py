@@ -199,12 +199,19 @@ def _download_main_zip(dest: Path) -> Path:
     return source
 
 
-def _pip_install(source: str, venv_python: str) -> bool:
-    """Install/upgrade nanobot from *source* into the venv, without deps."""
+def _pip_install(source: str, venv_python: str) -> tuple[bool, str]:
+    """Install/upgrade nanobot from *source* into the venv, without deps.
+
+    Returns (ok, message) so callers can surface the underlying pip error
+    instead of a bare "pip install failed".
+    """
     result = _run(
         [venv_python, "-m", "pip", "install", "--force-reinstall", "--no-deps", "--upgrade", source],
     )
-    return result.returncode == 0
+    if result.returncode == 0:
+        return True, ""
+    detail = (result.stderr or result.stdout or "").strip()
+    return False, detail[:2000]
 
 
 def _git_update(repo_path: Path) -> bool:
@@ -338,14 +345,16 @@ def perform_update(
                 print("git update failed; aborting.")
                 return 1
             source_dir = info.repo_path
-            if not _pip_install(str(source_dir), info.venv_python):
-                print("pip editable refresh failed; aborting.")
+            ok, err = _pip_install(str(source_dir), info.venv_python)
+            if not ok:
+                print(f"pip editable refresh failed: {err}")
                 return 1
         else:
             # PyPI/zip install: download main and reinstall.
             source_dir = _download_main_zip(tmp)
-            if not _pip_install(str(source_dir), info.venv_python):
-                print("pip install failed; aborting.")
+            ok, err = _pip_install(str(source_dir), info.venv_python)
+            if not ok:
+                print(f"pip install failed: {err}")
                 return 1
 
         if not no_webui:

@@ -110,7 +110,7 @@ def test_perform_update_full_mocked(tmp_path, capsys):
     with patch("nanobot.utils.update.detect_install", return_value=InstallInfo("pypi", None, "python", "0.3.0")), \
          patch("nanobot.utils.update.get_remote_info", return_value=RemoteInfo("abc123", "0.4.0", None)), \
          patch("nanobot.utils.update._download_main_zip", return_value=source), \
-         patch("nanobot.utils.update._pip_install", return_value=True), \
+         patch("nanobot.utils.update._pip_install", return_value=(True, "")), \
          patch("nanobot.utils.update.rebuild_webui", return_value=(True, "WebUI rebuilt")), \
          patch("nanobot.utils.update._reinstall_channel_deps", return_value=False), \
          patch("nanobot.utils.update.restart_gateway", return_value=(True, "gateway restarted")):
