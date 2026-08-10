@@ -827,7 +827,20 @@
       "unavailableReasonLabel": "Alasan tidak tersedia",
       "rawInstructions": "SKILL.md mentah",
       "rawInstructionsEmpty": "Tidak ada instruksi mentah.",
-      "detailDescription": "Detail untuk {{name}}."
+      "detailDescription": "Detail untuk {{name}}.",
+      "clawhubTitle": "Install from ClawHub",
+      "clawhubDescription": "Browse the public ClawHub registry and install skills directly.",
+      "clawhubSearchPlaceholder": "Search skills…",
+      "clawhubSearch": "Search",
+      "clawhubTrending": "Trending",
+      "clawhubInstall": "Install",
+      "clawhubInstalling": "Installing…",
+      "clawhubInstalled": "Installed",
+      "clawhubError": "Could not load ClawHub skills.",
+      "clawhubInstallError": "Could not install skill.",
+      "clawhubEmpty": "No skills found. Try another search.",
+      "clawhubInstalls": "{{count}} installs / 60d",
+      "clawhubDownloads": "{{count}} downloads"
     },
     "voice": {
       "selectProvider": "Pilih penyedia",

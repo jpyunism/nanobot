@@ -1,10 +1,25 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { TFunction } from "i18next";
-import { Brain, Check, CircleAlert, KeyRound, Loader2, Terminal } from "lucide-react";
+import {
+  Brain,
+  Check,
+  CircleAlert,
+  Download,
+  KeyRound,
+  Loader2,
+  Search,
+  Terminal,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { fetchSkillDetail } from "@/lib/api";
+import {
+  fetchClawhubSearch,
+  fetchClawhubTrending,
+  fetchSkillDetail,
+  installClawhubSkill,
+  type ClawhubSkillSummary,
+} from "@/lib/api";
 import type { SkillDetail, SkillSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
@@ -57,6 +72,8 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
         )}
       </section>
 
+      <ClawhubSection />
+
       <SkillDetailSheet
         skill={selectedSkill}
         open={selectedSkill !== null}
@@ -64,6 +81,189 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
           if (!open) setSelectedSkill(null);
         }}
       />
+    </div>
+  );
+}
+
+function ClawhubSection() {
+  const { token } = useClient();
+  const { t } = useTranslation();
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<ClawhubSkillSummary[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [installing, setInstalling] = useState<string | null>(null);
+  const [installed, setInstalled] = useState<Set<string>>(new Set());
+
+  const loadTrending = () => {
+    setLoading(true);
+    setError(null);
+    fetchClawhubTrending(token)
+      .then(({ results: next }) => setResults(next))
+      .catch(() => setError(t("settings.skills.clawhubError", { defaultValue: "Could not load ClawHub skills." })))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadTrending();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const runSearch = () => {
+    const q = query.trim();
+    if (!q) {
+      loadTrending();
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    fetchClawhubSearch(token, q)
+      .then(({ results: next }) => setResults(next))
+      .catch(() => setError(t("settings.skills.clawhubError", { defaultValue: "Could not load ClawHub skills." })))
+      .finally(() => setLoading(false));
+  };
+
+  const install = (skill: ClawhubSkillSummary) => {
+    setInstalling(skill.reference);
+    setError(null);
+    installClawhubSkill(token, skill.reference)
+      .then(() => {
+        setInstalled((prev) => new Set(prev).add(skill.reference));
+      })
+      .catch(() => setError(t("settings.skills.clawhubInstallError", { defaultValue: "Could not install skill." })))
+      .finally(() => setInstalling(null));
+  };
+
+  return (
+    <section className="rounded-[22px] bg-settings-surface px-3 py-3 sm:px-4">
+      <div className="flex items-center justify-between border-b border-border/45 pb-3">
+        <h2 className="mb-2 px-1 text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
+          {t("settings.skills.clawhubTitle", { defaultValue: "Install from ClawHub" })}
+        </h2>
+        <span className="rounded-full bg-muted px-2.5 py-1 text-[12px] font-medium text-muted-foreground">
+          clawhub.ai
+        </span>
+      </div>
+
+      <p className="px-1 pb-3 pt-3 text-[13px] leading-5 text-muted-foreground">
+        {t("settings.skills.clawhubDescription", {
+          defaultValue: "Browse the public ClawHub registry and install skills directly.",
+        })}
+      </p>
+
+      <div className="flex gap-2 px-1 pb-3">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && runSearch()}
+            placeholder={t("settings.skills.clawhubSearchPlaceholder", { defaultValue: "Search skills…" })}
+            className="h-9 w-full rounded-[12px] border border-border/50 bg-background/60 pl-9 pr-3 text-[13px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-ring focus:ring-1 focus:ring-ring"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={runSearch}
+          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[12px] bg-foreground/90 px-3.5 text-[13px] font-medium text-background transition-colors hover:bg-foreground"
+        >
+          {t("settings.skills.clawhubSearch", { defaultValue: "Search" })}
+        </button>
+      </div>
+
+      {error ? (
+        <div className="mx-1 mb-3 rounded-[14px] bg-destructive/10 px-3 py-2.5 text-[13px] text-destructive">
+          {error}
+        </div>
+      ) : null}
+
+      {loading ? (
+        <div className="flex items-center gap-2 px-1 py-6 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          {t("settings.skills.loadingDetail", { defaultValue: "Loading skill details..." })}
+        </div>
+      ) : results.length ? (
+        <div className="grid gap-x-10 gap-y-1 py-1 md:grid-cols-2">
+          {results.map((skill) => (
+            <ClawhubRow
+              key={skill.reference}
+              skill={skill}
+              installing={installing === skill.reference}
+              installed={installed.has(skill.reference)}
+              onInstall={() => install(skill)}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="px-3 py-8 text-center text-sm text-muted-foreground">
+          {t("settings.skills.clawhubEmpty", { defaultValue: "No skills found. Try another search." })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ClawhubRow({
+  skill,
+  installing,
+  installed,
+  onInstall,
+}: {
+  skill: ClawhubSkillSummary;
+  installing: boolean;
+  installed: boolean;
+  onInstall: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="group flex min-w-0 items-center gap-3 rounded-[16px] px-3 py-3 text-left">
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px] bg-muted/70 text-muted-foreground">
+        <Brain className="h-5 w-5" strokeWidth={1.8} aria-hidden />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <h3 className="truncate text-[15px] font-semibold leading-5 text-foreground">
+            {skill.name}
+          </h3>
+          <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold leading-none text-muted-foreground">
+            {skill.owner}
+          </span>
+        </div>
+        <p className="mt-1 line-clamp-2 text-[13px] leading-5 text-muted-foreground">
+          {skill.description}
+        </p>
+        <p className="mt-1 text-[11px] leading-4 text-muted-foreground/70">
+          {t("settings.skills.clawhubInstalls", {
+            count: skill.installs_60d,
+            defaultValue: "{{count}} installs / 60d",
+          })}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onInstall}
+        disabled={installing || installed}
+        className={cn(
+          "inline-flex shrink-0 items-center gap-1.5 rounded-[12px] px-3 py-1.5 text-[12px] font-medium transition-colors",
+          installed
+            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+            : "bg-foreground/90 text-background hover:bg-foreground",
+          (installing || installed) && "cursor-default opacity-80",
+        )}
+      >
+        {installing ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+        ) : installed ? (
+          <Check className="h-3.5 w-3.5" aria-hidden />
+        ) : (
+          <Download className="h-3.5 w-3.5" aria-hidden />
+        )}
+        {installing
+          ? t("settings.skills.clawhubInstalling", { defaultValue: "Installing…" })
+          : installed
+            ? t("settings.skills.clawhubInstalled", { defaultValue: "Installed" })
+            : t("settings.skills.clawhubInstall", { defaultValue: "Install" })}
+      </button>
     </div>
   );
 }

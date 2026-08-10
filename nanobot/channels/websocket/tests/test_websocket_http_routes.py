@@ -549,6 +549,126 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
 
 
 @pytest.mark.asyncio
+async def test_clawhub_routes_require_token_and_return_results(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ClawHub search/trending/install routes: auth + mocked registry calls."""
+    import httpx as _httpx
+
+    from nanobot.webui import clawhub_api
+
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        workspace_path=tmp_path,
+        port=29921,
+    )
+    server_task = asyncio.create_task(channel.start())
+    try:
+        # -- 401 without token -------------------------------------------
+        deny = await _http_get("http://127.0.0.1:29921/api/webui/clawhub/search?q=test")
+        assert deny.status_code == 401
+        deny_trending = await _http_get("http://127.0.0.1:29921/api/webui/clawhub/trending")
+        assert deny_trending.status_code == 401
+        deny_install = await _http_get("http://127.0.0.1:29921/api/webui/clawhub/install")
+        assert deny_install.status_code == 401
+
+        token = channel.gateway.tokens.issue_api_token(300)
+        auth = {"Authorization": f"Bearer {token}"}
+
+        # -- search: mocked registry response ----------------------------
+        def fake_search_response(request: _httpx.Request) -> _httpx.Response:
+            assert request.url.path == "/api/v1/search"
+            return _httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "displayName": "Web Scraping",
+                            "summary": "Extract structured information from websites.",
+                            "downloads": 13159,
+                            "metrics": {"rolling60DayInstalls": 31},
+                            "install": {
+                                "kind": "clawhub",
+                                "reference": "zhangqixin9527/web-scraping",
+                            },
+                        }
+                    ]
+                },
+                request=request,
+            )
+
+        monkeypatch.setattr(
+            clawhub_api.httpx,
+            "get",
+            lambda url, **kwargs: fake_search_response(_httpx.Request("GET", str(url))),
+        )
+
+        resp = await _http_get(
+            "http://127.0.0.1:29921/api/webui/clawhub/search?q=web+scraping",
+            headers=auth,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["results"]) == 1
+        result = body["results"][0]
+        assert result["name"] == "Web Scraping"
+        assert result["reference"] == "zhangqixin9527/web-scraping"
+        assert result["owner"] == "zhangqixin9527"
+        assert result["slug"] == "web-scraping"
+        assert result["installs_60d"] == 31
+        assert "path" not in result
+
+        # -- install: mocked zip download --------------------------------
+        import io
+        import zipfile
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w") as zf:
+            zf.writestr("SKILL.md", "---\nname: web-scraping\ndescription: Test.\n---\n")
+        zip_bytes = zip_buffer.getvalue()
+
+        def fake_download_response(request: _httpx.Request) -> _httpx.Response:
+            assert request.url.path == "/api/v1/download"
+            return _httpx.Response(200, content=zip_bytes, request=request)
+
+        monkeypatch.setattr(
+            clawhub_api.httpx,
+            "get",
+            lambda url, **kwargs: fake_download_response(_httpx.Request("GET", str(url))),
+        )
+
+        install_resp = await _http_get(
+            "http://127.0.0.1:29921/api/webui/clawhub/install",
+            headers={
+                **auth,
+                "X-Nanobot-Clawhub-Data": json.dumps(
+                    {"reference": "zhangqixin9527/web-scraping"}
+                ),
+            },
+        )
+        assert install_resp.status_code == 200
+        install_body = install_resp.json()
+        assert install_body["installed"] is True
+        assert install_body["slug"] == "web-scraping"
+        installed_skill = tmp_path / "skills" / "web-scraping" / "SKILL.md"
+        assert installed_skill.exists()
+        assert "name: web-scraping" in installed_skill.read_text(encoding="utf-8")
+
+        # -- install with missing reference ------------------------------
+        bad = await _http_get(
+            "http://127.0.0.1:29921/api/webui/clawhub/install",
+            headers={**auth, "X-Nanobot-Clawhub-Data": json.dumps({})},
+        )
+        assert bad.status_code == 400
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_cli_apps_routes_require_token_and_return_payload(
     bus: MagicMock,
     tmp_path: Path,

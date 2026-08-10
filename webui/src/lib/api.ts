@@ -363,6 +363,64 @@ export async function fetchSkillDetail(
   );
 }
 
+export interface ClawhubSkillSummary {
+  slug: string;
+  owner: string;
+  reference: string;
+  name: string;
+  description: string;
+  installs_60d: number;
+  downloads: number;
+  kind: string;
+}
+
+export interface ClawhubResultsPayload {
+  results: ClawhubSkillSummary[];
+}
+
+export async function fetchClawhubSearch(
+  token: string,
+  query: string,
+  base: string = "",
+): Promise<ClawhubResultsPayload> {
+  return request<ClawhubResultsPayload>(
+    `${base}/api/webui/clawhub/search?q=${encodeURIComponent(query)}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchClawhubTrending(
+  token: string,
+  base: string = "",
+): Promise<ClawhubResultsPayload> {
+  return request<ClawhubResultsPayload>(
+    `${base}/api/webui/clawhub/trending`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function installClawhubSkill(
+  token: string,
+  reference: string,
+  base: string = "",
+): Promise<{ slug: string; installed: boolean; path: string }> {
+  return request<{ slug: string; installed: boolean; path: string }>(
+    `${base}/api/webui/clawhub/install`,
+    token,
+    {
+      method: "GET",
+      headers: {
+        "X-Nanobot-Clawhub-Data": JSON.stringify({ reference }),
+      },
+    },
+    API_READ_TIMEOUT_MS,
+  );
+}
+
 export async function deleteSession(
   token: string,
   key: string,

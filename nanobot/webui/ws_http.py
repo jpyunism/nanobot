@@ -45,6 +45,12 @@ from nanobot.webui.agenda_api import (
 from nanobot.webui.agenda_api import (
     update_appointment as agenda_update_appointment,
 )
+from nanobot.webui.clawhub_api import (
+    ClawhubError,
+    clawhub_install,
+    clawhub_search,
+    clawhub_trending,
+)
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
     file_download_bytes,
@@ -1474,6 +1480,12 @@ class GatewayHTTPHandler:
         m = re.match(r"^/api/webui/skills/([^/]+)$", got)
         if m:
             return self._handle_webui_skill_detail(request, m.group(1))
+        if got == "/api/webui/clawhub/search":
+            return self._handle_clawhub_search(request)
+        if got == "/api/webui/clawhub/trending":
+            return self._handle_clawhub_trending(request)
+        if got == "/api/webui/clawhub/install":
+            return self._handle_clawhub_install(request)
         if got == "/api/webui/sidebar-state":
             return self._handle_webui_sidebar_state(request)
         if got == "/api/webui/sidebar-state/update":
@@ -1724,6 +1736,42 @@ class GatewayHTTPHandler:
         if payload is None:
             return _http_error(404, "skill not found")
         return _http_json_response(payload)
+
+    def _handle_clawhub_search(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _query_first(_parse_query(request.path), "q") or ""
+        try:
+            results = clawhub_search(query)
+        except ClawhubError as exc:
+            return _http_error(502, str(exc))
+        return _http_json_response({"results": results})
+
+    def _handle_clawhub_trending(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            results = clawhub_trending()
+        except ClawhubError as exc:
+            return _http_error(502, str(exc))
+        return _http_json_response({"results": results})
+
+    def _handle_clawhub_install(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(request, "X-Nanobot-Clawhub-Data", 16_384)
+        if err is not None:
+            return err
+        reference = (body.get("reference") or "").strip() if isinstance(body, dict) else ""
+        if not reference:
+            return _http_error(400, "missing reference")
+        try:
+            result = clawhub_install(
+                reference, self.skills_workspace_path / "skills"
+            )
+        except ClawhubError as exc:
+            return _http_error(502, str(exc))
+        return _http_json_response(result)
 
     def _handle_webui_sidebar_state(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):

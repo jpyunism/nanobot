@@ -827,7 +827,20 @@
       "unavailableReasonLabel": "不可用原因",
       "rawInstructions": "原始 SKILL.md",
       "rawInstructionsEmpty": "没有原始说明。",
-      "detailDescription": "{{name}} 的详情。"
+      "detailDescription": "{{name}} 的详情。",
+      "clawhubTitle": "Install from ClawHub",
+      "clawhubDescription": "Browse the public ClawHub registry and install skills directly.",
+      "clawhubSearchPlaceholder": "Search skills…",
+      "clawhubSearch": "Search",
+      "clawhubTrending": "Trending",
+      "clawhubInstall": "Install",
+      "clawhubInstalling": "Installing…",
+      "clawhubInstalled": "Installed",
+      "clawhubError": "Could not load ClawHub skills.",
+      "clawhubInstallError": "Could not install skill.",
+      "clawhubEmpty": "No skills found. Try another search.",
+      "clawhubInstalls": "{{count}} installs / 60d",
+      "clawhubDownloads": "{{count}} downloads"
     },
     "voice": {
       "selectProvider": "选择提供商",

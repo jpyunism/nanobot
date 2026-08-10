@@ -827,7 +827,20 @@
       "unavailableReasonLabel": "利用不可の理由",
       "rawInstructions": "元の SKILL.md",
       "rawInstructionsEmpty": "元の説明はありません。",
-      "detailDescription": "{{name}} の詳細。"
+      "detailDescription": "{{name}} の詳細。",
+      "clawhubTitle": "Install from ClawHub",
+      "clawhubDescription": "Browse the public ClawHub registry and install skills directly.",
+      "clawhubSearchPlaceholder": "Search skills…",
+      "clawhubSearch": "Search",
+      "clawhubTrending": "Trending",
+      "clawhubInstall": "Install",
+      "clawhubInstalling": "Installing…",
+      "clawhubInstalled": "Installed",
+      "clawhubError": "Could not load ClawHub skills.",
+      "clawhubInstallError": "Could not install skill.",
+      "clawhubEmpty": "No skills found. Try another search.",
+      "clawhubInstalls": "{{count}} installs / 60d",
+      "clawhubDownloads": "{{count}} downloads"
     },
     "voice": {
       "selectProvider": "プロバイダーを選択",
