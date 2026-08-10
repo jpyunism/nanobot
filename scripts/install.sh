@@ -129,6 +129,21 @@ has_browser_session() {
   esac
 }
 
+wizard_terminal_available() {
+  # Some platforms (e.g. macOS with a curl|sh install) expose a TTY that
+  # prompt_toolkit's selector still cannot register. Probe the same primitive
+  # before launching the wizard so we can fall back to the WebUI cleanly.
+  "$python_bin" -c '
+import selectors, sys
+try:
+    with selectors.DefaultSelector() as sel:
+        sel.register(sys.stdin.fileno(), selectors.EVENT_READ)
+    raise SystemExit(0)
+except OSError:
+    raise SystemExit(1)
+' 2>/dev/null </dev/tty
+}
+
 install_with_active_python() {
   info "Detected an active virtual environment. Installing into it..."
   ensure_pip "$python_bin" || return 1
@@ -313,9 +328,14 @@ if is_fresh_nanobot_install && has_browser_session; then
   info "Falling back to the setup wizard..."
 fi
 
-if : 2>/dev/null < /dev/tty; then
+if wizard_terminal_available; then
   info "Starting setup wizard..."
   run_nanobot onboard --wizard < /dev/tty
+elif run_nanobot webui --help >/dev/null 2>&1; then
+  info "This terminal cannot run the interactive wizard."
+  info "Starting nanobot WebUI for setup instead..."
+  run_nanobot webui --yes
+  exit 0
 else
   info "Skipping setup wizard because no interactive terminal is available."
   info "Run this later: $(nanobot_try_command) onboard --wizard"
