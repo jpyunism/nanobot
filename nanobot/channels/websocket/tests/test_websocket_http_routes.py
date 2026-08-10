@@ -640,6 +640,7 @@ async def test_clawhub_routes_require_token_and_return_results(
         assert result["name"] == "Find Skills"
         assert result["reference"] == "skills-sh:vercel-labs/skills/find-skills"
         assert result["kind"] == "skills-sh"
+        assert result["owner"] == "vercel-labs"
         clawhub_result = body["results"][1]
         assert clawhub_result["name"] == "Web Scraping"
         assert clawhub_result["reference"] == "zhangqixin9527/web-scraping"

@@ -349,10 +349,13 @@ function ClawhubRow({
         <Brain className="h-5 w-5" strokeWidth={1.8} aria-hidden />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <h3 className="truncate text-[15px] font-semibold leading-5 text-foreground">
-            {skill.name}
-          </h3>
+        <h3 className="truncate text-[15px] font-semibold leading-5 text-foreground">
+          {skill.name}
+        </h3>
+        <p className="mt-1 line-clamp-2 text-[13px] leading-5 text-muted-foreground">
+          {skill.description}
+        </p>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold leading-none text-muted-foreground">
             {skill.owner}
           </span>
@@ -361,16 +364,13 @@ function ClawhubRow({
               skills.sh
             </span>
           ) : null}
+          <span className="text-[11px] leading-4 text-muted-foreground/70">
+            {t("settings.skills.clawhubInstalls", {
+              count: skill.installs_60d,
+              defaultValue: "{{count}} installs",
+            })}
+          </span>
         </div>
-        <p className="mt-1 line-clamp-2 text-[13px] leading-5 text-muted-foreground">
-          {skill.description}
-        </p>
-        <p className="mt-1 text-[11px] leading-4 text-muted-foreground/70">
-          {t("settings.skills.clawhubInstalls", {
-            count: skill.installs_60d,
-            defaultValue: "{{count}} installs",
-          })}
-        </p>
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
         {installed ? (

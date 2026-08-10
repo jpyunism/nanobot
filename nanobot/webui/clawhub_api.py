@@ -51,8 +51,17 @@ def _get(path: str, params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _split_reference(reference: str) -> tuple[str, str]:
-    """Split an install reference like ``owner/slug`` into (owner, slug)."""
-    parts = reference.split("/")
+    """Split an install reference like ``owner/slug`` into (owner, slug).
+
+    Handles skills.sh references (``skills-sh:owner/repo/slug`` or
+    ``owner/repo@slug``) by stripping the prefix, so the owner shown in
+    the UI is the GitHub user/org (``vercel-labs``), not
+    ``skills-sh:vercel-labs``.
+    """
+    ref = reference.strip()
+    if ref.startswith("skills-sh:"):
+        ref = ref[len("skills-sh:") :].strip()
+    parts = ref.split("/")
     if len(parts) >= 2:
         return parts[0], parts[-1]
     return "", reference
