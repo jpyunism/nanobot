@@ -389,12 +389,21 @@ export interface ClawhubSkillSummary {
   name: string;
   description: string;
   installs_60d: number;
+  lifetime_installs?: number;
   downloads: number;
   kind: string;
 }
 
 export interface ClawhubResultsPayload {
   results: ClawhubSkillSummary[];
+}
+
+export interface ClawhubBrowsePayload {
+  results: ClawhubSkillSummary[];
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
 }
 
 export async function fetchClawhubSearch(
@@ -416,6 +425,20 @@ export async function fetchClawhubTrending(
 ): Promise<ClawhubResultsPayload> {
   return request<ClawhubResultsPayload>(
     `${base}/api/webui/clawhub/trending`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchClawhubBrowse(
+  token: string,
+  page: number,
+  pageSize: number = 50,
+  base: string = "",
+): Promise<ClawhubBrowsePayload> {
+  return request<ClawhubBrowsePayload>(
+    `${base}/api/webui/clawhub/browse?page=${page}&page_size=${pageSize}`,
     token,
     undefined,
     API_READ_TIMEOUT_MS,

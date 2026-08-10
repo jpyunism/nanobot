@@ -619,6 +619,8 @@ async def test_clawhub_routes_require_token_and_return_results(
         assert deny.status_code == 401
         deny_trending = await _http_get("http://127.0.0.1:29921/api/webui/clawhub/trending")
         assert deny_trending.status_code == 401
+        deny_browse = await _http_get("http://127.0.0.1:29921/api/webui/clawhub/browse")
+        assert deny_browse.status_code == 401
         deny_install = await _http_get("http://127.0.0.1:29921/api/webui/clawhub/install")
         assert deny_install.status_code == 401
 
@@ -796,6 +798,114 @@ async def test_clawhub_routes_require_token_and_return_results(
         assert update_body["updated"] == ["web-scraping"]
         assert update_body["skipped"] == []
         assert update_body["errors"] == []
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_clawhub_browse_paginates_by_lifetime_installs(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Browse route: full catalog ordered by lifetime installs + pagination."""
+    import httpx as _httpx
+
+    from nanobot.webui import clawhub_api
+
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        workspace_path=tmp_path,
+        port=29922,
+    )
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        auth = {"Authorization": f"Bearer {token}"}
+
+        def fake_trending_response(request: _httpx.Request) -> _httpx.Response:
+            assert request.url.path == "/api/v1/trending"
+            # A tiny catalog: 3 installable items + 1 non-installable.
+            items = [
+                {
+                    "displayName": "Low Installs",
+                    "summary": "Third most installed.",
+                    "metrics": {"lifetimeInstalls": 10},
+                    "install": {"kind": "clawhub", "reference": "alice/low"},
+                },
+                {
+                    "displayName": "Top Installs",
+                    "summary": "Most installed of all time.",
+                    "metrics": {"lifetimeInstalls": 500},
+                    "install": {"kind": "clawhub", "reference": "bob/top"},
+                },
+                {
+                    "displayName": "Middle",
+                    "summary": "Second most installed.",
+                    "metrics": {"lifetimeInstalls": 120},
+                    "install": {"kind": "clawhub", "reference": "carol/middle"},
+                },
+                {
+                    "displayName": "Not installable",
+                    "summary": "Must be filtered out.",
+                    "metrics": {"lifetimeInstalls": 99999},
+                    "install": {"kind": "other", "reference": "x/y"},
+                },
+            ]
+            return _httpx.Response(
+                200,
+                json={
+                    "items": items,
+                    "totalItems": len(items),
+                    "snapshotId": "skills-test",
+                    "nextCursor": None,
+                },
+                request=request,
+            )
+
+        monkeypatch.setattr(
+            clawhub_api.httpx,
+            "get",
+            lambda url, **kwargs: fake_trending_response(_httpx.Request("GET", str(url))),
+        )
+
+        # page 1, page_size 2 → top two by lifetime installs
+        resp = await _http_get(
+            "http://127.0.0.1:29922/api/webui/clawhub/browse?page=1&page_size=2",
+            headers=auth,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert [r["slug"] for r in body["results"]] == ["top", "middle"]
+        assert body["page"] == 1
+        assert body["page_size"] == 2
+        assert body["total"] == 3
+        assert body["total_pages"] == 2
+
+        # page 2 → the remaining installable skill
+        resp2 = await _http_get(
+            "http://127.0.0.1:29922/api/webui/clawhub/browse?page=2&page_size=2",
+            headers=auth,
+        )
+        assert resp2.status_code == 200
+        body2 = resp2.json()
+        assert [r["slug"] for r in body2["results"]] == ["low"]
+        assert body2["total_pages"] == 2
+
+        # invalid params are clamped, not errors
+        resp3 = await _http_get(
+            "http://127.0.0.1:29922/api/webui/clawhub/browse?page=-3&page_size=999",
+            headers=auth,
+        )
+        assert resp3.status_code == 200
+        assert resp3.json()["page"] == 1
+        assert resp3.json()["page_size"] <= clawhub_api._BROWSE_MAX_PAGE_SIZE
+
+        # results carry lifetime installs for the row badge
+        top = resp.json()["results"][0]
+        assert top["lifetime_installs"] == 500
     finally:
         await channel.stop()
         await server_task

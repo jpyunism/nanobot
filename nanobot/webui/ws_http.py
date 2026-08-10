@@ -48,6 +48,7 @@ from nanobot.webui.agenda_api import (
 )
 from nanobot.webui.clawhub_api import (
     ClawhubError,
+    clawhub_browse,
     clawhub_install,
     clawhub_search,
     clawhub_trending,
@@ -1488,6 +1489,8 @@ class GatewayHTTPHandler:
             return self._handle_clawhub_search(request)
         if got == "/api/webui/clawhub/trending":
             return self._handle_clawhub_trending(request)
+        if got == "/api/webui/clawhub/browse":
+            return self._handle_clawhub_browse(request)
         if got == "/api/webui/clawhub/install":
             return self._handle_clawhub_install(request)
         if got == "/api/webui/clawhub/delete":
@@ -1788,6 +1791,24 @@ class GatewayHTTPHandler:
         except ClawhubError as exc:
             return _http_error(502, str(exc))
         return _http_json_response({"results": results})
+
+    def _handle_clawhub_browse(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        try:
+            page = int(_query_first(query, "page") or 1)
+        except ValueError:
+            page = 1
+        try:
+            page_size = int(_query_first(query, "page_size") or 50)
+        except ValueError:
+            page_size = 50
+        try:
+            payload = clawhub_browse(page=page, page_size=page_size)
+        except ClawhubError as exc:
+            return _http_error(502, str(exc))
+        return _http_json_response(payload)
 
     def _handle_clawhub_install(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):

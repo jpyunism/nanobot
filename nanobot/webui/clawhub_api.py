@@ -10,8 +10,13 @@ and extracts it into the workspace skills directory (same layout the
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import io
 import json
+import math
+import threading
+import time
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -25,6 +30,16 @@ _DOWNLOAD_PATH = "/api/v1/download"
 _TIMEOUT = 15.0
 _MAX_RESULTS = 50
 _SOURCE_FILE = ".clawhub-source.json"
+
+_CATALOG_TTL_SECONDS = 600.0
+_BROWSE_MAX_PAGE_SIZE = 50
+_BROWSE_PAGE_CONCURRENCY = 12
+
+# Full-catalog cache: ``{"items": [...], "fetched_at": monotonic}``. The
+# trending endpoint paginates with opaque cursors; fetching every page takes
+# a few seconds, so we cache the normalized, sorted catalog.
+_catalog_cache: dict[str, Any] = {}
+_catalog_lock = threading.Lock()
 
 
 class ClawhubError(Exception):
@@ -101,7 +116,9 @@ def clawhub_search(query: str, limit: int = 20) -> list[dict[str, Any]]:
 
     Only installable kinds are returned: ``clawhub`` (downloaded from the
     ClawHub download API) and ``skills-sh`` (downloaded from their GitHub
-    source repository, see :func:`skills_sh_install`).
+    source repository, see :func:`skills_sh_install`). Results are sorted
+    most-installed first (60-day installs when available, lifetime
+    otherwise) and truncated to ``limit``.
     """
     query = query.strip()
     if not query:
@@ -117,13 +134,15 @@ def clawhub_search(query: str, limit: int = 20) -> list[dict[str, Any]]:
         if isinstance(item, dict) and (item.get("install") or {}).get("kind") in _INSTALLABLE_KINDS
     ]
     payloads.sort(key=lambda s: s["installs_60d"], reverse=True)
-    return payloads
+    return payloads[:limit]
 
 
 def clawhub_trending(limit: int = 20) -> list[dict[str, Any]]:
     """Return trending skills from the ClawHub registry, most installed first.
 
-    Only installable kinds are returned (see ``clawhub_search``).
+    Only installable kinds are returned (see :func:`clawhub_search`). The
+    trending endpoint only returns the current window (100 items), so the
+    ranking is limited to that window.
     """
     data = _get(
         _TRENDING_PATH,
@@ -135,8 +154,175 @@ def clawhub_trending(limit: int = 20) -> list[dict[str, Any]]:
         for item in items
         if isinstance(item, dict) and (item.get("install") or {}).get("kind") in _INSTALLABLE_KINDS
     ]
-    payloads.sort(key=lambda s: s["installs_60d"], reverse=True)
+    payloads.sort(key=lambda s: s["lifetime_installs"], reverse=True)
+    return payloads[:limit]
+
+
+def clawhub_browse(page: int = 1, page_size: int = 50) -> dict[str, Any]:
+    """Browse the whole ClawHub catalog ordered by lifetime installs.
+
+    Fetches the full trending catalog (paginated with opaque cursors,
+    fetched concurrently), normalizes it, sorts by lifetime installs
+    descending, and returns one page with the total count.
+
+    The catalog is cached for :data:`_CATALOG_TTL_SECONDS`; installs change
+    slowly, and re-fetching ~2700 items on every page turn would be wasteful.
+    """
+    page = max(1, int(page))
+    page_size = max(1, min(int(page_size), _BROWSE_MAX_PAGE_SIZE))
+    items = _catalog_items()
+    total = len(items)
+    start = (page - 1) * page_size
+    chunk = items[start : start + page_size]
+    return {
+        "results": chunk,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": max(1, math.ceil(total / page_size)) if total else 1,
+    }
+
+
+def _catalog_items() -> list[dict[str, Any]]:
+    """Return the cached, lifetime-sorted catalog of installable skills."""
+    now = time.monotonic()
+    cached = _catalog_cache.get("items")
+    if cached is not None and now - _catalog_cache.get("fetched_at", 0) < _CATALOG_TTL_SECONDS:
+        return cached
+    with _catalog_lock:
+        cached = _catalog_cache.get("items")
+        if cached is not None and now - _catalog_cache.get("fetched_at", 0) < _CATALOG_TTL_SECONDS:
+            return cached
+        try:
+            items = _fetch_catalog()
+        except ClawhubError:
+            # Serve stale data if the refresh fails.
+            stale = _catalog_cache.get("items")
+            if stale is not None:
+                return stale
+            raise
+        _catalog_cache["items"] = items
+        _catalog_cache["fetched_at"] = time.monotonic()
+        return items
+
+
+def _fetch_catalog() -> list[dict[str, Any]]:
+    """Fetch every trending page (concurrently) and normalize the results."""
+    data = _get(_TRENDING_PATH, {"limit": _BROWSE_MAX_PAGE_SIZE})
+    first_items = data.get("items") or []
+    total = int(data.get("totalItems") or 0)
+    page_size = len(first_items) or _BROWSE_MAX_PAGE_SIZE
+    snapshot = _cursor_snapshot(data.get("nextCursor")) or data.get("snapshotId")
+    offsets = list(range(page_size, total, page_size))
+
+    pages = _fetch_pages_concurrent(snapshot, offsets)
+    raw_items: list[dict[str, Any]] = list(first_items)
+    for page_items in pages:
+        if page_items is None:
+            # A concurrent fetch failed; fall back to sequential walking.
+            return _fetch_catalog_sequential(data)
+        raw_items.extend(page_items)
+
+    payloads = [
+        _summary_payload(item)
+        for item in raw_items
+        if isinstance(item, dict) and (item.get("install") or {}).get("kind") in _INSTALLABLE_KINDS
+    ]
+    payloads.sort(key=lambda s: s["lifetime_installs"], reverse=True)
     return payloads
+
+
+def _fetch_pages_concurrent(
+    snapshot: Any,
+    offsets: list[int],
+) -> list[list[dict[str, Any]] | None]:
+    """Fetch trending pages concurrently, one request per offset."""
+
+    async def fetch_one(offset: int) -> list[dict[str, Any]] | None:
+        cursor = _build_cursor(snapshot, offset)
+        try:
+            data = await asyncio.to_thread(
+                _get,
+                _TRENDING_PATH,
+                {"limit": _BROWSE_MAX_PAGE_SIZE, "cursor": cursor},
+            )
+            return data.get("items") or []
+        except ClawhubError:
+            return None
+
+    async def run() -> list[list[dict[str, Any]] | None]:
+        semaphore = asyncio.Semaphore(_BROWSE_PAGE_CONCURRENCY)
+
+        async def limited(offset: int) -> list[dict[str, Any]] | None:
+            async with semaphore:
+                return await fetch_one(offset)
+
+        return await asyncio.gather(*(limited(o) for o in offsets))
+
+    if not offsets:
+        return []
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No running event loop; drive the coroutine ourselves.
+        return asyncio.run(run())
+    # Already inside an event loop (e.g. the WebUI handler); fall back to
+    # sequential fetches instead of nesting a second loop.
+    return [fetch_one_sequential(snapshot, o) for o in offsets]
+
+
+def fetch_one_sequential(snapshot: Any, offset: int) -> list[dict[str, Any]] | None:
+    cursor = _build_cursor(snapshot, offset)
+    try:
+        data = _get(_TRENDING_PATH, {"limit": _BROWSE_MAX_PAGE_SIZE, "cursor": cursor})
+        return data.get("items") or []
+    except ClawhubError:
+        return None
+
+
+def _fetch_catalog_sequential(seed: dict[str, Any]) -> list[dict[str, Any]]:
+    """Sequential fallback for fetching the full trending catalog."""
+    items: list[dict[str, Any]] = list(seed.get("items") or [])
+    cursor = seed.get("nextCursor")
+    while cursor:
+        data = _get(_TRENDING_PATH, {"limit": _BROWSE_MAX_PAGE_SIZE, "cursor": cursor})
+        batch = data.get("items") or []
+        if not batch:
+            break
+        items.extend(batch)
+        cursor = data.get("nextCursor")
+    payloads = [
+        _summary_payload(item)
+        for item in items
+        if isinstance(item, dict) and (item.get("install") or {}).get("kind") in _INSTALLABLE_KINDS
+    ]
+    payloads.sort(key=lambda s: s["lifetime_installs"], reverse=True)
+    return payloads
+
+
+def _cursor_snapshot(cursor: str | None) -> Any:
+    """Extract the snapshot id from a trending cursor, if decodable."""
+    if not cursor:
+        return None
+    try:
+        decoded = json.loads(base64.urlsafe_b64decode(cursor + "=="))
+        if isinstance(decoded, dict):
+            return decoded.get("s")
+    except (ValueError, TypeError):
+        return None
+    return None
+
+
+def _build_cursor(snapshot: Any, offset: int) -> str:
+    """Build a trending pagination cursor for the given offset.
+
+    Trending cursors encode ``{v, s (snapshot), o (offset), e, p}`` and the
+    server validates them against the active snapshot, so we can jump to
+    any offset within the snapshot.
+    """
+    payload = {"v": 1, "s": snapshot, "o": offset, "e": offset, "p": True}
+    raw = json.dumps(payload).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
 def _clawhub_download_install(reference: str, skills_dir: Path) -> dict[str, Any]:

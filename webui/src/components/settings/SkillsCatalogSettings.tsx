@@ -3,6 +3,8 @@ import type { TFunction } from "i18next";
 import {
   Brain,
   Check,
+  ChevronLeft,
+  ChevronRight,
   CircleAlert,
   Download,
   KeyRound,
@@ -26,8 +28,8 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import {
   deleteClawhubSkill,
+  fetchClawhubBrowse,
   fetchClawhubSearch,
-  fetchClawhubTrending,
   fetchSkillDetail,
   fetchSkills,
   installClawhubSkill,
@@ -205,31 +207,47 @@ function ClawhubSection({
   } | null>(null);
   const [installed, setInstalled] = useState<Set<string>>(new Set());
   const [pendingDelete, setPendingDelete] = useState<ClawhubSkillSummary | null>(null);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [browsing, setBrowsing] = useState(true);
 
-  const loadTrending = () => {
+  const loadBrowse = (targetPage: number) => {
     setLoading(true);
     setError(null);
-    fetchClawhubTrending(token)
-      .then(({ results: next }) => setResults(next))
+    setBrowsing(true);
+    fetchClawhubBrowse(token, targetPage)
+      .then((payload) => {
+        setResults(payload.results);
+        setPage(payload.page);
+        setTotalPages(payload.total_pages);
+        setTotal(payload.total);
+      })
       .catch(() => setError(t("settings.skills.clawhubError", { defaultValue: "Could not load ClawHub skills." })))
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
-    loadTrending();
+    loadBrowse(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   const runSearch = () => {
     const q = query.trim();
     if (!q) {
-      loadTrending();
+      loadBrowse(1);
       return;
     }
     setLoading(true);
     setError(null);
+    setBrowsing(false);
     fetchClawhubSearch(token, q)
-      .then(({ results: next }) => setResults(next))
+      .then(({ results: next }) => {
+        setResults(next);
+        setPage(1);
+        setTotalPages(1);
+        setTotal(next.length);
+      })
       .catch(() => setError(t("settings.skills.clawhubError", { defaultValue: "Could not load ClawHub skills." })))
       .finally(() => setLoading(false));
   };
@@ -349,6 +367,29 @@ function ClawhubSection({
         </div>
       ) : null}
 
+      <div className="flex items-center justify-between px-1 pb-1">
+        <span className="text-[12px] font-medium text-muted-foreground">
+          {browsing
+            ? t("settings.skills.clawhubBrowseTotal", {
+                total,
+                defaultValue: "{{total}} skills · ordered by lifetime installs",
+              })
+            : t("settings.skills.clawhubSearchTotal", {
+                total: results.length,
+                defaultValue: "{{total}} results",
+              })}
+        </span>
+        {browsing && totalPages > 1 ? (
+          <span className="text-[12px] text-muted-foreground/80">
+            {t("settings.skills.clawhubPage", {
+              page,
+              totalPages,
+              defaultValue: "Page {{page}} / {{totalPages}}",
+            })}
+          </span>
+        ) : null}
+      </div>
+
       {loading ? (
         <div className="flex items-center gap-2 px-1 py-6 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -376,6 +417,36 @@ function ClawhubSection({
           {t("settings.skills.clawhubEmpty", { defaultValue: "No skills found. Try another search." })}
         </div>
       )}
+
+      {browsing && totalPages > 1 ? (
+        <div className="mt-3 flex items-center justify-center gap-2 px-1">
+          <button
+            type="button"
+            disabled={loading || page <= 1}
+            onClick={() => loadBrowse(page - 1)}
+            className="inline-flex h-9 items-center gap-1 rounded-[12px] border border-border/60 px-3 text-[13px] font-medium text-foreground/85 transition-colors hover:bg-muted/50 disabled:opacity-50"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
+            {t("settings.skills.clawhubPrev", { defaultValue: "Previous" })}
+          </button>
+          <span className="min-w-[4.5rem] text-center text-[12px] font-medium text-muted-foreground">
+            {t("settings.skills.clawhubPage", {
+              page,
+              totalPages,
+              defaultValue: "Page {{page}} / {{totalPages}}",
+            })}
+          </span>
+          <button
+            type="button"
+            disabled={loading || page >= totalPages}
+            onClick={() => loadBrowse(page + 1)}
+            className="inline-flex h-9 items-center gap-1 rounded-[12px] border border-border/60 px-3 text-[13px] font-medium text-foreground/85 transition-colors hover:bg-muted/50 disabled:opacity-50"
+          >
+            {t("settings.skills.clawhubNext", { defaultValue: "Next" })}
+            <ChevronRight className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        </div>
+      ) : null}
 
       <SkillDeleteDialog
         skill={pendingDelete}
@@ -483,7 +554,7 @@ function ClawhubRow({
           ) : null}
           <span className="text-[11px] leading-4 text-muted-foreground/70">
             {t("settings.skills.clawhubInstalls", {
-              count: skill.installs_60d,
+              count: skill.lifetime_installs ?? skill.installs_60d,
               defaultValue: "{{count}} installs",
             })}
           </span>
