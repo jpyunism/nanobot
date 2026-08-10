@@ -94,7 +94,10 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
         )}
       </section>
 
-      <ClawhubSection onSkillsChanged={refreshSkills} />
+      <ClawhubSection
+        onSkillsChanged={refreshSkills}
+        installedNames={new Set(localSkills.map((skill) => skill.name))}
+      />
 
       <SkillDetailSheet
         skill={selectedSkill}
@@ -107,7 +110,13 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
   );
 }
 
-function ClawhubSection({ onSkillsChanged }: { onSkillsChanged: () => void }) {
+function ClawhubSection({
+  onSkillsChanged,
+  installedNames,
+}: {
+  onSkillsChanged: () => void;
+  installedNames: Set<string>;
+}) {
   const { token } = useClient();
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -235,7 +244,11 @@ function ClawhubSection({ onSkillsChanged }: { onSkillsChanged: () => void }) {
               key={skill.reference}
               skill={skill}
               installing={installing === skill.reference}
-              installed={installed.has(skill.reference) || installed.has(skill.slug)}
+              installed={
+                installed.has(skill.reference) ||
+                installed.has(skill.slug) ||
+                installedNames.has(skill.slug)
+              }
               onInstall={() => install(skill)}
               onDelete={() => setPendingDelete(skill)}
             />
