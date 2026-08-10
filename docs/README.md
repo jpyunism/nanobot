@@ -15,11 +15,11 @@ Repository docs follow the current source tree and can be newer than the latest 
 The recommended first-run path is:
 
 1. Install nanobot.
-2. Let the installer open `nanobot webui` on a fresh local desktop.
+2. Run `nanobot webui` on a fresh local desktop to open the browser-based setup.
 3. Configure a provider and model in **Settings → Models**.
 4. Send `Hello!` before configuring anything else.
 
-Most people do not need to edit JSON for the first run. The WebUI handles the initial provider, model, and local browser settings. SSH, headless, existing-config, and older-release installs retain `nanobot onboard --wizard` as a terminal fallback. After the WebUI opens, use **Settings** for models and built-in capabilities, **Settings → Channels** for chat apps, and **Apps** for CLI App or MCP integrations.
+The installer only installs the binary; it does not launch the WebUI or wizard automatically. Most people do not need to edit JSON for the first run. The WebUI handles the initial provider, model, and local browser settings. SSH, headless, and prompt-preferring users can run `nanobot onboard --wizard` as a terminal fallback. After the WebUI opens, use **Settings** for models and built-in capabilities, **Settings → Channels** for chat apps, and **Apps** for CLI App or MCP integrations.
 
 ## Add One Capability
 

@@ -30,37 +30,39 @@ curl -fsSL https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/inst
 irm https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The installer chooses an active virtual environment, `uv`, `pipx`, or a managed environment under `~/.nanobot/venv`. It installs the stable PyPI release unless you explicitly pass `--dev`. At the end it prints the exact command it used to run nanobot; if `nanobot` is not on `PATH`, reuse that full command in the examples below.
+The installer chooses an active virtual environment, `uv`, `pipx`, or a managed environment under `~/.nanobot/venv`. It installs the stable PyPI release unless you explicitly pass `--dev`. At the end it prints the exact command it used to run nanobot and a list of next steps; if `nanobot` is not on `PATH`, reuse that full command in the examples below.
 
 If you prefer to inspect the scripts first, open [`install.sh`](../scripts/install.sh) or [`install.ps1`](../scripts/install.ps1).
 
 ## 2. Configure Your Model
 
-Keep the installer terminal open. The browser opens the local WebUI; go to **Settings → Models** and:
+The installer does not launch the WebUI or wizard automatically. Choose one of the setup paths it prints at the end:
+
+### Browser setup (recommended for desktop)
+
+```bash
+nanobot webui
+```
+
+Then go to **Settings → Models** and:
 
 1. Choose the provider or endpoint that owns your credential.
 2. Enter its API key or base URL when required.
 3. Create or select a model preset using a model ID that provider can run.
 4. Save the configuration.
 
-The WebUI launcher creates or updates:
+### Terminal setup (SSH, headless, or when you prefer prompts)
+
+```bash
+nanobot onboard --wizard
+```
+
+Either path creates or updates:
 
 | Path | Purpose |
 |---|---|
 | `~/.nanobot/config.json` | Provider, model, WebUI, channel, tool, and runtime settings |
 | `~/.nanobot/workspace/` | Sessions, memory, skills, automations, and generated files |
-
-If the installer did not open the browser, run:
-
-```bash
-nanobot webui
-```
-
-SSH, headless, existing-config, and older-release installs retain the terminal setup path:
-
-```bash
-nanobot onboard --wizard
-```
 
 ## 3. Check the Setup
 
