@@ -814,6 +814,7 @@
       "unavailableReason": "Manquant : {{reason}}",
       "openDetails": "Ouvrir les détails de {{name}}",
       "loadingDetail": "Chargement des détails...",
+      "loadingCatalog": "Chargement des skills…",
       "loadFailed": "Impossible de charger les détails.",
       "descriptionTitle": "Description",
       "source": "Source",

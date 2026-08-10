@@ -814,6 +814,7 @@
       "unavailableReason": "缺少：{{reason}}",
       "openDetails": "開啟 {{name}} 的詳細資料",
       "loadingDetail": "正在載入技能詳細資料…",
+      "loadingCatalog": "正在載入技能…",
       "loadFailed": "無法載入技能詳細資料。",
       "descriptionTitle": "描述",
       "source": "來源",

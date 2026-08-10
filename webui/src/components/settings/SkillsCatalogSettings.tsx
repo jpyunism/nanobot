@@ -251,6 +251,15 @@ function ClawhubSection({
         setPage(payload.page);
         setTotalPages(payload.total_pages);
         setTotal(payload.total);
+        if (payload.loading) {
+          // Catalog is still being fetched in the background; poll until
+          // it is ready so the UI shows a spinner instead of an empty list.
+          window.setTimeout(() => loadBrowse(targetPage), 2_000);
+          return;
+        }
+        if (payload.error) {
+          setError(payload.error);
+        }
       })
       .catch(() => setError(t("settings.skills.clawhubError", { defaultValue: "Could not load ClawHub skills." })))
       .finally(() => setLoading(false));
@@ -422,7 +431,7 @@ function ClawhubSection({
       {loading ? (
         <div className="flex items-center gap-2 px-1 py-6 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-          {t("settings.skills.loadingDetail", { defaultValue: "Loading skill details..." })}
+          {t("settings.skills.loadingCatalog", { defaultValue: "Loading skills…" })}
         </div>
       ) : results.length ? (
         <div className="grid gap-x-10 gap-y-1 py-1 md:grid-cols-2">

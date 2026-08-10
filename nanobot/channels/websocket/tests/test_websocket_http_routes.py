@@ -825,6 +825,11 @@ async def test_clawhub_browse_paginates_by_lifetime_installs(
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
+        # Reset the module-level catalog cache so this test exercises the
+        # background fetch path (first browse returns loading=True).
+        clawhub_api._catalog_cache.clear()
+        clawhub_api._catalog_state["status"] = "idle"
+
         def fake_trending_response(request: _httpx.Request) -> _httpx.Response:
             assert request.url.path == "/api/v1/trending"
             # A tiny catalog: 3 installable items + 1 non-installable.
@@ -872,12 +877,20 @@ async def test_clawhub_browse_paginates_by_lifetime_installs(
         )
 
         # page 1, page_size 2 → top two by lifetime installs
-        resp = await _http_get(
-            "http://127.0.0.1:29922/api/webui/clawhub/browse?page=1&page_size=2",
-            headers=auth,
-        )
-        assert resp.status_code == 200
-        body = resp.json()
+        # The first browse kicks off a background fetch; poll until the
+        # catalog is ready (loading flag flips to False).
+        body = None
+        for _ in range(50):
+            resp = await _http_get(
+                "http://127.0.0.1:29922/api/webui/clawhub/browse?page=1&page_size=2",
+                headers=auth,
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+            if not body.get("loading"):
+                break
+            await asyncio.sleep(0.1)
+        assert body is not None
         assert [r["slug"] for r in body["results"]] == ["top", "middle"]
         assert body["page"] == 1
         assert body["page_size"] == 2

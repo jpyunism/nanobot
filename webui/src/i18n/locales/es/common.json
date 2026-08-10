@@ -823,6 +823,7 @@
       "unavailableReason": "Falta: {{reason}}",
       "openDetails": "Abrir detalles de {{name}}",
       "loadingDetail": "Cargando detalles de la habilidad...",
+      "loadingCatalog": "Cargando skills…",
       "loadFailed": "No se pudieron cargar los detalles.",
       "descriptionTitle": "Descripción",
       "source": "Origen",

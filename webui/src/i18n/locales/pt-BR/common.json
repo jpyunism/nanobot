@@ -814,6 +814,7 @@
       "unavailableReason": "Faltando: {{reason}}",
       "openDetails": "Abrir detalhes de {{name}}",
       "loadingDetail": "Carregando detalhes da skill...",
+      "loadingCatalog": "Carregando skills…",
       "loadFailed": "Não foi possível carregar os detalhes da skill.",
       "descriptionTitle": "Descrição",
       "source": "Origem",

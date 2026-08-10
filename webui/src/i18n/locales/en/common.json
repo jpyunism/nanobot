@@ -867,6 +867,7 @@
       "unavailableReason": "Missing: {{reason}}",
       "openDetails": "Open details for {{name}}",
       "loadingDetail": "Loading skill details...",
+      "loadingCatalog": "Loading skills…",
       "loadFailed": "Could not load skill details.",
       "descriptionTitle": "Description",
       "source": "Source",

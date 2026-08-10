@@ -814,6 +814,7 @@
       "unavailableReason": "Kurang: {{reason}}",
       "openDetails": "Buka detail {{name}}",
       "loadingDetail": "Memuat detail skill...",
+      "loadingCatalog": "Memuat skills…",
       "loadFailed": "Tidak dapat memuat detail skill.",
       "descriptionTitle": "Deskripsi",
       "source": "Sumber",

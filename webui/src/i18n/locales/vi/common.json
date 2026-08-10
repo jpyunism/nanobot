@@ -814,6 +814,7 @@
       "unavailableReason": "Thiếu: {{reason}}",
       "openDetails": "Mở chi tiết {{name}}",
       "loadingDetail": "Đang tải chi tiết kỹ năng...",
+      "loadingCatalog": "Đang tải skills…",
       "loadFailed": "Không tải được chi tiết kỹ năng.",
       "descriptionTitle": "Mô tả",
       "source": "Nguồn",

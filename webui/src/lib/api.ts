@@ -404,6 +404,8 @@ export interface ClawhubBrowsePayload {
   page_size: number;
   total: number;
   total_pages: number;
+  loading?: boolean;
+  error?: string;
 }
 
 export async function fetchClawhubSearch(

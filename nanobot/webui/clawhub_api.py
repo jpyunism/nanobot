@@ -40,6 +40,9 @@ _BROWSE_PAGE_CONCURRENCY = 12
 # a few seconds, so we cache the normalized, sorted catalog.
 _catalog_cache: dict[str, Any] = {}
 _catalog_lock = threading.Lock()
+# Catalog fetch state: "idle" | "loading" | "ready" | "error". The fetch
+# runs in a background daemon thread so the WebUI never blocks on it.
+_catalog_state: dict[str, Any] = {"status": "idle"}
 
 
 class ClawhubError(Exception):
@@ -161,49 +164,73 @@ def clawhub_trending(limit: int = 20) -> list[dict[str, Any]]:
 def clawhub_browse(page: int = 1, page_size: int = 50) -> dict[str, Any]:
     """Browse the whole ClawHub catalog ordered by lifetime installs.
 
-    Fetches the full trending catalog (paginated with opaque cursors,
-    fetched concurrently), normalizes it, sorts by lifetime installs
-    descending, and returns one page with the total count.
-
-    The catalog is cached for :data:`_CATALOG_TTL_SECONDS`; installs change
-    slowly, and re-fetching ~2700 items on every page turn would be wasteful.
+    Never blocks on the network: the catalog is fetched in a background
+    thread (see :func:`_catalog_items`). While the first fetch is running
+    the payload carries ``loading: True`` so the UI can show a spinner and
+    poll until the catalog is ready.
     """
     page = max(1, int(page))
     page_size = max(1, min(int(page_size), _BROWSE_MAX_PAGE_SIZE))
-    items = _catalog_items()
+    items, status = _catalog_items()
     total = len(items)
     start = (page - 1) * page_size
     chunk = items[start : start + page_size]
-    return {
+    payload: dict[str, Any] = {
         "results": chunk,
         "page": page,
         "page_size": page_size,
         "total": total,
         "total_pages": max(1, math.ceil(total / page_size)) if total else 1,
+        "loading": status == "loading",
     }
+    if status == "error":
+        payload["error"] = _catalog_state.get("error") or "ClawHub catalog is unavailable"
+    return payload
 
 
-def _catalog_items() -> list[dict[str, Any]]:
-    """Return the cached, lifetime-sorted catalog of installable skills."""
+def _catalog_items() -> tuple[list[dict[str, Any]], str]:
+    """Return (items, status) without ever blocking on the network.
+
+    status is "ready" when the cached catalog is fresh, "loading" while a
+    background fetch is running, and "error" after a failed fetch. On the
+    first call (or after a TTL expiry) a background fetch is started and
+    stale data (or an empty list) is returned immediately.
+    """
     now = time.monotonic()
-    cached = _catalog_cache.get("items")
-    if cached is not None and now - _catalog_cache.get("fetched_at", 0) < _CATALOG_TTL_SECONDS:
-        return cached
     with _catalog_lock:
         cached = _catalog_cache.get("items")
-        if cached is not None and now - _catalog_cache.get("fetched_at", 0) < _CATALOG_TTL_SECONDS:
-            return cached
-        try:
-            items = _fetch_catalog()
-        except ClawhubError:
-            # Serve stale data if the refresh fails.
-            stale = _catalog_cache.get("items")
-            if stale is not None:
-                return stale
-            raise
+        fetched_at = _catalog_cache.get("fetched_at", 0)
+        status = _catalog_state.get("status", "idle")
+        if cached is not None and now - fetched_at < _CATALOG_TTL_SECONDS:
+            return cached, "ready"
+        if status == "loading":
+            return cached or [], "loading"
+        if status == "error":
+            return cached or [], "error"
+        # idle: kick off a background fetch; serve stale data (or nothing
+        # on the very first load) without blocking the caller.
+        _catalog_state["status"] = "loading"
+    threading.Thread(
+        target=_background_catalog_fetch,
+        name="clawhub-catalog-prefetch",
+        daemon=True,
+    ).start()
+    return cached or [], "ready" if cached is not None else "loading"
+
+
+def _background_catalog_fetch() -> None:
+    """Fetch the full catalog in a background thread and cache it."""
+    try:
+        items = _fetch_catalog()
+    except ClawhubError as exc:
+        with _catalog_lock:
+            _catalog_state["status"] = "error"
+            _catalog_state["error"] = str(exc)
+        return
+    with _catalog_lock:
         _catalog_cache["items"] = items
         _catalog_cache["fetched_at"] = time.monotonic()
-        return items
+        _catalog_state["status"] = "ready"
 
 
 def _fetch_catalog() -> list[dict[str, Any]]:

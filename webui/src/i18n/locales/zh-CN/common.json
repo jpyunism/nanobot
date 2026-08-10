@@ -814,6 +814,7 @@
       "unavailableReason": "缺少：{{reason}}",
       "openDetails": "查看 {{name}} 详情",
       "loadingDetail": "正在加载技能详情...",
+      "loadingCatalog": "正在加载技能…",
       "loadFailed": "无法加载技能详情。",
       "descriptionTitle": "完整描述",
       "source": "来源",
