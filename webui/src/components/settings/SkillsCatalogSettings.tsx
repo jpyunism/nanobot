@@ -166,7 +166,10 @@ export function SkillsCatalogSettings({
             {onRestart ? (
               <button
                 type="button"
-                onClick={onRestart}
+                onClick={() => {
+                  setRestartRequired(false);
+                  onRestart?.();
+                }}
                 disabled={isRestarting}
                 className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[12px] font-medium text-amber-800 transition-colors hover:bg-amber-500/20 disabled:opacity-60 dark:text-amber-200"
               >
