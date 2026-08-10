@@ -3,8 +3,8 @@ set -eu
 
 package="nanobot-ai"
 main_source="https://github.com/madkoding/nanobot/archive/refs/heads/main.zip"
-install_target="$package"
-install_source="PyPI"
+install_target="$main_source"
+install_source="GitHub main (madkoding/nanobot)"
 dry_run="0"
 nanobot_runner=""
 nanobot_python=""
@@ -32,10 +32,11 @@ install_failure_hint() {
 
 usage() {
   cat <<'EOF'
-Usage: install.sh [--dev] [--dry-run]
+Usage: install.sh [--dev] [--pypi] [--dry-run]
 
-By default this installs or upgrades nanobot-ai from PyPI.
-Use --dev to install from the current main branch on GitHub.
+By default this installs or upgrades nanobot from the madkoding/nanobot
+fork's main branch on GitHub.
+Use --pypi to install the published nanobot-ai release from PyPI instead.
 Use --dry-run to print what would happen without installing or starting setup.
 EOF
 }
@@ -201,7 +202,11 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --dev)
       install_target="$main_source"
-      install_source="GitHub main"
+      install_source="GitHub main (madkoding/nanobot)"
+      ;;
+    --pypi)
+      install_target="$package"
+      install_source="PyPI"
       ;;
     --dry-run)
       dry_run="1"
