@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import sys
 import types
 from dataclasses import dataclass
 from functools import lru_cache
@@ -1920,6 +1921,18 @@ def _configure_advanced_settings(config: Config) -> None:
             action_fn()
 
 
+def _require_interactive_terminal() -> bool:
+    """Return True when stdin is a TTY, else print a clear error and return False."""
+    if sys.stdin.isatty():
+        return True
+    print(
+        "[red]Setup wizard requires an interactive terminal.[/red] "
+        "Run `nanobot onboard --wizard` in a real terminal, or use "
+        "`nanobot onboard --refresh` to refresh config non-interactively."
+    )
+    return False
+
+
 def run_onboard(initial_config: Config | None = None) -> OnboardResult:
     """Run the interactive onboarding questionnaire.
 
@@ -1928,6 +1941,9 @@ def run_onboard(initial_config: Config | None = None) -> OnboardResult:
                        If None, loads from config file or creates new default.
     """
     _get_questionary()
+
+    if not _require_interactive_terminal():
+        return OnboardResult(config=initial_config or Config(), should_save=False)
 
     if initial_config is not None:
         base_config = initial_config.model_copy(deep=True)
@@ -1978,6 +1994,8 @@ def run_onboard(initial_config: Config | None = None) -> OnboardResult:
 def run_quick_start_onboard(initial_config: Config) -> OnboardResult:
     """Run the compact provider + local WebUI setup path directly."""
     _get_questionary()
+    if not _require_interactive_terminal():
+        return OnboardResult(config=initial_config, should_save=False)
     draft = initial_config.model_copy(deep=True)
     if _configure_quick_start(draft):
         return OnboardResult(config=draft, should_save=True)

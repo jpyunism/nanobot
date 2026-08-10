@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
 from pydantic import BaseModel, Field
 
 from nanobot.cli import onboard as onboard_wizard
@@ -24,6 +25,12 @@ from nanobot.cli.onboard import (
 from nanobot.config.loader import merge_missing_defaults
 from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.utils.helpers import sync_workspace_templates
+
+
+@pytest.fixture(autouse=True)
+def _fake_tty_stdin(monkeypatch):
+    """Run_onboard guards on a TTY; tests run under pytest's non-tty stdin."""
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
 
 class TestMergeMissingDefaults:
@@ -517,6 +524,15 @@ class TestConfigurePydanticModelDrafts:
 
 
 class TestRunOnboardExitBehavior:
+    def test_non_tty_stdin_discards_without_prompting(self, monkeypatch):
+        initial_config = Config()
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+        result = run_onboard(initial_config=initial_config)
+
+        assert result.should_save is False
+        assert result.config.model_dump(by_alias=True) == initial_config.model_dump(by_alias=True)
+
     def test_main_menu_interrupt_can_discard_unsaved_session_changes(self, monkeypatch):
         initial_config = Config()
 
