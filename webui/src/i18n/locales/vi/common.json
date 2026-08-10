@@ -846,7 +846,10 @@
       "clawhubDeleteDescription": "Remove the '{{name}}' skill from this workspace? This cannot be undone.",
       "clawhubDeleteConfirm": "Delete",
       "clawhubDeleteError": "Could not delete skill.",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "clawhubUpdateAll": "Cập nhật tất cả đã cài",
+      "clawhubUpdateAllResult": "{{updated}} đã cập nhật · {{skipped}} bỏ qua · {{errors}} lỗi",
+      "clawhubUpdateAllError": "Không thể cập nhật skill."
     },
     "voice": {
       "selectProvider": "Chon nha cung cap",

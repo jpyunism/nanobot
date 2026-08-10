@@ -899,7 +899,10 @@
       "clawhubDeleteDescription": "Remove the '{{name}}' skill from this workspace? This cannot be undone.",
       "clawhubDeleteConfirm": "Delete",
       "clawhubDeleteError": "Could not delete skill.",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "clawhubUpdateAll": "Update all installed",
+      "clawhubUpdateAllResult": "{{updated}} updated · {{skipped}} skipped · {{errors}} failed",
+      "clawhubUpdateAllError": "Could not update skills."
     },
     "voice": {
       "selectProvider": "Select provider",

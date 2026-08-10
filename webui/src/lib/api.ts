@@ -439,6 +439,24 @@ export async function deleteClawhubSkill(
   );
 }
 
+export interface ClawhubUpdateAllPayload {
+  updated: string[];
+  skipped: string[];
+  errors: { slug: string; error: string }[];
+}
+
+export async function updateAllClawhubSkills(
+  token: string,
+  base: string = "",
+): Promise<ClawhubUpdateAllPayload> {
+  return request<ClawhubUpdateAllPayload>(
+    `${base}/api/webui/clawhub/update-all`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
 export async function deleteSession(
   token: string,
   key: string,

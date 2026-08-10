@@ -721,6 +721,34 @@ async def test_clawhub_routes_require_token_and_return_results(
             headers={**auth, "X-Nanobot-Clawhub-Data": json.dumps({"name": "../evil"})},
         )
         assert traversal.status_code == 400
+
+        # -- update-all route --------------------------------------------
+        deny_update = await _http_get("http://127.0.0.1:29921/api/webui/clawhub/update-all")
+        assert deny_update.status_code == 401
+
+        # re-install the skill (with its source marker) so update-all has
+        # something to update; the download mock is still active.
+        reinstall = await _http_get(
+            "http://127.0.0.1:29921/api/webui/clawhub/install",
+            headers={
+                **auth,
+                "X-Nanobot-Clawhub-Data": json.dumps(
+                    {"reference": "zhangqixin9527/web-scraping"}
+                ),
+            },
+        )
+        assert reinstall.status_code == 200
+        assert (tmp_path / "skills" / "web-scraping" / ".clawhub-source.json").exists()
+
+        update_resp = await _http_get(
+            "http://127.0.0.1:29921/api/webui/clawhub/update-all",
+            headers=auth,
+        )
+        assert update_resp.status_code == 200
+        update_body = update_resp.json()
+        assert update_body["updated"] == ["web-scraping"]
+        assert update_body["skipped"] == []
+        assert update_body["errors"] == []
     finally:
         await channel.stop()
         await server_task

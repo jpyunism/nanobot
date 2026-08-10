@@ -11,6 +11,7 @@ and extracts it into the workspace skills directory (same layout the
 from __future__ import annotations
 
 import io
+import json
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ _TRENDING_PATH = "/api/v1/trending"
 _DOWNLOAD_PATH = "/api/v1/download"
 _TIMEOUT = 15.0
 _MAX_RESULTS = 50
+_SOURCE_FILE = ".clawhub-source.json"
 
 
 class ClawhubError(Exception):
@@ -183,7 +185,34 @@ def _clawhub_download_install(reference: str, skills_dir: Path) -> dict[str, Any
         resolved.parent.mkdir(parents=True, exist_ok=True)
         resolved.write_bytes(archive.read(member))
 
+    _write_source_meta(skills_dir, slug, reference, "clawhub")
     return {"slug": slug, "installed": True, "path": str(target)}
+
+
+def _write_source_meta(skills_dir: Path, slug: str, reference: str, kind: str) -> None:
+    """Record where a skill came from so it can be updated later."""
+    meta = {"reference": reference, "kind": kind}
+    (skills_dir / slug / _SOURCE_FILE).write_text(
+        json.dumps(meta, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def _read_source_meta(skills_dir: Path, slug: str) -> dict[str, str] | None:
+    """Return the recorded install source for ``slug``, or None."""
+    meta_path = skills_dir / slug / _SOURCE_FILE
+    if not meta_path.exists():
+        return None
+    try:
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    reference = data.get("reference")
+    kind = data.get("kind")
+    if not isinstance(reference, str) or not reference:
+        return None
+    return {"reference": reference, "kind": str(kind) if isinstance(kind, str) else "clawhub"}
 
 
 def skills_sh_install(reference: str, skills_dir: Path) -> dict[str, Any]:
@@ -245,7 +274,44 @@ def skills_sh_install(reference: str, skills_dir: Path) -> dict[str, Any]:
                 )
             )
 
+    _write_source_meta(skills_dir, slug, ref, "skills-sh")
     return {"slug": slug, "installed": True, "path": str(target), "source": "skills-sh"}
+
+
+def _safe_skill_dirs(skills_dir: Path) -> list[Path]:
+    """Return the workspace skill folders (directories containing SKILL.md)."""
+    if not skills_dir.is_dir():
+        return []
+    return [d for d in skills_dir.iterdir() if d.is_dir() and (d / "SKILL.md").exists()]
+
+
+def clawhub_update_all(skills_dir: Path) -> dict[str, Any]:
+    """Re-install every ClawHub/skills.sh skill that has a recorded source.
+
+    Existing skills without a ``.clawhub-source.json`` marker (e.g. added
+    before the marker existed) are skipped and reported as ``skipped`` so
+    the UI can tell the user they were not updated.
+    """
+    updated: list[str] = []
+    skipped: list[str] = []
+    errors: list[dict[str, str]] = []
+
+    for folder in _safe_skill_dirs(skills_dir):
+        slug = folder.name
+        meta = _read_source_meta(skills_dir, slug)
+        if meta is None:
+            skipped.append(slug)
+            continue
+        try:
+            if meta["kind"] == "skills-sh":
+                skills_sh_install(meta["reference"], skills_dir)
+            else:
+                _clawhub_download_install(meta["reference"], skills_dir)
+            updated.append(slug)
+        except ClawhubError as exc:
+            errors.append({"slug": slug, "error": str(exc)})
+
+    return {"updated": updated, "skipped": skipped, "errors": errors}
 
 
 def _github_default_branch(owner: str, repo: str) -> str:

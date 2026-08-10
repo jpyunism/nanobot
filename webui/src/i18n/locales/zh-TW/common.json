@@ -846,7 +846,10 @@
       "clawhubDeleteDescription": "Remove the '{{name}}' skill from this workspace? This cannot be undone.",
       "clawhubDeleteConfirm": "Delete",
       "clawhubDeleteError": "Could not delete skill.",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "clawhubUpdateAll": "更新所有已安裝",
+      "clawhubUpdateAllResult": "{{updated}} 已更新 · {{skipped}} 已跳過 · {{errors}} 失敗",
+      "clawhubUpdateAllError": "無法更新技能。"
     },
     "voice": {
       "selectProvider": "選擇供應商",

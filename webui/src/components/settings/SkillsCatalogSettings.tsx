@@ -7,6 +7,7 @@ import {
   Download,
   KeyRound,
   Loader2,
+  RefreshCw,
   Search,
   Terminal,
   Trash2,
@@ -29,6 +30,7 @@ import {
   fetchSkillDetail,
   fetchSkills,
   installClawhubSkill,
+  updateAllClawhubSkills,
   type ClawhubSkillSummary,
 } from "@/lib/api";
 import type { SkillDetail, SkillSummary } from "@/lib/types";
@@ -125,6 +127,12 @@ function ClawhubSection({
   const [error, setError] = useState<string | null>(null);
   const [installing, setInstalling] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [updatingAll, setUpdatingAll] = useState(false);
+  const [updateResult, setUpdateResult] = useState<{
+    updated: string[];
+    skipped: string[];
+    errors: { slug: string; error: string }[];
+  } | null>(null);
   const [installed, setInstalled] = useState<Set<string>>(new Set());
   const [pendingDelete, setPendingDelete] = useState<ClawhubSkillSummary | null>(null);
 
@@ -189,6 +197,19 @@ function ClawhubSection({
       });
   };
 
+  const updateAll = () => {
+    setUpdatingAll(true);
+    setError(null);
+    setUpdateResult(null);
+    updateAllClawhubSkills(token)
+      .then((result) => {
+        setUpdateResult(result);
+        onSkillsChanged();
+      })
+      .catch(() => setError(t("settings.skills.clawhubUpdateAllError", { defaultValue: "Could not update skills." })))
+      .finally(() => setUpdatingAll(false));
+  };
+
   return (
     <section className="rounded-[22px] bg-settings-surface px-3 py-3 sm:px-4">
       <div className="flex items-center justify-between border-b border-border/45 pb-3">
@@ -205,6 +226,32 @@ function ClawhubSection({
           defaultValue: "Browse the public ClawHub registry and install skills directly.",
         })}
       </p>
+
+      <div className="flex flex-wrap items-center gap-2 px-1 pb-3">
+        <button
+          type="button"
+          onClick={updateAll}
+          disabled={updatingAll}
+          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[12px] border border-border/60 px-3.5 text-[13px] font-medium text-foreground/85 transition-colors hover:bg-muted/50 disabled:opacity-60"
+        >
+          {updatingAll ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+          ) : (
+            <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+          )}
+          {t("settings.skills.clawhubUpdateAll", { defaultValue: "Update all installed" })}
+        </button>
+        {updateResult ? (
+          <span className="text-[12px] text-muted-foreground">
+            {t("settings.skills.clawhubUpdateAllResult", {
+              updated: updateResult.updated.length,
+              skipped: updateResult.skipped.length,
+              errors: updateResult.errors.length,
+              defaultValue: "{{updated}} updated · {{skipped}} skipped · {{errors}} failed",
+            })}
+          </span>
+        ) : null}
+      </div>
 
       <div className="flex gap-2 px-1 pb-3">
         <div className="relative flex-1">

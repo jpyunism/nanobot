@@ -51,6 +51,7 @@ from nanobot.webui.clawhub_api import (
     clawhub_install,
     clawhub_search,
     clawhub_trending,
+    clawhub_update_all,
 )
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
@@ -1489,6 +1490,8 @@ class GatewayHTTPHandler:
             return self._handle_clawhub_install(request)
         if got == "/api/webui/clawhub/delete":
             return self._handle_clawhub_delete(request)
+        if got == "/api/webui/clawhub/update-all":
+            return self._handle_clawhub_update_all(request)
         if got == "/api/webui/sidebar-state":
             return self._handle_webui_sidebar_state(request)
         if got == "/api/webui/sidebar-state/update":
@@ -1794,6 +1797,15 @@ class GatewayHTTPHandler:
         except OSError as exc:
             return _http_error(500, f"could not delete skill: {exc}")
         return _http_json_response({"name": name, "deleted": True})
+
+    def _handle_clawhub_update_all(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            result = clawhub_update_all(self.skills_workspace_path / "skills")
+        except ClawhubError as exc:
+            return _http_error(502, str(exc))
+        return _http_json_response(result)
 
     def _handle_webui_sidebar_state(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):

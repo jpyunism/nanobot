@@ -846,7 +846,10 @@
       "clawhubDeleteDescription": "Remove the '{{name}}' skill from this workspace? This cannot be undone.",
       "clawhubDeleteConfirm": "Delete",
       "clawhubDeleteError": "Could not delete skill.",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "clawhubUpdateAll": "설치된 스킬 모두 업데이트",
+      "clawhubUpdateAllResult": "{{updated}}개 업데이트 · {{skipped}}개 건너뜀 · {{errors}}개 실패",
+      "clawhubUpdateAllError": "스킬을 업데이트할 수 없습니다."
     },
     "voice": {
       "selectProvider": "제공자 선택",

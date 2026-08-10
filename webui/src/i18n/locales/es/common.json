@@ -855,7 +855,10 @@
       "clawhubDeleteDescription": "¿Eliminar la skill '{{name}}' de este workspace? Esta acción no se puede deshacer.",
       "clawhubDeleteConfirm": "Eliminar",
       "clawhubDeleteError": "No se pudo eliminar la skill.",
-      "cancel": "Cancelar"
+      "cancel": "Cancelar",
+      "clawhubUpdateAll": "Actualizar todas las instaladas",
+      "clawhubUpdateAllResult": "{{updated}} actualizadas · {{skipped}} omitidas · {{errors}} fallidas",
+      "clawhubUpdateAllError": "No se pudieron actualizar las skills."
     },
     "voice": {
       "selectProvider": "Seleccionar proveedor",

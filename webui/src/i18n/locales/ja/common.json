@@ -846,7 +846,10 @@
       "clawhubDeleteDescription": "Remove the '{{name}}' skill from this workspace? This cannot be undone.",
       "clawhubDeleteConfirm": "Delete",
       "clawhubDeleteError": "Could not delete skill.",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "clawhubUpdateAll": "インストール済みをすべて更新",
+      "clawhubUpdateAllResult": "{{updated}}件更新 · {{skipped}}件スキップ · {{errors}}件失敗",
+      "clawhubUpdateAllError": "スキルを更新できませんでした。"
     },
     "voice": {
       "selectProvider": "プロバイダーを選択",
