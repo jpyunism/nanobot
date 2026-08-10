@@ -533,6 +533,21 @@ class TestRunOnboardExitBehavior:
         assert result.should_save is False
         assert result.config.model_dump(by_alias=True) == initial_config.model_dump(by_alias=True)
 
+    def test_selector_failure_discards_without_prompting(self, monkeypatch):
+        """If the OS selector rejects stdin (e.g. macOS kqueue), bail gracefully."""
+        initial_config = Config()
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr(
+            onboard_wizard.selectors.DefaultSelector,
+            "register",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError(22, "Invalid argument")),
+        )
+
+        result = run_onboard(initial_config=initial_config)
+
+        assert result.should_save is False
+        assert result.config.model_dump(by_alias=True) == initial_config.model_dump(by_alias=True)
+
     def test_main_menu_interrupt_can_discard_unsaved_session_changes(self, monkeypatch):
         initial_config = Config()
 

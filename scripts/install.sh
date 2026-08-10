@@ -132,7 +132,7 @@ has_browser_session() {
 install_with_active_python() {
   info "Detected an active virtual environment. Installing into it..."
   ensure_pip "$python_bin" || return 1
-  "$python_bin" -m pip install --upgrade "$install_target" || return 1
+  "$python_bin" -m pip install --no-cache-dir --upgrade "$install_target" || return 1
   nanobot_runner="python"
   nanobot_python="$python_bin"
 }
@@ -191,7 +191,7 @@ PY
 
   info "Installing or upgrading nanobot from $install_source in $venv_dir..."
   ensure_pip "$venv_python" || return 1
-  "$venv_python" -m pip install --upgrade "$install_target" || return 1
+  "$venv_python" -m pip install --no-cache-dir --upgrade "$install_target" || return 1
 
   nanobot_runner="python"
   nanobot_python="$venv_python"

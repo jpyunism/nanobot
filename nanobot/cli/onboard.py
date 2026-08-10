@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import selectors
 import sys
 import types
 from dataclasses import dataclass
@@ -237,7 +238,7 @@ def _select_with_back(
         app.run()
     except Exception:
         logger.exception("Error in select prompt")
-        raise
+        return None
 
     return state["result"]
 
@@ -1922,15 +1923,33 @@ def _configure_advanced_settings(config: Config) -> None:
 
 
 def _require_interactive_terminal() -> bool:
-    """Return True when stdin is a TTY, else print a clear error and return False."""
-    if sys.stdin.isatty():
-        return True
-    print(
-        "[red]Setup wizard requires an interactive terminal.[/red] "
-        "Run `nanobot onboard --wizard` in a real terminal, or use "
-        "`nanobot onboard --refresh` to refresh config non-interactively."
-    )
-    return False
+    """Return True when stdin is an interactive terminal usable by prompt_toolkit.
+
+    Some platforms (e.g. macOS with a curl|sh install) give isatty=True but the
+    async selector still fails with OSError when adding stdin. Detect that here
+    so the wizard exits cleanly instead of crashing mid-prompt.
+    """
+    if not sys.stdin.isatty():
+        print(
+            "[red]Setup wizard requires an interactive terminal.[/red] "
+            "Run `nanobot onboard --wizard` in a real terminal, or use "
+            "`nanobot onboard --refresh` to refresh config non-interactively."
+        )
+        return False
+
+    # Probe that the underlying selector accepts stdin (kqueue on macOS can fail).
+    try:
+        with selectors.DefaultSelector() as sel:
+            sel.register(sys.stdin.fileno(), selectors.EVENT_READ)
+    except OSError as exc:
+        print(
+            "[red]Setup wizard cannot read from this terminal.[/red] "
+            f"({exc}). Use an interactive shell, or run "
+            "`nanobot webui --yes` to set up via the web interface instead."
+        )
+        return False
+
+    return True
 
 
 def run_onboard(initial_config: Config | None = None) -> OnboardResult:
