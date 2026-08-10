@@ -2226,7 +2226,13 @@ export function SettingsView({
           />
         );
       case "skills":
-        return <SkillsCatalogSettings skills={skills} />;
+        return (
+          <SkillsCatalogSettings
+            skills={skills}
+            onRestart={restartViaSettingsSurface}
+            isRestarting={isRestarting || hostEngineApplying}
+          />
+        );
       case "runtime":
         return (
           <RuntimeSettings

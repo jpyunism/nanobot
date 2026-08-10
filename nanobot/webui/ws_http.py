@@ -13,6 +13,7 @@ import asyncio
 import json
 import mimetypes
 import re
+import shutil
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -44,6 +45,14 @@ from nanobot.webui.agenda_api import (
 )
 from nanobot.webui.agenda_api import (
     update_appointment as agenda_update_appointment,
+)
+from nanobot.webui.clawhub_api import (
+    ClawhubError,
+    clawhub_browse,
+    clawhub_install,
+    clawhub_search,
+    clawhub_trending,
+    clawhub_update_all,
 )
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
@@ -1720,9 +1729,23 @@ class GatewayHTTPHandler:
             return self._handle_workspaces(connection, request)
         if got == "/api/webui/skills":
             return self._handle_webui_skills(request)
+        if got == "/api/webui/skills/toggle":
+            return self._handle_webui_skill_toggle(request)
         m = re.match(r"^/api/webui/skills/([^/]+)$", got)
         if m:
             return self._handle_webui_skill_detail(request, m.group(1))
+        if got == "/api/webui/clawhub/search":
+            return await self._handle_clawhub_search(request)
+        if got == "/api/webui/clawhub/trending":
+            return await self._handle_clawhub_trending(request)
+        if got == "/api/webui/clawhub/browse":
+            return await self._handle_clawhub_browse(request)
+        if got == "/api/webui/clawhub/install":
+            return await self._handle_clawhub_install(request)
+        if got == "/api/webui/clawhub/delete":
+            return await self._handle_clawhub_delete(request)
+        if got == "/api/webui/clawhub/update-all":
+            return await self._handle_clawhub_update_all(request)
         if got == "/api/webui/sidebar-state":
             return self._handle_webui_sidebar_state(request)
         if got == "/api/webui/sidebar-state/update":
@@ -1958,6 +1981,31 @@ class GatewayHTTPHandler:
             )
         )
 
+    def _handle_webui_skill_toggle(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(request, "X-Nanobot-Clawhub-Data", 16_384)
+        if err is not None:
+            return err
+        name = (body.get("name") or "").strip() if isinstance(body, dict) else ""
+        enabled = bool(body.get("enabled")) if isinstance(body, dict) else False
+        if not name or "/" in name or "\\" in name or name in {".", ".."}:
+            return _http_error(400, "invalid skill name")
+        from nanobot.config.loader import load_config, save_config
+
+        config = load_config()
+        disabled = list(config.agents.defaults.disabled_skills)
+        if enabled:
+            disabled = [item for item in disabled if item != name]
+        elif name not in disabled:
+            disabled.append(name)
+        config.agents.defaults.disabled_skills = disabled
+        save_config(config)
+        # Keep the in-memory snapshot in sync so the skills list reflects
+        # the change immediately; the agent loop still needs a restart.
+        self.disabled_skills = set(disabled)
+        return _http_json_response({"name": name, "enabled": enabled})
+
     def _handle_webui_skill_detail(self, request: WsRequest, raw_name: str) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
@@ -1973,6 +2021,90 @@ class GatewayHTTPHandler:
         if payload is None:
             return _http_error(404, "skill not found")
         return _http_json_response(payload)
+
+    async def _handle_clawhub_search(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _query_first(_parse_query(request.path), "q") or ""
+        try:
+            results = await asyncio.to_thread(clawhub_search, query)
+        except ClawhubError as exc:
+            return _http_error(502, str(exc))
+        return _http_json_response({"results": results})
+
+    async def _handle_clawhub_trending(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            results = await asyncio.to_thread(clawhub_trending)
+        except ClawhubError as exc:
+            return _http_error(502, str(exc))
+        return _http_json_response({"results": results})
+
+    async def _handle_clawhub_browse(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        try:
+            page = int(_query_first(query, "page") or 1)
+        except ValueError:
+            page = 1
+        try:
+            page_size = int(_query_first(query, "page_size") or 50)
+        except ValueError:
+            page_size = 50
+        try:
+            payload = await asyncio.to_thread(clawhub_browse, page, page_size)
+        except ClawhubError as exc:
+            return _http_error(502, str(exc))
+        return _http_json_response(payload)
+
+    async def _handle_clawhub_install(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(request, "X-Nanobot-Clawhub-Data", 16_384)
+        if err is not None:
+            return err
+        reference = (body.get("reference") or "").strip() if isinstance(body, dict) else ""
+        if not reference:
+            return _http_error(400, "missing reference")
+        try:
+            result = await asyncio.to_thread(
+                clawhub_install, reference, self.skills_workspace_path / "skills"
+            )
+        except ClawhubError as exc:
+            return _http_error(502, str(exc))
+        return _http_json_response(result)
+
+    async def _handle_clawhub_delete(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(request, "X-Nanobot-Clawhub-Data", 16_384)
+        if err is not None:
+            return err
+        name = (body.get("name") or "").strip() if isinstance(body, dict) else ""
+        if not name or "/" in name or "\\" in name or name in {".", ".."}:
+            return _http_error(400, "invalid skill name")
+        skills_root = (self.skills_workspace_path / "skills").resolve()
+        target = (skills_root / name).resolve()
+        if not target.is_relative_to(skills_root) or not (target / "SKILL.md").exists():
+            return _http_error(404, "skill not found")
+        try:
+            await asyncio.to_thread(shutil.rmtree, target)
+        except OSError as exc:
+            return _http_error(500, f"could not delete skill: {exc}")
+        return _http_json_response({"name": name, "deleted": True})
+
+    async def _handle_clawhub_update_all(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            result = await asyncio.to_thread(
+                clawhub_update_all, self.skills_workspace_path / "skills"
+            )
+        except ClawhubError as exc:
+            return _http_error(502, str(exc))
+        return _http_json_response(result)
 
     def _handle_webui_sidebar_state(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):

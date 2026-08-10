@@ -521,6 +521,7 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
             "source": "workspace",
             "available": True,
             "unavailable_reason": "",
+            "disabled": False,
         }
         unavailable = next(skill for skill in body["skills"] if skill["name"] == "zz-unavailable-skill")
         assert unavailable["available"] is False
@@ -543,6 +544,381 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
             "missing_env": ["DEFINITELY_MISSING_NANOBOT_SKILL_ENV"],
         }
         assert "Use the missing CLI and env var." in detail_body["raw_markdown"]
+
+        # -- toggle route ------------------------------------------------
+        deny_toggle = await _http_get("http://127.0.0.1:29920/api/webui/skills/toggle")
+        assert deny_toggle.status_code == 401
+
+        toggle_off = await _http_get(
+            "http://127.0.0.1:29920/api/webui/skills/toggle",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Nanobot-Clawhub-Data": json.dumps(
+                    {"name": "workspace-skill", "enabled": False}
+                ),
+            },
+        )
+        assert toggle_off.status_code == 200
+        assert toggle_off.json() == {"name": "workspace-skill", "enabled": False}
+
+        # the disabled skill disappears from the skills list
+        after_disable = await _http_get(
+            "http://127.0.0.1:29920/api/webui/skills",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        after_names = [skill["name"] for skill in after_disable.json()["skills"]]
+        assert "workspace-skill" not in after_names
+
+        toggle_on = await _http_get(
+            "http://127.0.0.1:29920/api/webui/skills/toggle",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Nanobot-Clawhub-Data": json.dumps(
+                    {"name": "workspace-skill", "enabled": True}
+                ),
+            },
+        )
+        assert toggle_on.status_code == 200
+        assert toggle_on.json() == {"name": "workspace-skill", "enabled": True}
+
+        # invalid name → 400
+        bad_toggle = await _http_get(
+            "http://127.0.0.1:29920/api/webui/skills/toggle",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Nanobot-Clawhub-Data": json.dumps({"name": "../evil", "enabled": True}),
+            },
+        )
+        assert bad_toggle.status_code == 400
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_clawhub_routes_require_token_and_return_results(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ClawHub search/trending/install routes: auth + mocked registry calls."""
+    import httpx as _httpx
+
+    from nanobot.webui import clawhub_api
+
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        workspace_path=tmp_path,
+        port=29921,
+    )
+    server_task = asyncio.create_task(channel.start())
+    try:
+        # -- 401 without token -------------------------------------------
+        deny = await _http_get("http://127.0.0.1:29921/api/webui/clawhub/search?q=test")
+        assert deny.status_code == 401
+        deny_trending = await _http_get("http://127.0.0.1:29921/api/webui/clawhub/trending")
+        assert deny_trending.status_code == 401
+        deny_browse = await _http_get("http://127.0.0.1:29921/api/webui/clawhub/browse")
+        assert deny_browse.status_code == 401
+        deny_install = await _http_get("http://127.0.0.1:29921/api/webui/clawhub/install")
+        assert deny_install.status_code == 401
+
+        token = channel.gateway.tokens.issue_api_token(300)
+        auth = {"Authorization": f"Bearer {token}"}
+
+        # -- search: mocked registry response ----------------------------
+        def fake_search_response(request: _httpx.Request) -> _httpx.Response:
+            assert request.url.path == "/api/v1/search"
+            return _httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "displayName": "Web Scraping",
+                            "summary": "Extract structured information from websites.",
+                            "downloads": 13159,
+                            "metrics": {"rolling60DayInstalls": 31},
+                            "install": {
+                                "kind": "clawhub",
+                                "reference": "zhangqixin9527/web-scraping",
+                            },
+                        },
+                        {
+                            "displayName": "Tiny Scraper",
+                            "summary": "A smaller scraping skill.",
+                            "downloads": 10,
+                            "metrics": {"rolling60DayInstalls": 4},
+                            "install": {
+                                "kind": "clawhub",
+                                "reference": "someone/tiny-scraper",
+                            },
+                        },
+                        {
+                            "displayName": "Find Skills",
+                            "summary": "A skills-sh skill that is not installable here.",
+                            "downloads": 26509,
+                            "metrics": {"lifetimeInstalls": 26509},
+                            "install": {
+                                "kind": "skills-sh",
+                                "reference": "skills-sh:vercel-labs/skills/find-skills",
+                            },
+                        },
+                    ]
+                },
+                request=request,
+            )
+
+        monkeypatch.setattr(
+            clawhub_api.httpx,
+            "get",
+            lambda url, **kwargs: fake_search_response(_httpx.Request("GET", str(url))),
+        )
+
+        resp = await _http_get(
+            "http://127.0.0.1:29921/api/webui/clawhub/search?q=web+scraping",
+            headers=auth,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        # skills-sh items are installable via GitHub and stay in the list.
+        assert len(body["results"]) == 3
+        # Results must be sorted most-installed first.
+        assert [r["installs_60d"] for r in body["results"]] == [26509, 31, 4]
+        result = body["results"][0]
+        assert result["name"] == "Find Skills"
+        assert result["reference"] == "skills-sh:vercel-labs/skills/find-skills"
+        assert result["kind"] == "skills-sh"
+        assert result["owner"] == "vercel-labs"
+        clawhub_result = body["results"][1]
+        assert clawhub_result["name"] == "Web Scraping"
+        assert clawhub_result["reference"] == "zhangqixin9527/web-scraping"
+        assert clawhub_result["owner"] == "zhangqixin9527"
+        assert clawhub_result["slug"] == "web-scraping"
+        assert clawhub_result["installs_60d"] == 31
+        assert "path" not in clawhub_result
+
+        # -- install: mocked zip download --------------------------------
+        import io
+        import zipfile
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w") as zf:
+            zf.writestr("SKILL.md", "---\nname: web-scraping\ndescription: Test.\n---\n")
+        zip_bytes = zip_buffer.getvalue()
+
+        def fake_download_response(request: _httpx.Request) -> _httpx.Response:
+            assert request.url.path == "/api/v1/download"
+            return _httpx.Response(200, content=zip_bytes, request=request)
+
+        monkeypatch.setattr(
+            clawhub_api.httpx,
+            "get",
+            lambda url, **kwargs: fake_download_response(_httpx.Request("GET", str(url))),
+        )
+
+        install_resp = await _http_get(
+            "http://127.0.0.1:29921/api/webui/clawhub/install",
+            headers={
+                **auth,
+                "X-Nanobot-Clawhub-Data": json.dumps(
+                    {"reference": "zhangqixin9527/web-scraping"}
+                ),
+            },
+        )
+        assert install_resp.status_code == 200
+        install_body = install_resp.json()
+        assert install_body["installed"] is True
+        assert install_body["slug"] == "web-scraping"
+        installed_skill = tmp_path / "skills" / "web-scraping" / "SKILL.md"
+        assert installed_skill.exists()
+        assert "name: web-scraping" in installed_skill.read_text(encoding="utf-8")
+
+        # -- install with missing reference ------------------------------
+        bad = await _http_get(
+            "http://127.0.0.1:29921/api/webui/clawhub/install",
+            headers={**auth, "X-Nanobot-Clawhub-Data": json.dumps({})},
+        )
+        assert bad.status_code == 400
+
+        # -- delete route ------------------------------------------------
+        deny_delete = await _http_get("http://127.0.0.1:29921/api/webui/clawhub/delete")
+        assert deny_delete.status_code == 401
+
+        # deleting an installed skill removes its folder
+        delete_resp = await _http_get(
+            "http://127.0.0.1:29921/api/webui/clawhub/delete",
+            headers={
+                **auth,
+                "X-Nanobot-Clawhub-Data": json.dumps({"name": "web-scraping"}),
+            },
+        )
+        assert delete_resp.status_code == 200
+        assert delete_resp.json()["deleted"] is True
+        assert not installed_skill.exists()
+
+        # unknown skill → 404
+        missing = await _http_get(
+            "http://127.0.0.1:29921/api/webui/clawhub/delete",
+            headers={**auth, "X-Nanobot-Clawhub-Data": json.dumps({"name": "nope"})},
+        )
+        assert missing.status_code == 404
+
+        # path traversal → 400
+        traversal = await _http_get(
+            "http://127.0.0.1:29921/api/webui/clawhub/delete",
+            headers={**auth, "X-Nanobot-Clawhub-Data": json.dumps({"name": "../evil"})},
+        )
+        assert traversal.status_code == 400
+
+        # -- update-all route --------------------------------------------
+        deny_update = await _http_get("http://127.0.0.1:29921/api/webui/clawhub/update-all")
+        assert deny_update.status_code == 401
+
+        # re-install the skill (with its source marker) so update-all has
+        # something to update; the download mock is still active.
+        reinstall = await _http_get(
+            "http://127.0.0.1:29921/api/webui/clawhub/install",
+            headers={
+                **auth,
+                "X-Nanobot-Clawhub-Data": json.dumps(
+                    {"reference": "zhangqixin9527/web-scraping"}
+                ),
+            },
+        )
+        assert reinstall.status_code == 200
+        assert (tmp_path / "skills" / "web-scraping" / ".clawhub-source.json").exists()
+
+        update_resp = await _http_get(
+            "http://127.0.0.1:29921/api/webui/clawhub/update-all",
+            headers=auth,
+        )
+        assert update_resp.status_code == 200
+        update_body = update_resp.json()
+        assert update_body["updated"] == ["web-scraping"]
+        assert update_body["skipped"] == []
+        assert update_body["errors"] == []
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_clawhub_browse_paginates_by_lifetime_installs(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Browse route: full catalog ordered by lifetime installs + pagination."""
+    import httpx as _httpx
+
+    from nanobot.webui import clawhub_api
+
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        workspace_path=tmp_path,
+        port=29922,
+    )
+    server_task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        auth = {"Authorization": f"Bearer {token}"}
+
+        # Reset the module-level catalog cache so this test exercises the
+        # background fetch path (first browse returns loading=True).
+        clawhub_api._catalog_cache.clear()
+        clawhub_api._catalog_state["status"] = "idle"
+
+        def fake_trending_response(request: _httpx.Request) -> _httpx.Response:
+            assert request.url.path == "/api/v1/trending"
+            # A tiny catalog: 3 installable items + 1 non-installable.
+            items = [
+                {
+                    "displayName": "Low Installs",
+                    "summary": "Third most installed.",
+                    "metrics": {"lifetimeInstalls": 10},
+                    "install": {"kind": "clawhub", "reference": "alice/low"},
+                },
+                {
+                    "displayName": "Top Installs",
+                    "summary": "Most installed of all time.",
+                    "metrics": {"lifetimeInstalls": 500},
+                    "install": {"kind": "clawhub", "reference": "bob/top"},
+                },
+                {
+                    "displayName": "Middle",
+                    "summary": "Second most installed.",
+                    "metrics": {"lifetimeInstalls": 120},
+                    "install": {"kind": "clawhub", "reference": "carol/middle"},
+                },
+                {
+                    "displayName": "Not installable",
+                    "summary": "Must be filtered out.",
+                    "metrics": {"lifetimeInstalls": 99999},
+                    "install": {"kind": "other", "reference": "x/y"},
+                },
+            ]
+            return _httpx.Response(
+                200,
+                json={
+                    "items": items,
+                    "totalItems": len(items),
+                    "snapshotId": "skills-test",
+                    "nextCursor": None,
+                },
+                request=request,
+            )
+
+        monkeypatch.setattr(
+            clawhub_api.httpx,
+            "get",
+            lambda url, **kwargs: fake_trending_response(_httpx.Request("GET", str(url))),
+        )
+
+        # page 1, page_size 2 → top two by lifetime installs
+        # The first browse kicks off a background fetch; poll until the
+        # catalog is ready (loading flag flips to False).
+        body = None
+        for _ in range(50):
+            resp = await _http_get(
+                "http://127.0.0.1:29922/api/webui/clawhub/browse?page=1&page_size=2",
+                headers=auth,
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+            if not body.get("loading"):
+                break
+            await asyncio.sleep(0.1)
+        assert body is not None
+        assert [r["slug"] for r in body["results"]] == ["top", "middle"]
+        assert body["page"] == 1
+        assert body["page_size"] == 2
+        assert body["total"] == 3
+        assert body["total_pages"] == 2
+
+        # page 2 → the remaining installable skill
+        resp2 = await _http_get(
+            "http://127.0.0.1:29922/api/webui/clawhub/browse?page=2&page_size=2",
+            headers=auth,
+        )
+        assert resp2.status_code == 200
+        body2 = resp2.json()
+        assert [r["slug"] for r in body2["results"]] == ["low"]
+        assert body2["total_pages"] == 2
+
+        # invalid params are clamped, not errors
+        resp3 = await _http_get(
+            "http://127.0.0.1:29922/api/webui/clawhub/browse?page=-3&page_size=999",
+            headers=auth,
+        )
+        assert resp3.status_code == 200
+        assert resp3.json()["page"] == 1
+        assert resp3.json()["page_size"] <= clawhub_api._BROWSE_MAX_PAGE_SIZE
+
+        # results carry lifetime installs for the row badge
+        top = resp.json()["results"][0]
+        assert top["lifetime_installs"] == 500
     finally:
         await channel.stop()
         await server_task
