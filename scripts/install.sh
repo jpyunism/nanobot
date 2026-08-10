@@ -105,45 +105,6 @@ nanobot_try_command() {
   esac
 }
 
-is_fresh_nanobot_install() {
-  [ -n "${HOME:-}" ] || return 1
-  [ ! -e "$HOME/.nanobot/config.json" ]
-}
-
-has_browser_session() {
-  if [ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ]; then
-    return 1
-  fi
-  if ! : 2>/dev/null < /dev/tty; then
-    return 1
-  fi
-
-  case "$(uname -s)" in
-    Darwin)
-      command -v launchctl >/dev/null 2>&1 &&
-        launchctl print "gui/$(id -u)" >/dev/null 2>&1
-      ;;
-    *)
-      [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]
-      ;;
-  esac
-}
-
-wizard_terminal_available() {
-  # Some platforms (e.g. macOS with a curl|sh install) expose a TTY that
-  # prompt_toolkit's selector still cannot register. Probe the same primitive
-  # before launching the wizard so we can fall back to the WebUI cleanly.
-  "$python_bin" -c '
-import selectors, sys
-try:
-    with selectors.DefaultSelector() as sel:
-        sel.register(sys.stdin.fileno(), selectors.EVENT_READ)
-    raise SystemExit(0)
-except OSError:
-    raise SystemExit(1)
-' 2>/dev/null </dev/tty
-}
-
 install_with_active_python() {
   info "Detected an active virtual environment. Installing into it..."
   ensure_pip "$python_bin" || return 1
@@ -268,14 +229,6 @@ if [ "$dry_run" = "1" ]; then
     info "Dry run: would run: $venv_dir/bin/python -m pip install --upgrade $install_target"
     info "Dry run: would run nanobot as: $venv_dir/bin/python -m nanobot"
   fi
-  if [ "${NANOBOT_SKIP_WIZARD:-}" = "1" ]; then
-    info "Dry run: would skip automatic setup because NANOBOT_SKIP_WIZARD=1."
-  elif is_fresh_nanobot_install && has_browser_session; then
-    info "Dry run: would start the WebUI for this fresh desktop install."
-    info "Dry run: would fall back to the setup wizard for older releases."
-  else
-    info "Dry run: would run the setup wizard."
-  fi
   info "Dry run: no changes made."
   exit 0
 fi
@@ -310,35 +263,9 @@ fi
 info "Installed nanobot:"
 run_nanobot --version
 
-if [ "${NANOBOT_SKIP_WIZARD:-}" = "1" ]; then
-  info "Skipping automatic setup because NANOBOT_SKIP_WIZARD=1."
-  info "Run this later: $(nanobot_try_command) webui"
-  exit 0
-fi
-
-if is_fresh_nanobot_install && has_browser_session; then
-  if run_nanobot webui --help >/dev/null 2>&1; then
-    info "Starting nanobot WebUI..."
-    info "Configure your first provider and model in Settings > Models."
-    info "Run this later: $(nanobot_try_command) webui"
-    run_nanobot webui --yes
-    exit 0
-  fi
-  info "The installed release does not support nanobot webui yet."
-  info "Falling back to the setup wizard..."
-fi
-
-if wizard_terminal_available; then
-  info "Starting setup wizard..."
-  run_nanobot onboard --wizard < /dev/tty
-elif run_nanobot webui --help >/dev/null 2>&1; then
-  info "This terminal cannot run the interactive wizard."
-  info "Starting nanobot WebUI for setup instead..."
-  run_nanobot webui --yes
-  exit 0
-else
-  info "Skipping setup wizard because no interactive terminal is available."
-  info "Run this later: $(nanobot_try_command) onboard --wizard"
-fi
-
-info "Done. Try: $(nanobot_try_command) agent -m \"Hello!\""
+info ""
+info "Next steps (run one of these in a real terminal or browser session):"
+info "  $(nanobot_try_command) webui     # Open the web-based setup UI"
+info "  $(nanobot_try_command) onboard --wizard  # Run the interactive terminal wizard"
+info ""
+info "Done."
