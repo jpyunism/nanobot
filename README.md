@@ -5,7 +5,7 @@
   <p>
     <img src="https://img.shields.io/badge/python-≥3.11-blue" alt="Python">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-    <img src="https://img.shields.io/badge/version-0.3.0-blueviolet" alt="Version">
+    <img src="https://img.shields.io/badge/version-0.3.6-blueviolet" alt="Version">
     <a href="https://github.com/madkoding/nanobot/graphs/commit-activity"><img src="https://img.shields.io/github/commit-activity/m/madkoding/nanobot" alt="Commits last month"></a>
     <a href="https://github.com/madkoding/nanobot/issues?q=is%3Aissue%20is%3Aclosed"><img src="https://img.shields.io/github/issues-search?query=repo%3Amadkoding%2Fnanobot%20is%3Aissue%20is%3Aclosed&label=issues%20closed" alt="Issues closed"></a>
   </p>
@@ -57,10 +57,9 @@ nanobot is a self-hosted personal AI agent runtime. It can:
 ## Install
 
 > [!IMPORTANT]
-> For the newest features and experiments, install from source.
-> For the most stable day-to-day experience, install from PyPI or with `uv`.
+> This fork is installed directly from the `madkoding/nanobot` repository.
 
-**Prerequisites:** Python 3.11 or newer. Git is only needed for a source install. Published packages already include the WebUI; a current-source install needs `bun` or `npm` to build it.
+**Prerequisites:** Python 3.11 or newer.
 
 ### One-command setup
 
@@ -76,7 +75,7 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `nanobot-ai` from PyPI. On a fresh local desktop, it then starts `nanobot webui` so you can configure the first provider and model in **Settings → Models**. The installer avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`.
+The default command installs or upgrades this fork from its `main` branch on GitHub. On a fresh local desktop, it then starts `nanobot webui` so you can configure the first provider and model in **Settings → Models**. The installer avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`.
 
 To preview the plan without changing your environment, pass `--dry-run`:
 
@@ -84,29 +83,15 @@ To preview the plan without changing your environment, pass `--dry-run`:
 curl -fsSL https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/install.sh | sh -s -- --dry-run
 ```
 
-To install the current `main` branch instead, pass `--dev`:
+To install the published upstream release from PyPI instead, pass `--pypi`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/install.sh | sh -s -- --dev
+curl -fsSL https://raw.githubusercontent.com/madkoding/nanobot/main/scripts/install.sh | sh -s -- --pypi
 ```
-
-### Install with `uv`
-
-```bash
-uv tool install nanobot-ai
-```
-
-### Install from PyPI with pip
-
-```bash
-python -m pip install nanobot-ai
-```
-
-If pip reports `externally-managed-environment` on macOS or Linux, use the one-command installer, `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or install inside a virtual environment.
 
 ### Install from source
 
-`bun` or `npm` must be available. From an activated virtual environment:
+`bun` or `npm` must be available to build the WebUI. From an activated virtual environment:
 
 ```bash
 git clone https://github.com/madkoding/nanobot.git
@@ -123,7 +108,7 @@ nanobot --version
 ### Update
 
 Update nanobot to the latest `main` branch. The command detects your install
-(editable source checkout vs PyPI/zip), updates the Python package, rebuilds
+(editable source checkout vs GitHub zip), updates the Python package, rebuilds
 the WebUI bundle, and restarts the gateway service automatically:
 
 ```bash
