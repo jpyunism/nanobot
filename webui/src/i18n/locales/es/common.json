@@ -848,7 +848,7 @@
       "clawhubError": "Could not load ClawHub skills.",
       "clawhubInstallError": "Could not install skill.",
       "clawhubEmpty": "No skills found. Try another search.",
-      "clawhubInstalls": "{{count}} installs / 60d",
+      "clawhubInstalls": "{{count}} installs",
       "clawhubDownloads": "{{count}} downloads"
     },
     "voice": {

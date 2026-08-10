@@ -64,13 +64,19 @@ def _summary_payload(item: dict[str, Any]) -> dict[str, Any]:
     reference = install.get("reference") or item.get("slug") or ""
     owner, slug = _split_reference(reference)
     metrics = item.get("metrics") or {}
+    rolling = metrics.get("rolling60DayInstalls")
+    lifetime = metrics.get("lifetimeInstalls")
+    # Trending items do not carry rolling60DayInstalls; fall back to the
+    # best available install metric so sorting stays meaningful.
+    installs = int(rolling) if rolling is not None else int(lifetime or 0)
     return {
         "slug": slug,
         "owner": owner,
         "reference": reference,
         "name": item.get("displayName") or slug,
         "description": (item.get("summary") or "").strip(),
-        "installs_60d": int(metrics.get("rolling60DayInstalls") or 0),
+        "installs_60d": installs,
+        "lifetime_installs": int(lifetime or 0),
         "downloads": int(item.get("downloads") or 0),
         "kind": install.get("kind") or "clawhub",
     }

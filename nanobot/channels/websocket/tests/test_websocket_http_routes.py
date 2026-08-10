@@ -594,7 +594,17 @@ async def test_clawhub_routes_require_token_and_return_results(
                                 "kind": "clawhub",
                                 "reference": "zhangqixin9527/web-scraping",
                             },
-                        }
+                        },
+                        {
+                            "displayName": "Tiny Scraper",
+                            "summary": "A smaller scraping skill.",
+                            "downloads": 10,
+                            "metrics": {"rolling60DayInstalls": 4},
+                            "install": {
+                                "kind": "clawhub",
+                                "reference": "someone/tiny-scraper",
+                            },
+                        },
                     ]
                 },
                 request=request,
@@ -612,7 +622,9 @@ async def test_clawhub_routes_require_token_and_return_results(
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert len(body["results"]) == 1
+        assert len(body["results"]) == 2
+        # Results must be sorted most-installed first.
+        assert [r["installs_60d"] for r in body["results"]] == [31, 4]
         result = body["results"][0]
         assert result["name"] == "Web Scraping"
         assert result["reference"] == "zhangqixin9527/web-scraping"

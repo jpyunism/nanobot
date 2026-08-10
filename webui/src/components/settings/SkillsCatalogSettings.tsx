@@ -235,7 +235,7 @@ function ClawhubRow({
         <p className="mt-1 text-[11px] leading-4 text-muted-foreground/70">
           {t("settings.skills.clawhubInstalls", {
             count: skill.installs_60d,
-            defaultValue: "{{count}} installs / 60d",
+            defaultValue: "{{count}} installs",
           })}
         </p>
       </div>
