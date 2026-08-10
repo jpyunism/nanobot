@@ -62,8 +62,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
   const [pendingDeleteSkill, setPendingDeleteSkill] = useState<SkillSummary | null>(null);
   const [deletingSkill, setDeletingSkill] = useState(false);
 
-  const toggleSkill = (skill: SkillSummary) => {
-    const nextEnabled = !skill.disabled;
+  const toggleSkill = (skill: SkillSummary, nextEnabled: boolean) => {
     setToggling(skill.name);
     setToggleError(null);
     toggleSkillEnabled(token, skill.name, nextEnabled)
@@ -134,7 +133,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
                 skill={skill}
                 toggling={toggling === skill.name}
                 onSelect={setSelectedSkill}
-                onToggle={() => toggleSkill(skill)}
+                onToggle={(next) => toggleSkill(skill, next)}
                 onDelete={() => setPendingDeleteSkill(skill)}
               />
             ))}
@@ -611,7 +610,7 @@ function SkillCatalogRow({
   skill: SkillSummary;
   toggling: boolean;
   onSelect: (skill: SkillSummary) => void;
-  onToggle: () => void;
+  onToggle: (nextEnabled: boolean) => void;
   onDelete: () => void;
 }) {
   const { t } = useTranslation();
