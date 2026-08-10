@@ -181,14 +181,14 @@ def test_atomic_write_leaves_no_partial_file_on_error(tmp_path, monkeypatch):
     agenda_path = tmp_path / "agenda" / "appointments.json"
     before = agenda_path.read_text(encoding="utf-8")
 
-    import nanobot.webui.agenda_api as mod
+    import nanobot.utils.atomic_write as atomic
 
-    real_replace = mod.os.replace
+    real_replace = atomic.os.replace
 
     def failing_replace(src, dst):
         raise OSError("boom")
 
-    monkeypatch.setattr(mod.os, "replace", failing_replace)
+    monkeypatch.setattr(atomic.os, "replace", failing_replace)
     raised = False
     try:
         create_appointment(
@@ -198,7 +198,7 @@ def test_atomic_write_leaves_no_partial_file_on_error(tmp_path, monkeypatch):
     except OSError:
         raised = True
     finally:
-        mod.os.replace = real_replace
+        atomic.os.replace = real_replace
     assert raised is True
     assert agenda_path.read_text(encoding="utf-8") == before
     assert not (tmp_path / "agenda" / "appointments.json.tmp").exists()

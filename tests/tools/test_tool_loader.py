@@ -28,10 +28,6 @@ class _MinimalTool(Tool):
         return "ok"
 
 
-def test_tool_default_config_cls_is_none():
-    assert _MinimalTool.config_cls() is None
-
-
 def test_tool_default_config_key_is_empty():
     assert _MinimalTool.config_key == ""
 
@@ -249,12 +245,6 @@ def test_cron_tool_create():
 # --- Task 6: ExecTool, WebTools, ImageGenerationTool ---
 
 
-def test_exec_tool_config_cls():
-    from nanobot.agent.tools.shell import ExecTool, ExecToolConfig
-    assert ExecTool.config_cls() is ExecToolConfig
-    assert ExecTool.config_key == "exec"
-
-
 def test_exec_tool_enabled():
     from nanobot.agent.tools.shell import ExecTool
     mock_config = MagicMock()
@@ -281,14 +271,6 @@ def test_exec_tool_create():
     tool = ExecTool.create(ctx)
     assert isinstance(tool, ExecTool)
     assert tool.path_prepend == "/venv/bin"
-
-
-def test_web_tools_config_cls():
-    from nanobot.agent.tools.web import WebFetchTool, WebSearchTool, WebToolsConfig
-    assert WebSearchTool.config_key == "web"
-    assert WebSearchTool.config_cls() is WebToolsConfig
-    assert WebFetchTool.config_key == "web"
-    assert WebFetchTool.config_cls() is WebToolsConfig
 
 
 def test_web_tools_enabled():
@@ -325,12 +307,6 @@ def test_web_fetch_tool_create():
     assert isinstance(tool, WebFetchTool)
 
 
-def test_image_gen_tool_config_cls():
-    from nanobot.agent.tools.image_generation import ImageGenerationTool, ImageGenerationToolConfig
-    assert ImageGenerationTool.config_key == "image_generation"
-    assert ImageGenerationTool.config_cls() is ImageGenerationToolConfig
-
-
 def test_image_gen_tool_enabled():
     from nanobot.agent.tools.image_generation import ImageGenerationTool
     mock_config = MagicMock()
@@ -354,12 +330,6 @@ def test_image_gen_tool_create():
 
 
 # --- Task 7: MyToolConfig + MCP wrappers ---
-
-
-def test_my_tool_config_cls():
-    from nanobot.agent.tools.self import MyTool, MyToolConfig
-    assert MyTool.config_key == "my"
-    assert MyTool.config_cls() is MyToolConfig
 
 
 def test_my_tool_enabled():

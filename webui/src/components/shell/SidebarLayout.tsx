@@ -7,6 +7,9 @@ import type { ComponentProps } from "react";
 
 type SidebarBaseProps = ComponentProps<typeof Sidebar>;
 
+type SidebarOverrides = Pick<SidebarBaseProps, "onCollapse" | "onExpand"> &
+  Partial<Pick<SidebarBaseProps, "collapsed" | "hostChromeInset" | "containActionMenus">>;
+
 type Args = {
   showHostChrome: boolean;
   showMainSidebar: boolean;
@@ -23,6 +26,10 @@ type Args = {
   closeMobileSidebar: () => void;
   sidebarProps: Omit<SidebarBaseProps, "onCollapse" | "onExpand" | "containActionMenus" | "hostChromeInset" | "collapsed">;
 };
+
+function renderSidebar(sidebarProps: Args["sidebarProps"], overrides: SidebarOverrides) {
+  return <Sidebar {...sidebarProps} {...overrides} />;
+}
 
 export function SidebarLayout({
   showHostChrome,
@@ -61,13 +68,12 @@ export function SidebarLayout({
               showHostChrome ? "host-sidebar-glass" : "bg-sidebar",
             )}
           >
-            <Sidebar
-              {...sidebarProps}
-              collapsed={!showHostChrome && !hostSidebarOpen}
-              hostChromeInset={showHostChrome}
-              onCollapse={closeHostSidebar}
-              onExpand={openHostSidebar}
-            />
+            {renderSidebar(sidebarProps, {
+              collapsed: !showHostChrome && !hostSidebarOpen,
+              hostChromeInset: showHostChrome,
+              onCollapse: closeHostSidebar,
+              onExpand: openHostSidebar,
+            })}
           </div>
         ) : null}
       </aside>
@@ -81,12 +87,11 @@ export function SidebarLayout({
           onMouseLeave={scheduleHostSidebarPreviewClose}
         >
           <div className="h-full w-full overflow-hidden host-sidebar-glass shadow-2xl">
-            <Sidebar
-              {...sidebarProps}
-              hostChromeInset={showHostChrome}
-              onCollapse={closeHostSidebar}
-              onExpand={openHostSidebar}
-            />
+            {renderSidebar(sidebarProps, {
+              hostChromeInset: showHostChrome,
+              onCollapse: closeHostSidebar,
+              onExpand: openHostSidebar,
+            })}
           </div>
         </aside>
       ) : null}
@@ -102,11 +107,10 @@ export function SidebarLayout({
           className="w-full p-0 sm:w-3/4 sm:max-w-sm lg:hidden"
         >
           <SheetTitle className="sr-only">{t("sidebar.navigation")}</SheetTitle>
-          <Sidebar
-            {...sidebarProps}
-            onCollapse={closeMobileSidebar}
-            containActionMenus
-          />
+          {renderSidebar(sidebarProps, {
+            onCollapse: closeMobileSidebar,
+            containActionMenus: true,
+          })}
         </SheetContent>
       </Sheet>
     </>

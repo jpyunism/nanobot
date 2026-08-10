@@ -41,9 +41,6 @@ export interface ActionsApi {
     onConfirmProjectRename: (title: string) => void;
     onRequestDelete: (key: string, label: string) => Promise<void>;
     onConfirmDelete: () => Promise<void>;
-    pendingDelete: { key: string; label: string; automations?: SessionAutomationJob[] } | null;
-    pendingRename: { key: string; label: string } | null;
-    pendingProjectRename: { key: string; label: string } | null;
     onSelectSearchResult: (key: string) => void;
     onOpenSessionSearch: () => void;
   };
@@ -476,9 +473,6 @@ export function useChatActions(args: UseChatActionsArgs): ActionsApi {
       onConfirmProjectRename,
       onRequestDelete,
       onConfirmDelete,
-      pendingDelete: dialogs.pendingDelete,
-      pendingRename: dialogs.pendingRename,
-      pendingProjectRename: dialogs.pendingProjectRename,
       onSelectSearchResult,
       onOpenSessionSearch,
     },

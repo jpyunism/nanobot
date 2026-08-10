@@ -7,7 +7,6 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import typer
 from loguru import logger
@@ -30,8 +29,6 @@ from nanobot.webui.build import BuildMode
 
 RuntimeConfigLoader = Callable[[str | None, str | None], Config]
 GatewayRunner = Callable[..., None]
-GatewayRuntimeFactory = Callable[..., Any]
-GatewayServiceFactory = Callable[[], Any]
 WebUIBundlePreparer = Callable[[Config, BuildMode], None]
 
 
@@ -41,8 +38,6 @@ def create_gateway_app(
     log_handler_id: int,
     load_runtime_config: RuntimeConfigLoader,
     run_gateway: GatewayRunner,
-    runtime_factory: GatewayRuntimeFactory | None = None,
-    service_factory: GatewayServiceFactory | None = None,
     prepare_webui_bundle: WebUIBundlePreparer | None = None,
 ) -> typer.Typer:
     gateway_app = typer.Typer(
@@ -86,8 +81,6 @@ def create_gateway_app(
         )
 
     def runtime_for_instance(*, workspace: str | None = None, config: str | None = None):
-        if runtime_factory is not None:
-            return runtime_factory(workspace=workspace, config=config)
         config_path = str(Path(config).expanduser().resolve(strict=False)) if config else None
         workspace_path = str(Path(workspace).expanduser().resolve(strict=False)) if workspace else None
         data_dir = Path(config_path).parent if config_path else None
@@ -100,7 +93,7 @@ def create_gateway_app(
         )
 
     def service_installer():
-        return service_factory() if service_factory is not None else GatewayServiceInstaller()
+        return GatewayServiceInstaller()
 
     def interactive_build_mode() -> BuildMode:
         # `nanobot gateway` is often launched by tests, supervisors, or service managers.

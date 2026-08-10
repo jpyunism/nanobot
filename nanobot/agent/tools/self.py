@@ -49,10 +49,6 @@ class MyTool(Tool):
     config_key = "my"
 
     @classmethod
-    def config_cls(cls):
-        return MyToolConfig
-
-    @classmethod
     def enabled(cls, ctx: Any) -> bool:
         return ctx.config.my.enable
 

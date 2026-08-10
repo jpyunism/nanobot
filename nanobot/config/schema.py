@@ -60,10 +60,6 @@ class DreamConfig(Base):
         default=None,
         exclude_if=lambda value: value is None,
     )  # Legacy cron expression override
-    model_override: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("modelOverride", "model", "model_override"),
-    )  # Override model for Dream sessions (pending implementation)
 
     def build_schedule(self, timezone: str) -> CronSchedule:
         """Build the runtime schedule, preferring the legacy cron override if present."""
@@ -294,19 +290,6 @@ class ProvidersConfig(Base):
                     )
                 if isinstance(value, dict):
                     self.model_extra[key] = ProviderConfig.model_validate(value)
-        return self
-
-    @model_validator(mode="after")
-    def _validate_api_type_scope(self) -> "ProvidersConfig":
-        for name in self.__class__.model_fields:
-            if name == "openai":
-                continue
-            provider = getattr(self, name, None)
-            if isinstance(provider, ProviderConfig) and provider.api_type != "auto":
-                raise ValueError("providers.<name>.api_type is only supported for providers.openai")
-        for provider in (self.model_extra or {}).values():
-            if isinstance(provider, ProviderConfig) and provider.api_type != "auto":
-                raise ValueError("providers.<name>.api_type is only supported for providers.openai")
         return self
 
 

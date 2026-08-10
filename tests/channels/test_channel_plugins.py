@@ -2374,7 +2374,6 @@ def test_optional_dependency_metadata_for_enable():
         assert not any(dep.startswith(dep_name) for dep in required)
     for dependency in (
         "tzdata>=2025.2; sys_platform == 'win32'",
-        "defusedxml>=0.7.1,<1.0.0",
         "pypdf>=6.15.0,<7.0.0",
         "python-docx>=1.1.0,<2.0.0",
         "openpyxl>=3.1.0,<4.0.0",

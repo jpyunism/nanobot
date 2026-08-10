@@ -189,7 +189,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const [atBottom, setAtBottom] = useState(true);
   const [composerDockHeight, setComposerDockHeight] = useState(0);
   const [keyboardInsetBottom, setKeyboardInsetBottom] = useState(0);
-  const [hasVerticalOverflow, setHasVerticalOverflow] = useState(false);
   const [visibleMessageCount, setVisibleMessageCount] =
     useState(INITIAL_HISTORY_WINDOW);
   const threadMotionRef = useRef<ThreadMotionCoordinator | null>(null);
@@ -227,10 +226,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
           composerDockHeightRef.current = geometry.composerHeight;
           setComposerDockHeight(geometry.composerHeight);
         }
-        const nextOverflow = geometry.scrollHeight > geometry.clientHeight + 1;
-        setHasVerticalOverflow((current) =>
-          current === nextOverflow ? current : nextOverflow,
-        );
       },
       onAutoFollow: () => setAtBottom(true),
     });
@@ -619,7 +614,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
           "thread-viewport-scrollbar absolute inset-0 scroll-auto",
           "[overflow-anchor:none] [scrollbar-width:none]",
           "[&::-webkit-scrollbar]:hidden",
-          hasVerticalOverflow ? "overflow-y-auto" : "overflow-hidden",
+          "overflow-y-auto",
         )}
         style={scrollViewportStyle}
       >

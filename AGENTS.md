@@ -68,7 +68,7 @@ The gateway runs from the venv as `nanobot-gateway.service` (user systemd). Beca
    # User then hard-refreshes the browser (Ctrl+Shift+R / Cmd+Shift+R).
    ```
 
-3. **Verify the running version** matches the source: open the WebUI at `http://localhost:8765/` and check the version badge in the Sidebar footer (e.g. `v0.1.0+4f21e13e`). The SHA is injected at build time from `git rev-parse` of this repo.
+3. **Verify the running version** matches the source: open the WebUI at `http://localhost:8765/` and check the version in Settings → About (e.g. `v0.1.0+4f21e13e`). The SHA is injected at build time from `git rev-parse` of this repo.
 
 > If the user reports the gateway is "stale" (old code still running), the cause is almost always missing service restart or missing browser hard-refresh.
 
@@ -94,7 +94,6 @@ webui/src/
     HostChrome.tsx                 # native host wrapper
     PairingCodePopup.tsx           # pairing code UI
     Sidebar.tsx, ChatList.tsx, ... # feature components
-    WebuiVersionBadge.tsx          # v0.1.0+<sha> in Sidebar footer
   hooks/                           # one hook per concern (see below)
   lib/                             # pure modules (no React)
     routing.ts                     # hash routing + pushState race fix
@@ -186,5 +185,4 @@ See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for contribution flow and PR guidelin
 - Channel base / new channel template: `nanobot/channels/base.py`
 - Tool registry: `nanobot/agent/tools/registry.py`
 - WebUI dev proxy config: `webui/vite.config.ts`
-- WebUI version badge source: `webui/src/components/WebuiVersionBadge.tsx`
 - Tests mirror the `nanobot/` package structure.

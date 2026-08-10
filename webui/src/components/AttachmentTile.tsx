@@ -41,7 +41,7 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
             draggable={false}
             onError={() => setFailed(true)}
             className={cn(
-              "block h-auto max-w-full bg-background object-contain",
+              "block h-auto min-h-[8rem] max-w-full bg-background object-contain",
               variant === "compact" ? "max-h-40" : "max-h-[34rem]",
             )}
           />

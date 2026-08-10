@@ -46,22 +46,4 @@ def build_bus_progress_callback(
             )
         )
 
-    async def _bus_progress(
-        content: str,
-        *,
-        tool_hint: bool = False,
-        tool_events: list[dict[str, Any]] | None = None,
-        file_edit_events: list[dict[str, Any]] | None = None,
-        reasoning: bool = False,
-        reasoning_end: bool = False,
-    ) -> None:
-        await _publish_progress(
-            content,
-            tool_hint=tool_hint,
-            tool_events=tool_events,
-            file_edit_events=file_edit_events,
-            reasoning=reasoning,
-            reasoning_end=reasoning_end,
-        )
-
-    return _bus_progress
+    return _publish_progress

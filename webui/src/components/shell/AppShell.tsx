@@ -31,26 +31,6 @@ export function AppShell({
   onNativeEngineRestart,
 }: Args) {
   const { client, token } = useClient();
-  return (
-    <ThemedShell
-      client={client}
-      token={token}
-      runtimeSurface={runtimeSurface}
-      onModelNameChange={onModelNameChange}
-      onLogout={onLogout}
-      onNativeEngineRestart={onNativeEngineRestart}
-    />
-  );
-}
-
-function ThemedShell({
-  client,
-  token,
-  runtimeSurface,
-  onModelNameChange,
-  onLogout,
-  onNativeEngineRestart,
-}: Args & { client: ReturnType<typeof useClient>["client"]; token: string }) {
   const { theme, toggle } = useTheme();
   const shell = useShellBootstrap({
     client,

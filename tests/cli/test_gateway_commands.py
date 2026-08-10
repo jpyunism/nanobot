@@ -90,7 +90,7 @@ class FakeServiceInstaller:
         )
 
 
-def _test_app(tmp_path: Path, config: Config | None = None):
+def _test_app(tmp_path: Path, config: Config | None = None, monkeypatch=None):
     app = typer.Typer()
     fake_runtime = FakeRuntime(tmp_path)
     fake_service = FakeServiceInstaller(tmp_path)
@@ -111,14 +111,16 @@ def _test_app(tmp_path: Path, config: Config | None = None):
     def prepare_webui_bundle(config: Config, mode: str) -> None:
         prepare_calls.append((config, mode))
 
+    if monkeypatch is not None:
+        monkeypatch.setattr("nanobot.cli.gateway.GatewayRuntime", lambda **kwargs: fake_runtime)
+        monkeypatch.setattr("nanobot.cli.gateway.GatewayServiceInstaller", lambda: fake_service)
+
     app.add_typer(
         create_gateway_app(
             console=Console(),
             log_handler_id=0,
             load_runtime_config=load_runtime_config,
             run_gateway=run_gateway,
-            runtime_factory=lambda **_kwargs: fake_runtime,
-            service_factory=lambda: fake_service,
             prepare_webui_bundle=prepare_webui_bundle,
         ),
         name="gateway",
@@ -126,8 +128,8 @@ def _test_app(tmp_path: Path, config: Config | None = None):
     return app, fake_runtime, fake_service, run_calls, prepare_calls
 
 
-def test_gateway_default_still_runs_foreground(tmp_path):
-    app, fake_runtime, _service, calls, _prepare_calls = _test_app(tmp_path)
+def test_gateway_default_still_runs_foreground(tmp_path, monkeypatch):
+    app, fake_runtime, _service, calls, _prepare_calls = _test_app(tmp_path, monkeypatch=monkeypatch)
     fake_runtime.status_value = GatewayStatus(
         running=False,
         pid=None,
@@ -143,8 +145,8 @@ def test_gateway_default_still_runs_foreground(tmp_path):
     assert calls[0][2] == "warn"
 
 
-def test_gateway_foreground_ignores_state_matching_own_pid(tmp_path):
-    app, fake_runtime, _service, calls, _prepare_calls = _test_app(tmp_path)
+def test_gateway_foreground_ignores_state_matching_own_pid(tmp_path, monkeypatch):
+    app, fake_runtime, _service, calls, _prepare_calls = _test_app(tmp_path, monkeypatch=monkeypatch)
     fake_runtime.status_value = GatewayStatus(
         running=True,
         pid=os.getpid(),
@@ -160,10 +162,10 @@ def test_gateway_foreground_ignores_state_matching_own_pid(tmp_path):
     assert len(calls) == 1
 
 
-def test_gateway_background_starts_detached_runtime(tmp_path):
+def test_gateway_background_starts_detached_runtime(tmp_path, monkeypatch):
     config = Config()
     config.gateway.port = 18792
-    app, fake_runtime, _service, _calls, prepare_calls = _test_app(tmp_path, config=config)
+    app, fake_runtime, _service, _calls, prepare_calls = _test_app(tmp_path, config=config, monkeypatch=monkeypatch)
 
     result = runner.invoke(app, ["gateway", "--background"])
 
@@ -173,8 +175,8 @@ def test_gateway_background_starts_detached_runtime(tmp_path):
     assert prepare_calls == [(config, "warn")]
 
 
-def test_gateway_rejects_conflicting_modes(tmp_path):
-    app, _runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
+def test_gateway_rejects_conflicting_modes(tmp_path, monkeypatch):
+    app, _runtime, _service, _calls, _prepare_calls = _test_app(tmp_path, monkeypatch=monkeypatch)
 
     result = runner.invoke(app, ["gateway", "--foreground", "--background"])
 
@@ -182,8 +184,8 @@ def test_gateway_rejects_conflicting_modes(tmp_path):
     assert "--foreground and --background cannot be used together" in result.stdout
 
 
-def test_gateway_status_uses_runtime(tmp_path):
-    app, _runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
+def test_gateway_status_uses_runtime(tmp_path, monkeypatch):
+    app, _runtime, _service, _calls, _prepare_calls = _test_app(tmp_path, monkeypatch=monkeypatch)
 
     result = runner.invoke(app, ["gateway", "status"])
 
@@ -192,8 +194,8 @@ def test_gateway_status_uses_runtime(tmp_path):
     assert "PID: 12345" in result.stdout
 
 
-def test_gateway_logs_can_read_without_following(tmp_path):
-    app, _runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
+def test_gateway_logs_can_read_without_following(tmp_path, monkeypatch):
+    app, _runtime, _service, _calls, _prepare_calls = _test_app(tmp_path, monkeypatch=monkeypatch)
 
     result = runner.invoke(app, ["gateway", "logs", "--tail", "12", "--no-follow"])
 
@@ -201,8 +203,8 @@ def test_gateway_logs_can_read_without_following(tmp_path):
     assert "line 12" in result.stdout
 
 
-def test_gateway_stop_treats_not_running_as_clean(tmp_path):
-    app, fake_runtime, _service, _calls, _prepare_calls = _test_app(tmp_path)
+def test_gateway_stop_treats_not_running_as_clean(tmp_path, monkeypatch):
+    app, fake_runtime, _service, _calls, _prepare_calls = _test_app(tmp_path, monkeypatch=monkeypatch)
 
     def fake_stop(*, timeout_s: int) -> RuntimeResult:
         fake_runtime.stop_timeout = timeout_s
@@ -217,10 +219,10 @@ def test_gateway_stop_treats_not_running_as_clean(tmp_path):
     assert fake_runtime.stop_timeout == 3
 
 
-def test_gateway_restart_starts_background_runtime(tmp_path):
+def test_gateway_restart_starts_background_runtime(tmp_path, monkeypatch):
     config = Config()
     config.gateway.port = 18793
-    app, fake_runtime, _service, _calls, prepare_calls = _test_app(tmp_path, config=config)
+    app, fake_runtime, _service, _calls, prepare_calls = _test_app(tmp_path, config=config, monkeypatch=monkeypatch)
 
     result = runner.invoke(app, ["gateway", "restart", "--timeout", "9", "--verbose"])
 
@@ -231,10 +233,10 @@ def test_gateway_restart_starts_background_runtime(tmp_path):
     assert prepare_calls == [(config, "warn")]
 
 
-def test_gateway_install_service_uses_service_installer(tmp_path):
+def test_gateway_install_service_uses_service_installer(tmp_path, monkeypatch):
     config = Config()
     config.gateway.port = 18794
-    app, _runtime, service, _calls, _prepare_calls = _test_app(tmp_path, config=config)
+    app, _runtime, service, _calls, _prepare_calls = _test_app(tmp_path, config=config, monkeypatch=monkeypatch)
 
     result = runner.invoke(app, ["gateway", "install-service", "--dry-run", "--manager", "systemd"])
 
@@ -246,8 +248,8 @@ def test_gateway_install_service_uses_service_installer(tmp_path):
     assert service.installed_options.manager == "systemd"
 
 
-def test_gateway_uninstall_service_uses_service_installer(tmp_path):
-    app, _runtime, service, _calls, _prepare_calls = _test_app(tmp_path)
+def test_gateway_uninstall_service_uses_service_installer(tmp_path, monkeypatch):
+    app, _runtime, service, _calls, _prepare_calls = _test_app(tmp_path, monkeypatch=monkeypatch)
 
     result = runner.invoke(
         app,

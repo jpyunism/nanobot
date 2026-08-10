@@ -28,7 +28,6 @@ All mutations are atomic (write to a temp file then ``os.replace`` + fsync).
 from __future__ import annotations
 
 import json
-import os
 import re
 import uuid
 from datetime import datetime, timezone
@@ -40,6 +39,7 @@ from nanobot.security.workspace_policy import (
     WorkspaceBoundaryError,
     resolve_allowed_path,
 )
+from nanobot.utils.atomic_write import atomic_write_text
 
 TODO_DIR_NAME = "todo"
 USERS_FILENAME = "_users.json"
@@ -122,27 +122,8 @@ def _is_valid_slug(slug: str) -> bool:
 
 
 def _atomic_write(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    encoded = json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
-    try:
-        with open(tmp, "wb") as f:
-            f.write(encoded)
-            f.write(b"\n")
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-        try:
-            dir_fd = os.open(path.parent, os.O_RDONLY)
-        except OSError:
-            return
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+    encoded = json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    atomic_write_text(path, encoded)
 
 
 def _read_json_file(path: Path) -> dict[str, Any] | None:

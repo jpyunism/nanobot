@@ -347,38 +347,6 @@ class TestProgressFiltering:
         assert send_mock.await_args_list[0].args[0].content == "final answer"
 
     @pytest.mark.asyncio
-    async def test_legacy_progress_flag_uses_runtime_progress_filter(self, manager, bus):
-        manager.channels["mock"].send_progress = False
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content="legacy progress-shaped message",
-            metadata={"_progress": True},
-        ))
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content="processing sentinel",
-        ))
-
-        task = asyncio.create_task(manager._dispatch_outbound())
-        try:
-            for _ in range(30):
-                if manager.channels["mock"]._send_mock.await_count >= 1:
-                    break
-                await asyncio.sleep(0.05)
-        finally:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-
-        send_mock = manager.channels["mock"]._send_mock
-        assert send_mock.await_count == 1
-        assert send_mock.await_args.args[0].content == "processing sentinel"
-
-    @pytest.mark.asyncio
     async def test_channel_override_can_enable_tool_hints(self, manager, bus):
         manager.channels["mock"].send_tool_hints = True
         await bus.publish_outbound(outbound_message_for_event(

@@ -197,26 +197,26 @@ def test_atomic_write_leaves_no_partial_file_on_error(tmp_path, monkeypatch):
     # Snapshot the file content before a failed write
     detail_before = fetch_todo_list("lista", scope=scope)
     # Force os.replace to fail
-    import nanobot.webui.todos_api as mod
+    import nanobot.utils.atomic_write as atomic
 
-    real_replace = mod.os.replace
+    real_replace = atomic.os.replace
 
     def failing_replace(src, dst):
         raise OSError("boom")
 
-    monkeypatch.setattr(mod.os, "replace", failing_replace)
+    monkeypatch.setattr(atomic.os, "replace", failing_replace)
     raised = False
     try:
         create_item("lista", {"text": "x"}, scope=scope)
     except OSError:
         raised = True
     finally:
-        mod.os.replace = real_replace
+        atomic.os.replace = real_replace
     assert raised is True
     # The list file should still be readable and intact (no partial write, no tmp left)
     detail = fetch_todo_list("lista", scope=scope)
     assert detail["list"]["items"] == detail_before["list"]["items"]
-    assert not (tmp_path / "todo" / "lista.json.tmp").exists()
+    assert not list((tmp_path / "todo").glob(".lista.json.*.tmp"))
 
 
 def test_migrate_legacy_transfers_transfer_info_into_notes(tmp_path):

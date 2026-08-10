@@ -67,126 +67,8 @@ type Args = {
   agenda: AgendaProps["agenda"];
 };
 
-function ChatSurface(props: Args) {
-  return (
-    <div
-      className={cn(
-        "absolute inset-0 flex flex-col",
-        props.view !== "chat" && "hidden",
-      )}
-    >
-      <ThreadShell
-        session={props.session}
-        title={props.title}
-        onToggleSidebar={props.onToggleSidebar}
-        onNewChat={props.onNewChat}
-        onCreateChat={props.onCreateChat}
-        onForkChat={props.onForkChat}
-        onTurnEnd={props.onTurnEnd}
-        theme={props.theme}
-        onToggleTheme={props.onToggleTheme}
-        hideSidebarToggleForHostChrome
-        hostChromeTitleInset={props.hostChromeTitleInset}
-        hideHeader={false}
-        workspaceScope={props.activeWorkspaceScope}
-        workspaceDefaultScope={props.workspaces?.default_scope ?? null}
-        workspaceControls={props.workspaces?.controls ?? null}
-        workspaceScopeDisabled={props.activeChatRunning}
-        workspaceError={props.workspaceError}
-        onWorkspaceScopeChange={props.onWorkspaceScopeChange}
-        settingsSnapshot={props.settingsSnapshot}
-        onOpenModelSettings={props.onOpenModelSettings}
-        skills={props.skills}
-      />
-    </div>
-  );
-}
-
-function SettingsSurface(props: Args) {
-  return (
-    <div
-      className={cn(
-        "absolute inset-0 flex flex-col",
-        props.view === "chat" && "hidden",
-      )}
-    >
-      <Suspense fallback={props.fallback}>
-        <SettingsView
-          theme={props.theme}
-          initialSection={props.settingsInitialSection}
-          initialSettings={props.settingsSnapshot}
-          showSidebar={props.showSidebar}
-          onToggleTheme={props.onToggleTheme}
-          onBackToChat={props.onBackToChat}
-          onModelNameChange={props.onModelNameChange}
-          onSettingsChange={props.onSettingsChange}
-          skills={props.skills}
-          onWorkspaceSettingsChange={props.onWorkspaceSettingsChange}
-          onSectionChange={props.onSectionChange}
-          onLogout={props.onLogout}
-          onRestart={props.onRestart}
-          onNativeEngineRestart={props.onNativeEngineRestart}
-          isRestarting={props.isRestarting}
-          hostChromeInset={props.hostChromeInset}
-        />
-      </Suspense>
-    </div>
-  );
-}
-
-function TodosSurfaceWrapper(props: Args) {
-  return (
-    <div
-      className={cn(
-        "absolute inset-0 flex flex-col",
-        props.view !== "todos" && "hidden",
-      )}
-    >
-      <Suspense fallback={props.fallback}>
-        <TodosSurface
-          todoSlug={props.todoSlug}
-          todos={props.todos}
-          onOpenSlug={props.onOpenTodoSlug}
-          onBackToChat={props.onBackToChat}
-        />
-      </Suspense>
-    </div>
-  );
-}
-
-function AgendaSurfaceWrapper(props: Args) {
-  return (
-    <div
-      className={cn(
-        "absolute inset-0 flex flex-col",
-        props.view !== "agenda" && "hidden",
-      )}
-    >
-      <Suspense fallback={props.fallback}>
-        <AgendaSurface
-          agenda={props.agenda}
-          onBackToChat={props.onBackToChat}
-        />
-      </Suspense>
-    </div>
-  );
-}
-
-function ResearchSurfaceWrapper(props: Args) {
-  return (
-    <div
-      className={cn(
-        "absolute inset-0 flex flex-col",
-        props.view !== "research" && "hidden",
-      )}
-    >
-      <Suspense fallback={props.fallback}>
-        <ResearchSurface
-          onBackToChat={props.onBackToChat}
-        />
-      </Suspense>
-    </div>
-  );
+function Surface({ hidden, children }: { hidden: boolean; children: ReactNode }) {
+  return <div className={cn("absolute inset-0 flex flex-col", hidden && "hidden")}>{children}</div>;
 }
 
 export function MainView(props: Args) {
@@ -195,19 +77,86 @@ export function MainView(props: Args) {
       className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background"
     >
       {props.view === "chat" ? (
-        <ChatSurface {...props} />
+        <Surface hidden={false}>
+          <ThreadShell
+            session={props.session}
+            title={props.title}
+            onToggleSidebar={props.onToggleSidebar}
+            onNewChat={props.onNewChat}
+            onCreateChat={props.onCreateChat}
+            onForkChat={props.onForkChat}
+            onTurnEnd={props.onTurnEnd}
+            theme={props.theme}
+            onToggleTheme={props.onToggleTheme}
+            hideSidebarToggleForHostChrome
+            hostChromeTitleInset={props.hostChromeTitleInset}
+            hideHeader={false}
+            workspaceScope={props.activeWorkspaceScope}
+            workspaceDefaultScope={props.workspaces?.default_scope ?? null}
+            workspaceControls={props.workspaces?.controls ?? null}
+            workspaceScopeDisabled={props.activeChatRunning}
+            workspaceError={props.workspaceError}
+            onWorkspaceScopeChange={props.onWorkspaceScopeChange}
+            settingsSnapshot={props.settingsSnapshot}
+            onOpenModelSettings={props.onOpenModelSettings}
+            skills={props.skills}
+          />
+        </Surface>
       ) : props.view === "projects" ? (
         <ProjectsSurface onBackToChat={props.onBackToChat} />
       ) : props.view === "workspace" ? (
         <WorkspaceBrowser onBackToChat={props.onBackToChat} />
       ) : props.view === "todos" ? (
-        <TodosSurfaceWrapper {...props} />
+        <Surface hidden={false}>
+          <Suspense fallback={props.fallback}>
+            <TodosSurface
+              todoSlug={props.todoSlug}
+              todos={props.todos}
+              onOpenSlug={props.onOpenTodoSlug}
+              onBackToChat={props.onBackToChat}
+            />
+          </Suspense>
+        </Surface>
       ) : props.view === "agenda" ? (
-        <AgendaSurfaceWrapper {...props} />
+        <Surface hidden={false}>
+          <Suspense fallback={props.fallback}>
+            <AgendaSurface
+              agenda={props.agenda}
+              onBackToChat={props.onBackToChat}
+            />
+          </Suspense>
+        </Surface>
       ) : props.view === "research" ? (
-        <ResearchSurfaceWrapper {...props} />
+        <Surface hidden={false}>
+          <Suspense fallback={props.fallback}>
+            <ResearchSurface
+              onBackToChat={props.onBackToChat}
+            />
+          </Suspense>
+        </Surface>
       ) : (
-        <SettingsSurface {...props} />
+        <Surface hidden={false}>
+          <Suspense fallback={props.fallback}>
+            <SettingsView
+              theme={props.theme}
+              initialSection={props.settingsInitialSection}
+              initialSettings={props.settingsSnapshot}
+              showSidebar={props.showSidebar}
+              onToggleTheme={props.onToggleTheme}
+              onBackToChat={props.onBackToChat}
+              onModelNameChange={props.onModelNameChange}
+              onSettingsChange={props.onSettingsChange}
+              skills={props.skills}
+              onWorkspaceSettingsChange={props.onWorkspaceSettingsChange}
+              onSectionChange={props.onSectionChange}
+              onLogout={props.onLogout}
+              onRestart={props.onRestart}
+              onNativeEngineRestart={props.onNativeEngineRestart}
+              isRestarting={props.isRestarting}
+              hostChromeInset={props.hostChromeInset}
+            />
+          </Suspense>
+        </Surface>
       )}
     </main>
   );

@@ -33,10 +33,6 @@ class _FsTool(Tool):
     config_key = "file"
 
     @classmethod
-    def config_cls(cls):
-        return FileToolsConfig
-
-    @classmethod
     def enabled(cls, ctx: Any) -> bool:
         return ctx.config.file.enable
 
@@ -254,7 +250,7 @@ def _builtin_skill_read_path(path: str) -> Path | None:
 )
 class ReadFileTool(_FsTool):
     """Read file contents with optional line-based pagination."""
-    _scopes = {"core", "subagent", "memory"}
+    _scopes = {"core", "subagent"}
 
     _MAX_CHARS = 128_000
     _MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024
@@ -480,7 +476,7 @@ class ReadFileTool(_FsTool):
 )
 class WriteFileTool(_FsTool):
     """Write content to a file."""
-    _scopes = {"core", "subagent", "memory"}
+    _scopes = {"core", "subagent"}
 
     @property
     def name(self) -> str:
@@ -812,7 +808,7 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
 )
 class EditFileTool(_FsTool):
     """Edit a file by replacing text with fallback matching."""
-    _scopes = {"core", "subagent", "memory"}
+    _scopes = {"core", "subagent"}
 
     _MAX_EDIT_FILE_SIZE = 1024 * 1024 * 1024  # 1 GiB
     _MARKDOWN_EXTS = frozenset({".md", ".mdx", ".markdown"})

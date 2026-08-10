@@ -42,13 +42,3 @@ def test_dream_config_dump_omits_empty_legacy_cron() -> None:
     dumped = DreamConfig().model_dump(by_alias=True)
 
     assert "cron" not in dumped
-
-
-def test_dream_config_uses_model_override_name_and_accepts_legacy_model() -> None:
-    cfg = DreamConfig.model_validate({"model": "openrouter/sonnet"})
-
-    dumped = cfg.model_dump(by_alias=True)
-
-    assert cfg.model_override == "openrouter/sonnet"
-    assert dumped["modelOverride"] == "openrouter/sonnet"
-    assert "model" not in dumped

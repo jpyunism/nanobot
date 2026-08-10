@@ -85,10 +85,6 @@ class ImageGenerationTool(Tool):
     config_key = "image_generation"
 
     @classmethod
-    def config_cls(cls):
-        return ImageGenerationToolConfig
-
-    @classmethod
     def enabled(cls, ctx: Any) -> bool:
         return ctx.config.image_generation.enabled
 

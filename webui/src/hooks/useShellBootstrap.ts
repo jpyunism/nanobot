@@ -6,10 +6,8 @@ import { useChatActions } from "@/hooks/useChatActions";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useEngineRestart } from "@/hooks/useEngineRestart";
 import { useMissingSessionRedirect } from "@/hooks/useMissingSessionRedirect";
-import { useNativeHostClass } from "@/hooks/useNativeHostClass";
 import { usePairing } from "@/hooks/usePairing";
 import { useRunTracker } from "@/hooks/useRunTracker";
-import { useRuntimeModelSync } from "@/hooks/useRuntimeModelSync";
 import { useSettingsSnapshot } from "@/hooks/useSettingsSnapshot";
 import { useShellShortcuts } from "@/hooks/useShellShortcuts";
 import { useSidebarProps } from "@/hooks/useSidebarProps";
@@ -209,11 +207,7 @@ export function useShellBootstrap({
   const onOpenTodoSlug = useCallback(
     (slug: string | null) => {
       setTodoSlug(slug);
-      if (slug) {
-        navigate({ view: "todos", activeKey, settingsSection: "overview" });
-      } else {
-        navigate({ view: "todos", activeKey, settingsSection: "overview" });
-      }
+      navigate({ view: "todos", activeKey, settingsSection: "overview" });
     },
     [navigate, activeKey],
   );
@@ -243,9 +237,18 @@ export function useShellBootstrap({
 
   useDocumentTitle({ view, activeSession, sidebarState });
 
-  useRuntimeModelSync({ client, onModelNameChange });
+  useEffect(() => {
+    return client.onRuntimeModelUpdate((modelName) => {
+      onModelNameChange(modelName);
+    });
+  }, [client, onModelNameChange]);
 
-  useNativeHostClass(showHostChrome);
+  useEffect(() => {
+    document.documentElement.classList.toggle("native-host", showHostChrome);
+    return () => {
+      document.documentElement.classList.remove("native-host");
+    };
+  }, [showHostChrome]);
 
   const sidebarProps = useSidebarProps({
     sessions,

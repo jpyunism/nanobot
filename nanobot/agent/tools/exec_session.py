@@ -474,12 +474,6 @@ class WriteStdinTool(Tool):
     config_key = "exec"
 
     @classmethod
-    def config_cls(cls):
-        from nanobot.agent.tools.shell import ExecToolConfig
-
-        return ExecToolConfig
-
-    @classmethod
     def enabled(cls, ctx: Any) -> bool:
         return ctx.config.exec.enable
 
@@ -613,12 +607,6 @@ class ListExecSessionsTool(Tool):
 
     _scopes = {"core", "subagent"}
     config_key = "exec"
-
-    @classmethod
-    def config_cls(cls):
-        from nanobot.agent.tools.shell import ExecToolConfig
-
-        return ExecToolConfig
 
     @classmethod
     def enabled(cls, ctx: Any) -> bool:

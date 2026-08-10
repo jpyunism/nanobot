@@ -1039,10 +1039,10 @@
   }
 
   @supports (content-visibility: auto) {
-    .thread-render-unit {
-      content-visibility: auto;
-      contain-intrinsic-size: auto 12rem;
-    }
+    /* ponytail: content-visibility:auto with a 12rem intrinsic-size estimate
+       causes scroll jitter in long histories — off-screen units render at the
+       estimate, then jump to real height on reveal. windowMessages already
+       tail-slices to 160 messages, so the render savings are marginal. */
   }
 
   .thread-prompt-rail {

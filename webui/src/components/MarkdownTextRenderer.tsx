@@ -705,7 +705,7 @@ export default function MarkdownTextRenderer({
                 loading="lazy"
                 decoding="async"
                 draggable={false}
-                className="block h-auto max-h-[34rem] w-full rounded-[inherit] object-contain"
+                className="block h-auto min-h-[8rem] max-h-[34rem] w-full rounded-[inherit] object-contain"
               />
             </button>
           );

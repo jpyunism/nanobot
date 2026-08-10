@@ -146,7 +146,7 @@ function CodeTextBlock({
         showLineNumbers ? "whitespace-pre" : "whitespace-pre-wrap",
         chrome === "default"
           ? "py-4 pl-5 pr-14 leading-[1.6]"
-          : "p-3 leading-[1.55]",
+          : "py-3 pl-4 pr-4 leading-[1.55]",
         className,
       )}
       data-testid={testId}

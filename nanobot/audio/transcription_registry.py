@@ -9,22 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from importlib import import_module
-from pathlib import Path
-from typing import Any, Protocol
-
-
-class TranscriptionProviderAdapter(Protocol):
-    """Runtime protocol implemented by provider-specific transcription adapters."""
-
-    def __init__(
-        self,
-        api_key: str | None = None,
-        api_base: str | None = None,
-        language: str | None = None,
-        model: str | None = None,
-    ) -> None: ...
-
-    async def transcribe(self, file_path: str | Path) -> str: ...
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -34,7 +19,7 @@ class TranscriptionProviderSpec:
     adapter: str
     aliases: tuple[str, ...] = ()
 
-    def load_adapter(self) -> type[TranscriptionProviderAdapter]:
+    def load_adapter(self) -> type:
         module_name, _, class_name = self.adapter.partition(":")
         if not module_name or not class_name:
             raise RuntimeError(f"Invalid transcription adapter path: {self.adapter}")

@@ -147,10 +147,6 @@ class ExecTool(Tool):
     config_key = "exec"
 
     @classmethod
-    def config_cls(cls):
-        return ExecToolConfig
-
-    @classmethod
     def enabled(cls, ctx: Any) -> bool:
         return ctx.config.exec.enable
 

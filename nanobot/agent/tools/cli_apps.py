@@ -62,10 +62,6 @@ class CliAppsTool(Tool):
     _scopes = {"core", "subagent"}
 
     @classmethod
-    def config_cls(cls):
-        return CliAppsToolConfig
-
-    @classmethod
     def enabled(cls, ctx: Any) -> bool:
         return ctx.config.cli_apps.enable
 

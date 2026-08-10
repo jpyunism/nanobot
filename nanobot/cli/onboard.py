@@ -18,7 +18,6 @@ from rich.panel import Panel
 from rich.table import Table
 
 from nanobot.cli.models import (
-    format_token_count,
     get_model_context_limit,
     get_model_suggestions,
 )
@@ -694,7 +693,7 @@ def _input_context_window_with_recommendation(
         if context_limit:
             console.print(
                 f"[{_UI_SUCCESS}]+ Recommended context window: "
-                f"{format_token_count(context_limit)} tokens[/]"
+                f"{context_limit:,} tokens[/]"
             )
             return context_limit
         else:
@@ -1037,7 +1036,7 @@ def _try_auto_fill_context_window(model: BaseModel, new_model_name: str) -> None
         setattr(model, "context_window_tokens", context_limit)
         console.print(
             f"[{_UI_SUCCESS}]+ Auto-filled context window: "
-            f"{format_token_count(context_limit)} tokens[/]"
+            f"{context_limit:,} tokens[/]"
         )
     else:
         console.print("[dim]Could not auto-fill context window - model not in database[/dim]")

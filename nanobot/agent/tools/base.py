@@ -8,8 +8,6 @@ from copy import deepcopy
 from typing import Any, TypeVar
 
 if typing.TYPE_CHECKING:
-    from pydantic import BaseModel
-
     from nanobot.agent.tools.context import ToolContext
     from nanobot.runtime_context import RuntimeContextProvider
 
@@ -194,10 +192,6 @@ class Tool(ABC):
     config_key: str = ""
     _plugin_discoverable: bool = True
     _scopes: set[str] = {"core"}
-
-    @classmethod
-    def config_cls(cls) -> type[BaseModel] | None:
-        return None
 
     @classmethod
     def enabled(cls, ctx: ToolContext) -> bool:

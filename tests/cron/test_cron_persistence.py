@@ -17,6 +17,7 @@ import pytest
 
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronPayload, CronSchedule
+from nanobot.utils.atomic_write import atomic_write_text
 
 
 def _seeded_store(tmp_path: Path) -> tuple[CronService, Path]:
@@ -130,7 +131,7 @@ def test_atomic_write_ignores_unsupported_directory_fsync(
     monkeypatch.setattr("os.fsync", fake_fsync)
     monkeypatch.setattr("os.close", fake_close)
 
-    CronService._atomic_write(store_path, '{"version": 1, "jobs": []}')
+    atomic_write_text(store_path, '{"version": 1, "jobs": []}')
 
     assert store_path.read_text(encoding="utf-8") == '{"version": 1, "jobs": []}'
     assert list(store_path.parent.glob("*.tmp")) == []

@@ -328,10 +328,6 @@ class WebSearchTool(Tool):
     config_key = "web"
 
     @classmethod
-    def config_cls(cls):
-        return WebToolsConfig
-
-    @classmethod
     def enabled(cls, ctx: Any) -> bool:
         return ctx.config.web.enable
 
@@ -980,10 +976,6 @@ class WebFetchTool(Tool):
     )
 
     config_key = "web"
-
-    @classmethod
-    def config_cls(cls):
-        return WebToolsConfig
 
     @classmethod
     def enabled(cls, ctx: Any) -> bool:

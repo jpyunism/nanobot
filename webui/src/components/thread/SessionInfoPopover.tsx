@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useSessionAutomationJobs } from "@/hooks/useSessionAutomationJobs";
 import { currentLocale } from "@/i18n";
+import { formatDuration } from "@/lib/automation-format";
 import { fmtDateTime } from "@/lib/format";
 import type { SessionAutomationJob } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -211,29 +212,4 @@ function relativeTimeFrom(value: number, now: number, locale: string): string {
     delta /= step;
   }
   return formatter.format(Math.round(delta), "year");
-}
-
-function formatDuration(ms: number, locale: string): string {
-  const units: Array<[Intl.NumberFormatOptions["unit"], number]> = [
-    ["day", 86_400_000],
-    ["hour", 3_600_000],
-    ["minute", 60_000],
-    ["second", 1000],
-  ];
-  for (const [unit, size] of units) {
-    if (ms >= size && ms % size === 0) {
-      return new Intl.NumberFormat(locale, {
-        style: "unit",
-        unit,
-        unitDisplay: "long",
-        maximumFractionDigits: 0,
-      }).format(ms / size);
-    }
-  }
-  return new Intl.NumberFormat(locale, {
-    style: "unit",
-    unit: "minute",
-    unitDisplay: "long",
-    maximumFractionDigits: 1,
-  }).format(ms / 60_000);
 }

@@ -17,6 +17,7 @@ from loguru import logger
 
 from nanobot.runtime_context import public_history_messages
 from nanobot.session.manager import Session, SessionManager
+from nanobot.utils.atomic_write import atomic_write_text
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
     ensure_dir,
@@ -513,28 +514,8 @@ class MemoryStore:
 
     def _write_entries(self, entries: list[dict[str, Any]]) -> None:
         """Overwrite history.jsonl with the given entries (atomic write)."""
-        tmp_path = self.history_file.with_suffix(self.history_file.suffix + ".tmp")
-        try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                for entry in entries:
-                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, self.history_file)
-
-            # fsync the directory so the rename is durable.
-            # On Windows, opening a directory with O_RDONLY raises
-            # PermissionError — skip the dir sync there (NTFS
-            # journals metadata synchronously).
-            with suppress(PermissionError):
-                fd = os.open(str(self.history_file.parent), os.O_RDONLY)
-                try:
-                    os.fsync(fd)
-                finally:
-                    os.close(fd)
-        except BaseException:
-            tmp_path.unlink(missing_ok=True)
-            raise
+        content = "".join(json.dumps(entry, ensure_ascii=False) + "\n" for entry in entries)
+        atomic_write_text(self.history_file, content)
 
     # -- dream cursor --------------------------------------------------------
 

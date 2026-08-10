@@ -21,6 +21,7 @@ from nanobot.runtime_context import public_history_message
 from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionManager
+from nanobot.utils.atomic_write import atomic_write_text
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
 
 WEBUI_TRANSCRIPT_SCHEMA_VERSION = 3
@@ -188,21 +189,13 @@ def _flatten_turns(turns: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
 
 
 def _write_records_to_path(path: Path, rows: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            for row in rows:
-                raw = _record_json_line(row)
-                if len(raw.encode("utf-8")) > _MAX_TRANSCRIPT_FILE_BYTES:
-                    raise ValueError("webui transcript line too large")
-                f.write(raw + "\n")
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
+    lines = []
+    for row in rows:
+        raw = _record_json_line(row)
+        if len(raw.encode("utf-8")) > _MAX_TRANSCRIPT_FILE_BYTES:
+            raise ValueError("webui transcript line too large")
+        lines.append(raw)
+    atomic_write_text(path, "\n".join(lines) + "\n")
 
 
 def _segment_file_path(session_key: str, segment_id: str) -> Path:
@@ -268,13 +261,7 @@ def _write_segment_manifest(session_key: str, segment_ids: list[str]) -> None:
         "segments": [_segment_manifest_entry(session_key, segment_id) for segment_id in segment_ids],
     }
     path = _webui_transcript_manifest_path(session_key)
-    tmp_path = path.with_suffix(".json.tmp")
-    try:
-        tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        os.replace(tmp_path, path)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
+    atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
 
 
 def _rebuild_segment_manifest(session_key: str) -> list[str]:

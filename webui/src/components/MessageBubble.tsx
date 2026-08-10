@@ -587,7 +587,7 @@ function UserImageCell({
           className={cn(
             "block",
             size === "large"
-              ? "h-auto max-h-[36rem] w-full rounded-[inherit] object-contain"
+              ? "h-auto min-h-[8rem] max-h-[36rem] w-full rounded-[inherit] object-contain"
               : "h-full w-full object-cover",
           )}
         />

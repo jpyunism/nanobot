@@ -43,28 +43,6 @@ def test_provider_api_type_accepts_exact_values_only() -> None:
         })
 
 
-def test_provider_api_type_is_openai_only() -> None:
-    with pytest.raises(ValueError, match="only supported"):
-        Config.model_validate({
-            "providers": {
-                "custom": {
-                    "apiBase": "https://example.test/v1",
-                    "apiType": "responses",
-                }
-            }
-        })
-
-    with pytest.raises(ValueError, match="only supported"):
-        Config.model_validate({
-            "providers": {
-                "my-company-api": {
-                    "apiBase": "https://example.test/v1",
-                    "apiType": "responses",
-                }
-            }
-        })
-
-
 @pytest.mark.parametrize("provider_name", ["openai-codex", "github-copilot", "lm-studio"])
 def test_dynamic_custom_provider_rejects_builtin_provider_aliases(provider_name: str) -> None:
     with pytest.raises(ValueError, match="conflicts with built-in provider"):

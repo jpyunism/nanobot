@@ -39,27 +39,7 @@ from nanobot.bus.outbound_events import (
     TurnModelUpdatedEvent,
     WorkflowUpdateEvent,
 )
-
-
-def _atomic_write(path: Path, content: str) -> None:
-    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-        try:
-            fd = os.open(str(path.parent), os.O_RDONLY)
-            try:
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-        except OSError:
-            pass
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+from nanobot.utils.atomic_write import atomic_write_text
 
 
 def _encode_datetime(obj: Any) -> Any:
@@ -220,7 +200,7 @@ class DurableMessageQueue:
         # cannot block the asyncio event loop for seconds and kill heartbeats
         # for live channels (Discord/WebSocket pings).
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, _atomic_write, path, content)
+        await loop.run_in_executor(None, atomic_write_text, path, content)
         if put_signal is not None:
             result = put_signal()
             if isinstance(result, Awaitable):

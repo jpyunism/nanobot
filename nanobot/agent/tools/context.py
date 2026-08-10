@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from nanobot.utils.llm_runtime import LLMRuntime
@@ -29,12 +29,6 @@ class RequestContext:
     sender_id: str | None = None
     turn_id: str | None = None
     workspace: Path | None = None
-
-
-@runtime_checkable
-class ContextAware(Protocol):
-    def set_context(self, ctx: RequestContext) -> None:
-        ...
 
 
 def bind_request_context(ctx: RequestContext) -> Token[RequestContext | None]:
