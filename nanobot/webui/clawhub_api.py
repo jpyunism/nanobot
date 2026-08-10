@@ -83,7 +83,12 @@ def _summary_payload(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def clawhub_search(query: str, limit: int = 20) -> list[dict[str, Any]]:
-    """Search the ClawHub registry by natural language query."""
+    """Search the ClawHub registry by natural language query.
+
+    Only skills installable through the ClawHub download API (``kind ==
+    "clawhub"``) are returned; ``skills-sh`` and other registry kinds are
+    not installable here and would only surface as install errors.
+    """
     query = query.strip()
     if not query:
         return []
@@ -92,19 +97,30 @@ def clawhub_search(query: str, limit: int = 20) -> list[dict[str, Any]]:
         {"q": query, "limit": max(1, min(limit, _MAX_RESULTS))},
     )
     results = data.get("results") or []
-    payloads = [_summary_payload(item) for item in results if isinstance(item, dict)]
+    payloads = [
+        _summary_payload(item)
+        for item in results
+        if isinstance(item, dict) and (item.get("install") or {}).get("kind") == "clawhub"
+    ]
     payloads.sort(key=lambda s: s["installs_60d"], reverse=True)
     return payloads
 
 
 def clawhub_trending(limit: int = 20) -> list[dict[str, Any]]:
-    """Return trending skills from the ClawHub registry, most installed first."""
+    """Return trending skills from the ClawHub registry, most installed first.
+
+    Only ``clawhub``-kind skills are returned (see ``clawhub_search``).
+    """
     data = _get(
         _TRENDING_PATH,
         {"limit": max(1, min(limit, _MAX_RESULTS))},
     )
     items = data.get("items") or []
-    payloads = [_summary_payload(item) for item in items if isinstance(item, dict)]
+    payloads = [
+        _summary_payload(item)
+        for item in items
+        if isinstance(item, dict) and (item.get("install") or {}).get("kind") == "clawhub"
+    ]
     payloads.sort(key=lambda s: s["installs_60d"], reverse=True)
     return payloads
 

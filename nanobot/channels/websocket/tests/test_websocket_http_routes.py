@@ -605,6 +605,16 @@ async def test_clawhub_routes_require_token_and_return_results(
                                 "reference": "someone/tiny-scraper",
                             },
                         },
+                        {
+                            "displayName": "Find Skills",
+                            "summary": "A skills-sh skill that is not installable here.",
+                            "downloads": 26509,
+                            "metrics": {"lifetimeInstalls": 26509},
+                            "install": {
+                                "kind": "skills-sh",
+                                "reference": "skills-sh:vercel-labs/skills/find-skills",
+                            },
+                        },
                     ]
                 },
                 request=request,
@@ -622,6 +632,7 @@ async def test_clawhub_routes_require_token_and_return_results(
         )
         assert resp.status_code == 200
         body = resp.json()
+        # skills-sh items are filtered out (not installable via the API).
         assert len(body["results"]) == 2
         # Results must be sorted most-installed first.
         assert [r["installs_60d"] for r in body["results"]] == [31, 4]
