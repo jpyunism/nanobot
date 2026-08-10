@@ -62,6 +62,7 @@ class SessionClient:
 
         if save:
             self._loop.sessions.save(session)
+            await self._loop.drain_archives()
         return snapshot_from_session(session)
 
     def get(self, session_key: str) -> SessionSnapshot | None:

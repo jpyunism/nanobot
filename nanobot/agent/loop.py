@@ -417,6 +417,7 @@ class AgentLoop:
         self._runtime_context_providers: list[RuntimeContextProvider] = []
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
+        self._archive_tasks: list[asyncio.Task] = []
         self._session_locks: dict[str, asyncio.Lock] = {}
         # Per-session pending queues for mid-turn message injection.
         # When a session has an active task, new messages for that session
@@ -1374,6 +1375,9 @@ class AgentLoop:
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
+        if self._archive_tasks:
+            await asyncio.gather(*self._archive_tasks, return_exceptions=True)
+            self._archive_tasks.clear()
         errors: list[BaseException] = []
         cleanup_steps = [
             self.subagents.close,
@@ -1399,6 +1403,18 @@ class AgentLoop:
         self._background_tasks.append(task)
         task.add_done_callback(self._background_tasks.remove)
 
+    def _schedule_archive(self, coro) -> None:
+        """Schedule an archive task, tracked so callers can await completion."""
+        task = asyncio.create_task(coro)
+        self._archive_tasks.append(task)
+        task.add_done_callback(self._archive_tasks.remove)
+
+    async def drain_archives(self) -> None:
+        """Await all pending archive tasks (file-cap / snip overflow)."""
+        if self._archive_tasks:
+            await asyncio.gather(*self._archive_tasks, return_exceptions=True)
+            self._archive_tasks.clear()
+
     def _archive_file_cap(self, messages: list[dict], *, session_key: str | None = None) -> None:
         """Archive file-cap overflow with an LLM summary instead of a raw dump.
 
@@ -1421,7 +1437,7 @@ class AgentLoop:
             )
             self.context.memory.raw_archive(messages, session_key=session_key)
             return
-        self._schedule_background(
+        self._schedule_archive(
             self._archive_with_llm(messages, runtime=runtime, session_key=session_key)
         )
 
@@ -1447,7 +1463,7 @@ class AgentLoop:
             )
             self.context.memory.raw_archive(messages, session_key=session_key)
             return
-        self._schedule_background(
+        self._schedule_archive(
             self._archive_with_llm(messages, runtime=runtime, session_key=session_key)
         )
 
