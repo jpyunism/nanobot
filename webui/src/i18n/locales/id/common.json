@@ -840,7 +840,13 @@
       "clawhubInstallError": "Could not install skill.",
       "clawhubEmpty": "No skills found. Try another search.",
       "clawhubInstalls": "{{count}} installs",
-      "clawhubDownloads": "{{count}} downloads"
+      "clawhubDownloads": "{{count}} downloads",
+      "clawhubDelete": "Delete skill",
+      "clawhubDeleteTitle": "Delete skill",
+      "clawhubDeleteDescription": "Remove the '{{name}}' skill from this workspace? This cannot be undone.",
+      "clawhubDeleteConfirm": "Delete",
+      "clawhubDeleteError": "Could not delete skill.",
+      "cancel": "Cancel"
     },
     "voice": {
       "selectProvider": "Pilih penyedia",

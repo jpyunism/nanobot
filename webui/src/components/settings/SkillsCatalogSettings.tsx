@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useCallback, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import {
   Brain,
@@ -9,14 +9,25 @@ import {
   Loader2,
   Search,
   Terminal,
+  Trash2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import {
+  deleteClawhubSkill,
   fetchClawhubSearch,
   fetchClawhubTrending,
   fetchSkillDetail,
+  fetchSkills,
   installClawhubSkill,
   type ClawhubSkillSummary,
 } from "@/lib/api";
@@ -25,8 +36,19 @@ import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
 export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
+  const { token } = useClient();
   const { t } = useTranslation();
-  const availableCount = skills.filter((skill) => skill.available).length;
+  const [localSkills, setLocalSkills] = useState<SkillSummary[]>(skills);
+
+  const refreshSkills = useCallback(() => {
+    fetchSkills(token)
+      .then(({ skills: next }) => setLocalSkills(next))
+      .catch(() => {
+        /* keep the current list on transient failures */
+      });
+  }, [token]);
+
+  const availableCount = localSkills.filter((skill) => skill.available).length;
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
 
   return (
@@ -40,7 +62,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
         <span className="text-[12px] font-medium text-muted-foreground">
           {t("settings.skills.caption", {
             available: availableCount,
-            total: skills.length,
+            total: localSkills.length,
             defaultValue: "{{available}} available · {{total}} total",
           })}
         </span>
@@ -52,12 +74,12 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
             {t("settings.skills.featured", { defaultValue: "Agent skills" })}
           </h2>
           <span className="rounded-full bg-muted px-2.5 py-1 text-[12px] font-medium text-muted-foreground">
-            {skills.length}
+            {localSkills.length}
           </span>
         </div>
-        {skills.length ? (
+        {localSkills.length ? (
           <div className="grid gap-x-10 gap-y-1 py-3 md:grid-cols-2">
-            {skills.map((skill) => (
+            {localSkills.map((skill) => (
               <SkillCatalogRow
                 key={`${skill.source}:${skill.name}`}
                 skill={skill}
@@ -72,7 +94,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
         )}
       </section>
 
-      <ClawhubSection />
+      <ClawhubSection onSkillsChanged={refreshSkills} />
 
       <SkillDetailSheet
         skill={selectedSkill}
@@ -85,7 +107,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
   );
 }
 
-function ClawhubSection() {
+function ClawhubSection({ onSkillsChanged }: { onSkillsChanged: () => void }) {
   const { token } = useClient();
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -93,7 +115,9 @@ function ClawhubSection() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [installing, setInstalling] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [installed, setInstalled] = useState<Set<string>>(new Set());
+  const [pendingDelete, setPendingDelete] = useState<ClawhubSkillSummary | null>(null);
 
   const loadTrending = () => {
     setLoading(true);
@@ -127,11 +151,33 @@ function ClawhubSection() {
     setInstalling(skill.reference);
     setError(null);
     installClawhubSkill(token, skill.reference)
-      .then(() => {
+      .then(({ slug }) => {
         setInstalled((prev) => new Set(prev).add(skill.reference));
+        setInstalled((prev) => new Set(prev).add(slug));
+        onSkillsChanged();
       })
       .catch(() => setError(t("settings.skills.clawhubInstallError", { defaultValue: "Could not install skill." })))
       .finally(() => setInstalling(null));
+  };
+
+  const confirmDelete = (skill: ClawhubSkillSummary) => {
+    setDeleting(skill.reference);
+    setError(null);
+    deleteClawhubSkill(token, skill.slug)
+      .then(() => {
+        setInstalled((prev) => {
+          const next = new Set(prev);
+          next.delete(skill.reference);
+          next.delete(skill.slug);
+          return next;
+        });
+        onSkillsChanged();
+      })
+      .catch(() => setError(t("settings.skills.clawhubDeleteError", { defaultValue: "Could not delete skill." })))
+      .finally(() => {
+        setDeleting(null);
+        setPendingDelete(null);
+      });
   };
 
   return (
@@ -189,8 +235,9 @@ function ClawhubSection() {
               key={skill.reference}
               skill={skill}
               installing={installing === skill.reference}
-              installed={installed.has(skill.reference)}
+              installed={installed.has(skill.reference) || installed.has(skill.slug)}
               onInstall={() => install(skill)}
+              onDelete={() => setPendingDelete(skill)}
             />
           ))}
         </div>
@@ -199,7 +246,73 @@ function ClawhubSection() {
           {t("settings.skills.clawhubEmpty", { defaultValue: "No skills found. Try another search." })}
         </div>
       )}
+
+      <SkillDeleteDialog
+        skill={pendingDelete}
+        open={pendingDelete !== null}
+        deleting={deleting !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+        onConfirm={() => pendingDelete && confirmDelete(pendingDelete)}
+      />
     </section>
+  );
+}
+
+function SkillDeleteDialog({
+  skill,
+  open,
+  deleting,
+  onOpenChange,
+  onConfirm,
+}: {
+  skill: ClawhubSkillSummary | null;
+  open: boolean;
+  deleting: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {t("settings.skills.clawhubDeleteTitle", { defaultValue: "Delete skill" })}
+          </DialogTitle>
+          <DialogDescription>
+            {t("settings.skills.clawhubDeleteDescription", {
+              name: skill?.name ?? "",
+              defaultValue: "Remove the '{{name}}' skill from this workspace? This cannot be undone.",
+            })}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={() => onOpenChange(false)}
+            className="inline-flex h-9 items-center rounded-[12px] border border-border/60 px-3.5 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted/50 disabled:opacity-60"
+          >
+            {t("settings.skills.cancel", { defaultValue: "Cancel" })}
+          </button>
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={onConfirm}
+            className="inline-flex h-9 items-center gap-1.5 rounded-[12px] bg-destructive px-3.5 text-[13px] font-medium text-white transition-colors hover:bg-destructive/90 disabled:opacity-60"
+          >
+            {deleting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            ) : (
+              <Trash2 className="h-3.5 w-3.5" aria-hidden />
+            )}
+            {t("settings.skills.clawhubDeleteConfirm", { defaultValue: "Delete" })}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -208,11 +321,13 @@ function ClawhubRow({
   installing,
   installed,
   onInstall,
+  onDelete,
 }: {
   skill: ClawhubSkillSummary;
   installing: boolean;
   installed: boolean;
   onInstall: () => void;
+  onDelete: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -228,6 +343,11 @@ function ClawhubRow({
           <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold leading-none text-muted-foreground">
             {skill.owner}
           </span>
+          {skill.kind === "skills-sh" ? (
+            <span className="shrink-0 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-violet-600 dark:text-violet-300">
+              skills.sh
+            </span>
+          ) : null}
         </div>
         <p className="mt-1 line-clamp-2 text-[13px] leading-5 text-muted-foreground">
           {skill.description}
@@ -239,31 +359,43 @@ function ClawhubRow({
           })}
         </p>
       </div>
-      <button
-        type="button"
-        onClick={onInstall}
-        disabled={installing || installed}
-        className={cn(
-          "inline-flex shrink-0 items-center gap-1.5 rounded-[12px] px-3 py-1.5 text-[12px] font-medium transition-colors",
-          installed
-            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-            : "bg-foreground/90 text-background hover:bg-foreground",
-          (installing || installed) && "cursor-default opacity-80",
-        )}
-      >
-        {installing ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-        ) : installed ? (
-          <Check className="h-3.5 w-3.5" aria-hidden />
-        ) : (
-          <Download className="h-3.5 w-3.5" aria-hidden />
-        )}
-        {installing
-          ? t("settings.skills.clawhubInstalling", { defaultValue: "Installing…" })
-          : installed
-            ? t("settings.skills.clawhubInstalled", { defaultValue: "Installed" })
-            : t("settings.skills.clawhubInstall", { defaultValue: "Install" })}
-      </button>
+      <div className="flex shrink-0 items-center gap-1.5">
+        {installed ? (
+          <button
+            type="button"
+            onClick={onDelete}
+            title={t("settings.skills.clawhubDelete", { defaultValue: "Delete skill" })}
+            className="inline-flex items-center gap-1.5 rounded-[12px] border border-border/50 px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+          >
+            <Trash2 className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={onInstall}
+          disabled={installing || installed}
+          className={cn(
+            "inline-flex shrink-0 items-center gap-1.5 rounded-[12px] px-3 py-1.5 text-[12px] font-medium transition-colors",
+            installed
+              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+              : "bg-foreground/90 text-background hover:bg-foreground",
+            (installing || installed) && "cursor-default opacity-80",
+          )}
+        >
+          {installing ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+          ) : installed ? (
+            <Check className="h-3.5 w-3.5" aria-hidden />
+          ) : (
+            <Download className="h-3.5 w-3.5" aria-hidden />
+          )}
+          {installing
+            ? t("settings.skills.clawhubInstalling", { defaultValue: "Installing…" })
+            : installed
+              ? t("settings.skills.clawhubInstalled", { defaultValue: "Installed" })
+              : t("settings.skills.clawhubInstall", { defaultValue: "Install" })}
+        </button>
+      </div>
     </div>
   );
 }

@@ -82,12 +82,15 @@ def _summary_payload(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_INSTALLABLE_KINDS = {"clawhub", "skills-sh"}
+
+
 def clawhub_search(query: str, limit: int = 20) -> list[dict[str, Any]]:
     """Search the ClawHub registry by natural language query.
 
-    Only skills installable through the ClawHub download API (``kind ==
-    "clawhub"``) are returned; ``skills-sh`` and other registry kinds are
-    not installable here and would only surface as install errors.
+    Only installable kinds are returned: ``clawhub`` (downloaded from the
+    ClawHub download API) and ``skills-sh`` (downloaded from their GitHub
+    source repository, see :func:`skills_sh_install`).
     """
     query = query.strip()
     if not query:
@@ -100,7 +103,7 @@ def clawhub_search(query: str, limit: int = 20) -> list[dict[str, Any]]:
     payloads = [
         _summary_payload(item)
         for item in results
-        if isinstance(item, dict) and (item.get("install") or {}).get("kind") == "clawhub"
+        if isinstance(item, dict) and (item.get("install") or {}).get("kind") in _INSTALLABLE_KINDS
     ]
     payloads.sort(key=lambda s: s["installs_60d"], reverse=True)
     return payloads
@@ -109,7 +112,7 @@ def clawhub_search(query: str, limit: int = 20) -> list[dict[str, Any]]:
 def clawhub_trending(limit: int = 20) -> list[dict[str, Any]]:
     """Return trending skills from the ClawHub registry, most installed first.
 
-    Only ``clawhub``-kind skills are returned (see ``clawhub_search``).
+    Only installable kinds are returned (see ``clawhub_search``).
     """
     data = _get(
         _TRENDING_PATH,
@@ -119,13 +122,13 @@ def clawhub_trending(limit: int = 20) -> list[dict[str, Any]]:
     payloads = [
         _summary_payload(item)
         for item in items
-        if isinstance(item, dict) and (item.get("install") or {}).get("kind") == "clawhub"
+        if isinstance(item, dict) and (item.get("install") or {}).get("kind") in _INSTALLABLE_KINDS
     ]
     payloads.sort(key=lambda s: s["installs_60d"], reverse=True)
     return payloads
 
 
-def clawhub_install(reference: str, skills_dir: Path) -> dict[str, Any]:
+def _clawhub_download_install(reference: str, skills_dir: Path) -> dict[str, Any]:
     """Download and install a ClawHub skill into ``skills_dir``.
 
     ``reference`` is the install reference (``owner/slug``). The zip is
@@ -172,3 +175,139 @@ def clawhub_install(reference: str, skills_dir: Path) -> dict[str, Any]:
         resolved.write_bytes(archive.read(member))
 
     return {"slug": slug, "installed": True, "path": str(target)}
+
+
+def skills_sh_install(reference: str, skills_dir: Path) -> dict[str, Any]:
+    """Install a ``skills-sh`` skill from its GitHub source repository.
+
+    The skills.sh API itself requires a Vercel OIDC token, but skills are
+    plain folders in GitHub repos, so we install them straight from the
+    source: ``skills-sh:owner/repo/slug`` (or ``owner/repo@slug``) maps to
+    the GitHub repo ``owner/repo`` and the skill folder ``<slug>`` inside
+    it (conventionally under ``skills/<slug>/``). Files are downloaded from
+    the repo tree and extracted into ``skills_dir/<slug>/``.
+    """
+    ref = reference.strip()
+    if ref.startswith("skills-sh:"):
+        ref = ref[len("skills-sh:") :].strip()
+    if "@" in ref:
+        owner_repo, slug = ref.rsplit("@", 1)
+    else:
+        parts = ref.split("/")
+        if len(parts) != 3:
+            raise ClawhubError(
+                "Invalid skills-sh reference (expected owner/repo/slug)"
+            )
+        owner_repo, slug = "/".join(parts[:2]), parts[2]
+    owner, sep, repo = owner_repo.partition("/")
+    if not sep or not owner or not repo or not slug:
+        raise ClawhubError("Invalid skills-sh reference (expected owner/repo/slug)")
+
+    branch = _github_default_branch(owner, repo)
+    try:
+        tree = _github_get_json(
+            f"https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"
+        )
+    except ClawhubError as exc:
+        raise ClawhubError(f"Could not read the skill repository: {exc}") from exc
+    entries = tree.get("tree") if isinstance(tree, dict) else None
+    if not isinstance(entries, list):
+        raise ClawhubError("Could not read the skill repository tree")
+
+    skill_paths = _skill_folder_paths(entries, slug)
+    if not skill_paths:
+        raise ClawhubError(
+            f"Skill '{slug}' not found in {owner}/{repo} (looked for a '{slug}/SKILL.md' folder)"
+        )
+    prefix = skill_paths[0]  # deterministic: prefers skills/<slug>, then */<slug>
+    files = [entry["path"] for entry in entries if entry["path"].startswith(prefix + "/")]
+
+    target = skills_dir / slug
+    target.mkdir(parents=True, exist_ok=True)
+    for path in files:
+        if not path.endswith("/"):
+            resolved = (target / path[len(prefix) + 1 :]).resolve()
+            if not resolved.is_relative_to(target.resolve()):
+                raise ClawhubError("Skill source contains unsafe paths")
+            resolved.parent.mkdir(parents=True, exist_ok=True)
+            resolved.write_bytes(
+                _github_get_raw(
+                    f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
+                )
+            )
+
+    return {"slug": slug, "installed": True, "path": str(target), "source": "skills-sh"}
+
+
+def _github_default_branch(owner: str, repo: str) -> str:
+    """Resolve the repository's default branch (needed for raw URLs)."""
+    data = _github_get_json(f"https://api.github.com/repos/{owner}/{repo}")
+    branch = data.get("default_branch")
+    if not isinstance(branch, str) or not branch:
+        raise ClawhubError("Could not resolve the repository default branch")
+    return branch
+
+
+def _github_get_json(url: str) -> dict[str, Any]:
+    try:
+        response = httpx.get(url, timeout=_TIMEOUT, follow_redirects=True)
+        response.raise_for_status()
+        data = response.json()
+    except httpx.HTTPStatusError as exc:
+        raise ClawhubError(f"GitHub responded {exc.response.status_code}") from exc
+    except httpx.HTTPError as exc:
+        raise ClawhubError(f"Could not reach GitHub: {exc}") from exc
+    except ValueError as exc:
+        raise ClawhubError("GitHub returned an invalid response") from exc
+    if not isinstance(data, dict):
+        raise ClawhubError("GitHub returned an invalid response")
+    return data
+
+
+def _github_get_raw(url: str) -> bytes:
+    try:
+        response = httpx.get(url, timeout=_TIMEOUT, follow_redirects=True)
+        response.raise_for_status()
+        return response.content
+    except httpx.HTTPStatusError as exc:
+        raise ClawhubError(f"GitHub responded {exc.response.status_code}") from exc
+    except httpx.HTTPError as exc:
+        raise ClawhubError(f"Could not reach GitHub: {exc}") from exc
+
+
+def _skill_folder_paths(entries: list[dict[str, Any]], slug: str) -> list[str]:
+    """Return candidate skill folder paths (containing SKILL.md) sorted by preference.
+
+    The skills.sh convention is ``skills/<slug>/SKILL.md``; we prefer that,
+    then any ``*/<slug>/SKILL.md``, then ``<slug>/SKILL.md`` at the root.
+    """
+    skl = slug.lower()
+    candidates: list[str] = []
+    for entry in entries:
+        path = entry.get("path") or ""
+        if path.endswith(f"/{slug}/SKILL.md") or path.endswith(f"/{skl}/SKILL.md"):
+            folder = path[: -len("/SKILL.md")]
+            candidates.append(folder)
+    if not candidates:
+        return []
+    def _rank(folder: str) -> tuple[int, int]:
+        parts = folder.split("/")
+        if len(parts) == 2 and parts[0].lower() == "skills":
+            return (0, 0)
+        return (1, len(parts))
+    candidates.sort(key=_rank)
+    return candidates
+
+
+def clawhub_install(reference: str, skills_dir: Path) -> dict[str, Any]:
+    """Install a skill from ClawHub or skills.sh by reference.
+
+    References starting with ``skills-sh:`` (or ``owner/repo@slug``) are
+    installed from their GitHub source; anything else goes through the
+    ClawHub download API.
+    """
+    if reference.strip().startswith("skills-sh:") or (
+        reference.count("/") == 1 and "@" in reference
+    ):
+        return skills_sh_install(reference, skills_dir)
+    return _clawhub_download_install(reference, skills_dir)

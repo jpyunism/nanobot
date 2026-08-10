@@ -421,6 +421,24 @@ export async function installClawhubSkill(
   );
 }
 
+export async function deleteClawhubSkill(
+  token: string,
+  name: string,
+  base: string = "",
+): Promise<{ name: string; deleted: boolean }> {
+  return request<{ name: string; deleted: boolean }>(
+    `${base}/api/webui/clawhub/delete`,
+    token,
+    {
+      method: "GET",
+      headers: {
+        "X-Nanobot-Clawhub-Data": JSON.stringify({ name }),
+      },
+    },
+    API_READ_TIMEOUT_MS,
+  );
+}
+
 export async function deleteSession(
   token: string,
   key: string,

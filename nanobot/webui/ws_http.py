@@ -13,6 +13,7 @@ import asyncio
 import json
 import mimetypes
 import re
+import shutil
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -1486,6 +1487,8 @@ class GatewayHTTPHandler:
             return self._handle_clawhub_trending(request)
         if got == "/api/webui/clawhub/install":
             return self._handle_clawhub_install(request)
+        if got == "/api/webui/clawhub/delete":
+            return self._handle_clawhub_delete(request)
         if got == "/api/webui/sidebar-state":
             return self._handle_webui_sidebar_state(request)
         if got == "/api/webui/sidebar-state/update":
@@ -1772,6 +1775,25 @@ class GatewayHTTPHandler:
         except ClawhubError as exc:
             return _http_error(502, str(exc))
         return _http_json_response(result)
+
+    def _handle_clawhub_delete(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(request, "X-Nanobot-Clawhub-Data", 16_384)
+        if err is not None:
+            return err
+        name = (body.get("name") or "").strip() if isinstance(body, dict) else ""
+        if not name or "/" in name or "\\" in name or name in {".", ".."}:
+            return _http_error(400, "invalid skill name")
+        skills_root = (self.skills_workspace_path / "skills").resolve()
+        target = (skills_root / name).resolve()
+        if not target.is_relative_to(skills_root) or not (target / "SKILL.md").exists():
+            return _http_error(404, "skill not found")
+        try:
+            shutil.rmtree(target)
+        except OSError as exc:
+            return _http_error(500, f"could not delete skill: {exc}")
+        return _http_json_response({"name": name, "deleted": True})
 
     def _handle_webui_sidebar_state(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):

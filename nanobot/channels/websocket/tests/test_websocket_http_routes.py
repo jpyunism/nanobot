@@ -632,17 +632,21 @@ async def test_clawhub_routes_require_token_and_return_results(
         )
         assert resp.status_code == 200
         body = resp.json()
-        # skills-sh items are filtered out (not installable via the API).
-        assert len(body["results"]) == 2
+        # skills-sh items are installable via GitHub and stay in the list.
+        assert len(body["results"]) == 3
         # Results must be sorted most-installed first.
-        assert [r["installs_60d"] for r in body["results"]] == [31, 4]
+        assert [r["installs_60d"] for r in body["results"]] == [26509, 31, 4]
         result = body["results"][0]
-        assert result["name"] == "Web Scraping"
-        assert result["reference"] == "zhangqixin9527/web-scraping"
-        assert result["owner"] == "zhangqixin9527"
-        assert result["slug"] == "web-scraping"
-        assert result["installs_60d"] == 31
-        assert "path" not in result
+        assert result["name"] == "Find Skills"
+        assert result["reference"] == "skills-sh:vercel-labs/skills/find-skills"
+        assert result["kind"] == "skills-sh"
+        clawhub_result = body["results"][1]
+        assert clawhub_result["name"] == "Web Scraping"
+        assert clawhub_result["reference"] == "zhangqixin9527/web-scraping"
+        assert clawhub_result["owner"] == "zhangqixin9527"
+        assert clawhub_result["slug"] == "web-scraping"
+        assert clawhub_result["installs_60d"] == 31
+        assert "path" not in clawhub_result
 
         # -- install: mocked zip download --------------------------------
         import io
@@ -686,6 +690,36 @@ async def test_clawhub_routes_require_token_and_return_results(
             headers={**auth, "X-Nanobot-Clawhub-Data": json.dumps({})},
         )
         assert bad.status_code == 400
+
+        # -- delete route ------------------------------------------------
+        deny_delete = await _http_get("http://127.0.0.1:29921/api/webui/clawhub/delete")
+        assert deny_delete.status_code == 401
+
+        # deleting an installed skill removes its folder
+        delete_resp = await _http_get(
+            "http://127.0.0.1:29921/api/webui/clawhub/delete",
+            headers={
+                **auth,
+                "X-Nanobot-Clawhub-Data": json.dumps({"name": "web-scraping"}),
+            },
+        )
+        assert delete_resp.status_code == 200
+        assert delete_resp.json()["deleted"] is True
+        assert not installed_skill.exists()
+
+        # unknown skill → 404
+        missing = await _http_get(
+            "http://127.0.0.1:29921/api/webui/clawhub/delete",
+            headers={**auth, "X-Nanobot-Clawhub-Data": json.dumps({"name": "nope"})},
+        )
+        assert missing.status_code == 404
+
+        # path traversal → 400
+        traversal = await _http_get(
+            "http://127.0.0.1:29921/api/webui/clawhub/delete",
+            headers={**auth, "X-Nanobot-Clawhub-Data": json.dumps({"name": "../evil"})},
+        )
+        assert traversal.status_code == 400
     finally:
         await channel.stop()
         await server_task
