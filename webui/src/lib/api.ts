@@ -363,6 +363,25 @@ export async function fetchSkillDetail(
   );
 }
 
+export async function toggleSkillEnabled(
+  token: string,
+  name: string,
+  enabled: boolean,
+  base: string = "",
+): Promise<{ name: string; enabled: boolean }> {
+  return request<{ name: string; enabled: boolean }>(
+    `${base}/api/webui/skills/toggle`,
+    token,
+    {
+      method: "GET",
+      headers: {
+        "X-Nanobot-Clawhub-Data": JSON.stringify({ name, enabled }),
+      },
+    },
+    API_READ_TIMEOUT_MS,
+  );
+}
+
 export interface ClawhubSkillSummary {
   slug: string;
   owner: string;

@@ -849,7 +849,12 @@
       "cancel": "Cancel",
       "clawhubUpdateAll": "Perbarui semua yang terpasang",
       "clawhubUpdateAllResult": "{{updated}} diperbarui · {{skipped}} dilewati · {{errors}} gagal",
-      "clawhubUpdateAllError": "Tidak dapat memperbarui skill."
+      "clawhubUpdateAllError": "Tidak dapat memperbarui skill.",
+      "toggleSkill": "Aktifkan atau nonaktifkan {{name}}",
+      "statusEnabled": "Aktif",
+      "statusDisabled": "Nonaktif",
+      "toggleError": "Tidak dapat memperbarui skill.",
+      "restartRequired": "Mulai ulang nanobot untuk menerapkan perubahan skill."
     },
     "voice": {
       "selectProvider": "Pilih penyedia",

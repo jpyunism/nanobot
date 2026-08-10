@@ -902,7 +902,12 @@
       "cancel": "Cancel",
       "clawhubUpdateAll": "Update all installed",
       "clawhubUpdateAllResult": "{{updated}} updated · {{skipped}} skipped · {{errors}} failed",
-      "clawhubUpdateAllError": "Could not update skills."
+      "clawhubUpdateAllError": "Could not update skills.",
+      "toggleSkill": "Enable or disable {{name}}",
+      "statusEnabled": "Enabled",
+      "statusDisabled": "Disabled",
+      "toggleError": "Could not update the skill.",
+      "restartRequired": "Restart nanobot to apply skill changes."
     },
     "voice": {
       "selectProvider": "Select provider",

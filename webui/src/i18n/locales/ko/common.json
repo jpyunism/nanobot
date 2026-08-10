@@ -849,7 +849,12 @@
       "cancel": "Cancel",
       "clawhubUpdateAll": "설치된 스킬 모두 업데이트",
       "clawhubUpdateAllResult": "{{updated}}개 업데이트 · {{skipped}}개 건너뜀 · {{errors}}개 실패",
-      "clawhubUpdateAllError": "스킬을 업데이트할 수 없습니다."
+      "clawhubUpdateAllError": "스킬을 업데이트할 수 없습니다.",
+      "toggleSkill": "{{name}} 활성화 또는 비활성화",
+      "statusEnabled": "활성화",
+      "statusDisabled": "비활성화",
+      "toggleError": "스킬을 업데이트할 수 없습니다.",
+      "restartRequired": "스킬 변경을 적용하려면 nanobot을 다시 시작하세요."
     },
     "voice": {
       "selectProvider": "제공자 선택",

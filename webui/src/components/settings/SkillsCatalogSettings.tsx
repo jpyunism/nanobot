@@ -23,6 +23,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { ToggleButton } from "@/components/settings/ToggleButton";
 import {
   deleteClawhubSkill,
   fetchClawhubSearch,
@@ -30,6 +31,7 @@ import {
   fetchSkillDetail,
   fetchSkills,
   installClawhubSkill,
+  toggleSkillEnabled,
   updateAllClawhubSkills,
   type ClawhubSkillSummary,
 } from "@/lib/api";
@@ -52,6 +54,49 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
 
   const availableCount = localSkills.filter((skill) => skill.available).length;
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
+  const [toggling, setToggling] = useState<string | null>(null);
+  const [toggleError, setToggleError] = useState<string | null>(null);
+  const [restartRequired, setRestartRequired] = useState(false);
+  const [pendingDeleteSkill, setPendingDeleteSkill] = useState<SkillSummary | null>(null);
+  const [deletingSkill, setDeletingSkill] = useState(false);
+
+  const toggleSkill = (skill: SkillSummary) => {
+    const nextEnabled = !skill.disabled;
+    setToggling(skill.name);
+    setToggleError(null);
+    toggleSkillEnabled(token, skill.name, nextEnabled)
+      .then(() => {
+        setLocalSkills((prev) =>
+          prev.map((item) =>
+            item.name === skill.name ? { ...item, disabled: !nextEnabled } : item,
+          ),
+        );
+        setRestartRequired(true);
+      })
+      .catch(() =>
+        setToggleError(
+          t("settings.skills.toggleError", { defaultValue: "Could not update the skill." }),
+        ),
+      )
+      .finally(() => setToggling(null));
+  };
+
+  const confirmDeleteSkill = () => {
+    if (!pendingDeleteSkill) return;
+    setDeletingSkill(true);
+    setToggleError(null);
+    deleteClawhubSkill(token, pendingDeleteSkill.name)
+      .then(() => {
+        setPendingDeleteSkill(null);
+        refreshSkills();
+      })
+      .catch(() =>
+        setToggleError(
+          t("settings.skills.clawhubDeleteError", { defaultValue: "Could not delete skill." }),
+        ),
+      )
+      .finally(() => setDeletingSkill(false));
+  };
 
   return (
     <div className="space-y-7">
@@ -85,7 +130,10 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
               <SkillCatalogRow
                 key={`${skill.source}:${skill.name}`}
                 skill={skill}
+                toggling={toggling === skill.name}
                 onSelect={setSelectedSkill}
+                onToggle={() => toggleSkill(skill)}
+                onDelete={() => setPendingDeleteSkill(skill)}
               />
             ))}
           </div>
@@ -94,6 +142,18 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
             {t("settings.skills.empty", { defaultValue: "No skills are available." })}
           </div>
         )}
+        {toggleError ? (
+          <div className="mx-1 mb-1 rounded-[14px] bg-destructive/10 px-3 py-2.5 text-[13px] text-destructive">
+            {toggleError}
+          </div>
+        ) : null}
+        {restartRequired ? (
+          <div className="mx-1 mb-1 rounded-[14px] border border-amber-500/20 bg-amber-500/8 px-3 py-2.5 text-[13px] text-amber-800 dark:text-amber-200">
+            {t("settings.skills.restartRequired", {
+              defaultValue: "Restart nanobot to apply skill changes.",
+            })}
+          </div>
+        ) : null}
       </section>
 
       <ClawhubSection
@@ -107,6 +167,16 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
         onOpenChange={(open) => {
           if (!open) setSelectedSkill(null);
         }}
+      />
+
+      <SkillDeleteDialog
+        skill={pendingDeleteSkill}
+        open={pendingDeleteSkill !== null}
+        deleting={deletingSkill}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteSkill(null);
+        }}
+        onConfirm={confirmDeleteSkill}
       />
     </div>
   );
@@ -327,7 +397,7 @@ function SkillDeleteDialog({
   onOpenChange,
   onConfirm,
 }: {
-  skill: ClawhubSkillSummary | null;
+  skill: { name: string } | null;
   open: boolean;
   deleting: boolean;
   onOpenChange: (open: boolean) => void;
@@ -462,10 +532,16 @@ function ClawhubRow({
 
 function SkillCatalogRow({
   skill,
+  toggling,
   onSelect,
+  onToggle,
+  onDelete,
 }: {
   skill: SkillSummary;
+  toggling: boolean;
   onSelect: (skill: SkillSummary) => void;
+  onToggle: () => void;
+  onDelete: () => void;
 }) {
   const { t } = useTranslation();
   const sourceLabel = skillSourceLabel(skill.source, t);
@@ -473,45 +549,51 @@ function SkillCatalogRow({
   const statusLabel = skill.available
     ? t("settings.skills.statusAvailable", { defaultValue: "Available" })
     : t("settings.skills.statusUnavailable", { defaultValue: "Unavailable" });
+  const isWorkspace = skill.source === "workspace";
 
   return (
-    <button
-      type="button"
-      aria-label={t("settings.skills.openDetails", {
-        name: skill.name,
-        defaultValue: "Open details for {{name}}",
-      })}
-      onClick={() => onSelect(skill)}
+    <div
       className={cn(
         "group flex min-w-0 items-center gap-3 rounded-[16px] px-3 py-3 text-left transition-colors",
-        "hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "hover:bg-muted/45",
         !skill.available && "opacity-65",
+        skill.disabled && "opacity-70",
       )}
     >
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px] bg-muted/70 text-muted-foreground">
-        <Brain className="h-5 w-5" strokeWidth={1.8} aria-hidden />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <h3 className="truncate text-[15px] font-semibold leading-5 text-foreground">
-            {skill.name}
-          </h3>
-          <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold leading-none text-muted-foreground">
-            {sourceLabel}
-          </span>
+      <button
+        type="button"
+        aria-label={t("settings.skills.openDetails", {
+          name: skill.name,
+          defaultValue: "Open details for {{name}}",
+        })}
+        onClick={() => onSelect(skill)}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px] bg-muted/70 text-muted-foreground">
+          <Brain className="h-5 w-5" strokeWidth={1.8} aria-hidden />
         </div>
-        <p className="mt-1 line-clamp-2 text-[13px] leading-5 text-muted-foreground">
-          {skill.description}
-        </p>
-        {!skill.available && skill.unavailable_reason ? (
-          <p className="mt-1 truncate text-[12px] leading-4 text-muted-foreground/80">
-            {t("settings.skills.unavailableReason", {
-              reason: skill.unavailable_reason,
-              defaultValue: "Missing: {{reason}}",
-            })}
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <h3 className="truncate text-[15px] font-semibold leading-5 text-foreground">
+              {skill.name}
+            </h3>
+            <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold leading-none text-muted-foreground">
+              {sourceLabel}
+            </span>
+          </div>
+          <p className="mt-1 line-clamp-2 text-[13px] leading-5 text-muted-foreground">
+            {skill.description}
           </p>
-        ) : null}
-      </div>
+          {!skill.available && skill.unavailable_reason ? (
+            <p className="mt-1 truncate text-[12px] leading-4 text-muted-foreground/80">
+              {t("settings.skills.unavailableReason", {
+                reason: skill.unavailable_reason,
+                defaultValue: "Missing: {{reason}}",
+              })}
+            </p>
+          ) : null}
+        </div>
+      </button>
       <span
         title={!skill.available && skill.unavailable_reason ? skill.unavailable_reason : undefined}
         className={cn(
@@ -524,7 +606,29 @@ function SkillCatalogRow({
         <StatusIcon className="h-3.5 w-3.5" aria-hidden />
         {statusLabel}
       </span>
-    </button>
+      <div className="flex shrink-0 items-center gap-2">
+        <ToggleButton
+          checked={!skill.disabled}
+          disabled={toggling}
+          onChange={onToggle}
+          ariaLabel={t("settings.skills.toggleSkill", {
+            name: skill.name,
+            defaultValue: "Enable or disable {{name}}",
+          })}
+          label={skill.disabled ? t("settings.skills.statusDisabled", { defaultValue: "Disabled" }) : t("settings.skills.statusEnabled", { defaultValue: "Enabled" })}
+        />
+        {isWorkspace ? (
+          <button
+            type="button"
+            onClick={onDelete}
+            title={t("settings.skills.clawhubDelete", { defaultValue: "Delete skill" })}
+            className="inline-flex items-center rounded-[12px] border border-border/50 px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+          >
+            <Trash2 className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

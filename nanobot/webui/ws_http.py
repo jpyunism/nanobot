@@ -1479,6 +1479,8 @@ class GatewayHTTPHandler:
             return self._handle_workspaces(connection, request)
         if got == "/api/webui/skills":
             return self._handle_webui_skills(request)
+        if got == "/api/webui/skills/toggle":
+            return self._handle_webui_skill_toggle(request)
         m = re.match(r"^/api/webui/skills/([^/]+)$", got)
         if m:
             return self._handle_webui_skill_detail(request, m.group(1))
@@ -1726,6 +1728,31 @@ class GatewayHTTPHandler:
                 disabled_skills=self.disabled_skills,
             )
         )
+
+    def _handle_webui_skill_toggle(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        body, err = read_json_request_header(request, "X-Nanobot-Clawhub-Data", 16_384)
+        if err is not None:
+            return err
+        name = (body.get("name") or "").strip() if isinstance(body, dict) else ""
+        enabled = bool(body.get("enabled")) if isinstance(body, dict) else False
+        if not name or "/" in name or "\\" in name or name in {".", ".."}:
+            return _http_error(400, "invalid skill name")
+        from nanobot.config.loader import load_config, save_config
+
+        config = load_config()
+        disabled = list(config.agents.defaults.disabled_skills)
+        if enabled:
+            disabled = [item for item in disabled if item != name]
+        elif name not in disabled:
+            disabled.append(name)
+        config.agents.defaults.disabled_skills = disabled
+        save_config(config)
+        # Keep the in-memory snapshot in sync so the skills list reflects
+        # the change immediately; the agent loop still needs a restart.
+        self.disabled_skills = set(disabled)
+        return _http_json_response({"name": name, "enabled": enabled})
 
     def _handle_webui_skill_detail(self, request: WsRequest, raw_name: str) -> Response:
         if not self.check_api_token(request):

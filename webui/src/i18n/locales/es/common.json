@@ -858,7 +858,12 @@
       "cancel": "Cancelar",
       "clawhubUpdateAll": "Actualizar todas las instaladas",
       "clawhubUpdateAllResult": "{{updated}} actualizadas · {{skipped}} omitidas · {{errors}} fallidas",
-      "clawhubUpdateAllError": "No se pudieron actualizar las skills."
+      "clawhubUpdateAllError": "No se pudieron actualizar las skills.",
+      "toggleSkill": "Habilitar o deshabilitar {{name}}",
+      "statusEnabled": "Habilitada",
+      "statusDisabled": "Deshabilitada",
+      "toggleError": "No se pudo actualizar la skill.",
+      "restartRequired": "Reinicia nanobot para aplicar los cambios de skills."
     },
     "voice": {
       "selectProvider": "Seleccionar proveedor",

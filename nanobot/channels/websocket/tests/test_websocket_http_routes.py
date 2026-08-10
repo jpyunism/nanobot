@@ -521,6 +521,7 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
             "source": "workspace",
             "available": True,
             "unavailable_reason": "",
+            "disabled": False,
         }
         unavailable = next(skill for skill in body["skills"] if skill["name"] == "zz-unavailable-skill")
         assert unavailable["available"] is False
@@ -543,6 +544,52 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
             "missing_env": ["DEFINITELY_MISSING_NANOBOT_SKILL_ENV"],
         }
         assert "Use the missing CLI and env var." in detail_body["raw_markdown"]
+
+        # -- toggle route ------------------------------------------------
+        deny_toggle = await _http_get("http://127.0.0.1:29920/api/webui/skills/toggle")
+        assert deny_toggle.status_code == 401
+
+        toggle_off = await _http_get(
+            "http://127.0.0.1:29920/api/webui/skills/toggle",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Nanobot-Clawhub-Data": json.dumps(
+                    {"name": "workspace-skill", "enabled": False}
+                ),
+            },
+        )
+        assert toggle_off.status_code == 200
+        assert toggle_off.json() == {"name": "workspace-skill", "enabled": False}
+
+        # the disabled skill disappears from the skills list
+        after_disable = await _http_get(
+            "http://127.0.0.1:29920/api/webui/skills",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        after_names = [skill["name"] for skill in after_disable.json()["skills"]]
+        assert "workspace-skill" not in after_names
+
+        toggle_on = await _http_get(
+            "http://127.0.0.1:29920/api/webui/skills/toggle",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Nanobot-Clawhub-Data": json.dumps(
+                    {"name": "workspace-skill", "enabled": True}
+                ),
+            },
+        )
+        assert toggle_on.status_code == 200
+        assert toggle_on.json() == {"name": "workspace-skill", "enabled": True}
+
+        # invalid name → 400
+        bad_toggle = await _http_get(
+            "http://127.0.0.1:29920/api/webui/skills/toggle",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Nanobot-Clawhub-Data": json.dumps({"name": "../evil", "enabled": True}),
+            },
+        )
+        assert bad_toggle.status_code == 400
     finally:
         await channel.stop()
         await server_task

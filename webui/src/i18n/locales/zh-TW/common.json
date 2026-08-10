@@ -849,7 +849,12 @@
       "cancel": "Cancel",
       "clawhubUpdateAll": "更新所有已安裝",
       "clawhubUpdateAllResult": "{{updated}} 已更新 · {{skipped}} 已跳過 · {{errors}} 失敗",
-      "clawhubUpdateAllError": "無法更新技能。"
+      "clawhubUpdateAllError": "無法更新技能。",
+      "toggleSkill": "啟用或停用 {{name}}",
+      "statusEnabled": "已啟用",
+      "statusDisabled": "已停用",
+      "toggleError": "無法更新技能。",
+      "restartRequired": "重新啟動 nanobot 以套用技能變更。"
     },
     "voice": {
       "selectProvider": "選擇供應商",

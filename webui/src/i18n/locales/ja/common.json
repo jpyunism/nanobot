@@ -849,7 +849,12 @@
       "cancel": "Cancel",
       "clawhubUpdateAll": "インストール済みをすべて更新",
       "clawhubUpdateAllResult": "{{updated}}件更新 · {{skipped}}件スキップ · {{errors}}件失敗",
-      "clawhubUpdateAllError": "スキルを更新できませんでした。"
+      "clawhubUpdateAllError": "スキルを更新できませんでした。",
+      "toggleSkill": "{{name}}を有効化または無効化",
+      "statusEnabled": "有効",
+      "statusDisabled": "無効",
+      "toggleError": "スキルを更新できませんでした。",
+      "restartRequired": "スキルの変更を適用するにはnanobotを再起動してください。"
     },
     "voice": {
       "selectProvider": "プロバイダーを選択",

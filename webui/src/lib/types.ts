@@ -187,6 +187,7 @@ export interface SkillSummary {
   source: "workspace" | "builtin" | string;
   available: boolean;
   unavailable_reason?: string;
+  disabled?: boolean;
 }
 
 export interface SkillRequirements {

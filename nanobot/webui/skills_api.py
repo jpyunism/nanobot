@@ -19,7 +19,9 @@ def webui_skills_payload(
         loader.list_skills(filter_unavailable=False),
         key=lambda entry: (entry.get("source") != "workspace", entry["name"]),
     )
-    return {"skills": [_skill_payload(loader, entry) for entry in entries]}
+    return {
+        "skills": [_skill_payload(loader, entry, disabled_skills) for entry in entries]
+    }
 
 
 def webui_skill_detail_payload(
@@ -35,13 +37,17 @@ def webui_skill_detail_payload(
     if entry is None:
         return None
     return {
-        **_skill_payload(loader, entry),
+        **_skill_payload(loader, entry, disabled_skills),
         "requirements": loader.get_skill_requirements(name),
         "raw_markdown": loader.load_skill(name) or "",
     }
 
 
-def _skill_payload(loader: SkillsLoader, entry: dict[str, str]) -> dict[str, Any]:
+def _skill_payload(
+    loader: SkillsLoader,
+    entry: dict[str, str],
+    disabled_skills: set[str] | None = None,
+) -> dict[str, Any]:
     name = entry["name"]
     metadata = loader.get_skill_metadata(name)
     available, unavailable_reason = loader.get_skill_availability(name)
@@ -51,6 +57,7 @@ def _skill_payload(loader: SkillsLoader, entry: dict[str, str]) -> dict[str, Any
         "source": entry.get("source", "unknown"),
         "available": available,
         "unavailable_reason": unavailable_reason,
+        "disabled": name in (disabled_skills or set()),
     }
 
 
