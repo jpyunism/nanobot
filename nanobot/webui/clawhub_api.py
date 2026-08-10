@@ -86,17 +86,21 @@ def clawhub_search(query: str, limit: int = 20) -> list[dict[str, Any]]:
         {"q": query, "limit": max(1, min(limit, _MAX_RESULTS))},
     )
     results = data.get("results") or []
-    return [_summary_payload(item) for item in results if isinstance(item, dict)]
+    payloads = [_summary_payload(item) for item in results if isinstance(item, dict)]
+    payloads.sort(key=lambda s: s["installs_60d"], reverse=True)
+    return payloads
 
 
 def clawhub_trending(limit: int = 20) -> list[dict[str, Any]]:
-    """Return trending skills from the ClawHub registry."""
+    """Return trending skills from the ClawHub registry, most installed first."""
     data = _get(
         _TRENDING_PATH,
         {"limit": max(1, min(limit, _MAX_RESULTS))},
     )
     items = data.get("items") or []
-    return [_summary_payload(item) for item in items if isinstance(item, dict)]
+    payloads = [_summary_payload(item) for item in items if isinstance(item, dict)]
+    payloads.sort(key=lambda s: s["installs_60d"], reverse=True)
+    return payloads
 
 
 def clawhub_install(reference: str, skills_dir: Path) -> dict[str, Any]:
