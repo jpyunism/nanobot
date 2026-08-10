@@ -1375,7 +1375,7 @@ class AgentLoop:
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
-        if self._archive_tasks:
+        if getattr(self, "_archive_tasks", None):
             await asyncio.gather(*self._archive_tasks, return_exceptions=True)
             self._archive_tasks.clear()
         errors: list[BaseException] = []
@@ -1411,7 +1411,7 @@ class AgentLoop:
 
     async def drain_archives(self) -> None:
         """Await all pending archive tasks (file-cap / snip overflow)."""
-        if self._archive_tasks:
+        if getattr(self, "_archive_tasks", None):
             await asyncio.gather(*self._archive_tasks, return_exceptions=True)
             self._archive_tasks.clear()
 
