@@ -21,6 +21,7 @@ from pydantic import Field
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.whatsapp.group_workspace import GroupWorkspaceRegistry
 from nanobot.config.paths import get_media_dir, get_runtime_subdir
 from nanobot.config.schema import Base
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, RuntimeContextBlock
@@ -56,6 +57,13 @@ class WhatsAppConfig(Base):
     # user probe whether the block has lifted. Set threshold=0 to disable.
     throttle_threshold: int = Field(default=3, ge=0, le=100)
     throttle_cooldown_s: int = Field(default=7200, ge=0, le=604800)
+    # Per-group workspace override. Maps a WhatsApp group JID (e.g.
+    # "120363000@g.us") to an absolute path whose AGENTS.md / SOUL.md are
+    # loaded into the system prompt for turns originating in that group.
+    # Keys that aren't group JIDs, paths that aren't absolute, or paths
+    # that don't exist as directories are skipped (with a warning) so a
+    # stale entry never breaks a turn.
+    group_workspaces: dict[str, str] = Field(default_factory=dict)
 
 
 class _NeonizeAPI(NamedTuple):
@@ -403,6 +411,12 @@ class WhatsAppChannel(BaseChannel):
         # Persisted display-name mappings per chat (phone/sender_id -> push_name).
         self._display_names: dict[str, dict[str, str]] = {}
         self._display_names_path = get_runtime_subdir("whatsapp-auth") / "display_names.json"
+        # Per-group workspace override registry. Channels.manager hands this
+        # to AgentLoop so turns originating in a mapped group pick up the
+        # group's AGENTS.md/SOUL.md instead of the channel-level workspace.
+        self.group_workspace_registry = GroupWorkspaceRegistry(
+            self.config.group_workspaces, log=self.logger
+        )
 
     def _database_path(self) -> Path:
         configured = self.config.database_path.strip()

@@ -40,6 +40,7 @@ from nanobot.utils.restart import (
 )
 
 if TYPE_CHECKING:
+    from nanobot.channels.whatsapp.group_workspace import GroupWorkspaceRegistry
     from nanobot.session.manager import SessionManager
 
 
@@ -155,6 +156,7 @@ class ChannelManager:
         self._origin_reply_fingerprints: dict[tuple[str, str, str], str] = {}
 
         self._init_channels()
+        self._wire_group_workspaces_to_agent_loop()
 
     def _channel_section(
         self,
@@ -246,6 +248,27 @@ class ChannelManager:
             await channel.send_subagent_update(chat_id, payload)
 
         self._subagent_manager.set_event_callback(_broadcast)
+
+    def _wire_group_workspaces_to_agent_loop(self) -> None:
+        """Hand each WhatsApp channel's group-workspace registry to the agent loop.
+
+        Channels are built before the loop has a chance to know about them, so
+        we patch them in here. When the loop sees a WhatsApp group turn it can
+        resolve that group's workspace and inject its AGENTS.md into the prompt.
+        """
+        loop = getattr(self, "_agent_loop", None)
+        if loop is None:
+            return
+        set_registry = getattr(loop, "set_group_workspace_registry", None)
+        if not callable(set_registry):
+            return
+        merged: dict[str, "GroupWorkspaceRegistry"] = {}
+        for channel in self.channels.values():
+            registry = getattr(channel, "group_workspace_registry", None)
+            if registry is not None:
+                merged[channel.name] = registry
+        if merged:
+            set_registry(merged)
 
     def _init_channels(self) -> None:
         """Initialize enabled runtimes from dependency-free channel descriptors."""
@@ -578,6 +601,7 @@ class ChannelManager:
             if self._started:
                 self._start_channel_task(runtime_name, channel)
             logger.info("{} channel applied without restart", runtime_name)
+        self._wire_group_workspaces_to_agent_loop()
         if self._started:
             await asyncio.sleep(0)
         failed = [

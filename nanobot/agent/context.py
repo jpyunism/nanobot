@@ -78,10 +78,18 @@ class ContextBuilder:
         session_key: str | None = None,
         unified_session: bool = False,
         session_metadata: Mapping[str, Any] | None = None,
+        extra_bootstrap_paths: Sequence[Path] | None = None,
     ) -> str:
-        """Build the system prompt from identity, bootstrap files, memory, and skills."""
+        """Build the system prompt from identity, bootstrap files, memory, and skills.
+
+        ``extra_bootstrap_paths`` lets callers (e.g. WhatsApp group turns) inject
+        AGENTS.md/SOUL.md from an additional workspace without rebuilding the
+        rest of the prompt. Files are loaded with the same conventions as the
+        primary workspace and appended as a separate ``## Workspace Overrides``
+        section so the model treats them as scoped, not global.
+        """
         root = workspace or self.workspace
-        static = self._static_prompt(root, channel)
+        static = self._static_prompt(root, channel, extra_bootstrap_paths)
         parts = [static]
 
         # Auto-load the research skill for ephemeral research surface chats.
@@ -100,7 +108,12 @@ class ContextBuilder:
 
         return "\n\n---\n\n".join(parts)
 
-    def _static_prompt(self, root: Path, channel: str | None) -> str:
+    def _static_prompt(
+        self,
+        root: Path,
+        channel: str | None,
+        extra_bootstrap_paths: Sequence[Path] | None = None,
+    ) -> str:
         """Build (and cache) the static system-prompt prefix.
 
         The prefix depends only on files on disk (identity, bootstrap files,
@@ -109,14 +122,23 @@ class ContextBuilder:
         I/O and template rendering. The research skill is excluded here because
         it is selected per-turn from ``session_metadata``.
         """
-        cache_key = (str(root), channel or "")
+        cache_key = (str(root), channel or "", tuple(str(p) for p in (extra_bootstrap_paths or ())))
         cached = self._static_prompt_cache.get(cache_key)
         if cached is not None:
             sig, text = cached
-            if sig == self._static_signature(root):
+            current_sig = self._static_signature(root, extra_bootstrap_paths)
+            if sig == current_sig:
                 return text
 
-        parts = [self._get_identity(channel=channel, workspace=root)]
+        parts = []
+
+        # Group/channel scope rules take precedence over global identity:
+        # they go first so the model treats them as authoritative for this turn.
+        overrides = self._load_bootstrap_overrides(extra_bootstrap_paths)
+        if overrides:
+            parts.append(overrides)
+
+        parts.append(self._get_identity(channel=channel, workspace=root))
 
         bootstrap = self._load_bootstrap_files(root)
         if bootstrap:
@@ -139,10 +161,37 @@ class ContextBuilder:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
         text = "\n\n---\n\n".join(parts)
-        self._static_prompt_cache[cache_key] = (self._static_signature(root), text)
+        self._static_prompt_cache[cache_key] = (
+            self._static_signature(root, extra_bootstrap_paths),
+            text,
+        )
+        # ponytail: one-shot diagnostic so we can confirm in the gateway log
+        # that the group override actually lands in the prompt. Logs the order
+        # and the first/last 200 chars of each section.
+        if extra_bootstrap_paths and not getattr(self, "_diag_logged", False):
+            from loguru import logger as _logger
+            self._diag_logged = True
+            section_labels = [
+                p.split("\n", 1)[0].lstrip("# ").strip() or p[:60]
+                for p in parts
+            ]
+            _logger.info(
+                "[group_override_diag] channel={} extra_paths={} sections={}",
+                channel,
+                [str(p) for p in extra_bootstrap_paths],
+                section_labels,
+            )
+            _logger.info(
+                "[group_override_diag] override_head={}",
+                overrides[:300] if overrides else "<empty>",
+            )
         return text
 
-    def _static_signature(self, root: Path) -> str:
+    def _static_signature(
+        self,
+        root: Path,
+        extra_bootstrap_paths: Sequence[Path] | None = None,
+    ) -> str:
         """Return a signature of the static prompt's source files' mtimes."""
         paths = [
             root / "AGENTS.md",
@@ -150,6 +199,9 @@ class ContextBuilder:
             self.workspace / "USER.md",
             self.memory.memory_file,
         ]
+        for extra in extra_bootstrap_paths or ():
+            paths.append(extra / "AGENTS.md")
+            paths.append(extra / "SOUL.md")
         for skill_dir in (self.workspace / "skills", self.skills.builtin_skills):
             if skill_dir.is_dir():
                 paths.extend(skill_dir.glob("*/SKILL.md"))
@@ -261,6 +313,45 @@ class ContextBuilder:
             return content.strip() == tpl.strip()
         return False
 
+    def _load_bootstrap_overrides(self, paths: Sequence[Path] | None) -> str:
+        """Load AGENTS.md/SOUL.md from each extra workspace, as a scoped override section.
+
+        Each non-empty workspace contributes its own ``## <workspace>`` block so
+        the model can tell different override sources apart. The wrapper section
+        label ``Workspace Overrides`` keeps the original bootstrap files
+        authoritative and signals that these are scope-specific additions
+        (e.g. a WhatsApp group's ruleset) instead of global identity.
+        """
+        if not paths:
+            return ""
+        sections: list[str] = []
+        for extra_root in paths:
+            inner: list[str] = []
+            for filename in ("AGENTS.md", "SOUL.md"):
+                file_path = extra_root / filename
+                try:
+                    text = file_path.read_text(encoding="utf-8").rstrip()
+                except (OSError, UnicodeDecodeError):
+                    continue
+                if text:
+                    inner.append(f"## {filename}\n\n{text}")
+            if not inner:
+                continue
+            label = extra_root.name or str(extra_root)
+            sections.append(f"### {label}\n\n" + "\n\n".join(inner))
+        if not sections:
+            return ""
+        # Lead with a hard precedence note so the model treats these rules as
+        # the operating contract for this turn, not as a suggestion that can
+        # be overridden by the global identity/voice later in the prompt.
+        header = (
+            "## Workspace Overrides — Authoritative For This Turn\n\n"
+            "The rules below are scoped to this conversation's workspace and "
+            "take precedence over any global identity, voice, or tone "
+            "defined elsewhere in this system prompt. Follow them strictly."
+        )
+        return header + "\n\n" + "\n\n".join(sections)
+
     def build_messages(
         self,
         history: list[dict[str, Any]],
@@ -278,6 +369,7 @@ class ContextBuilder:
         include_memory_recent_history: bool = True,
         session_key: str | None = None,
         unified_session: bool = False,
+        extra_bootstrap_paths: Sequence[Path] | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         root = workspace or self.workspace
@@ -296,6 +388,7 @@ class ContextBuilder:
                     session_key=session_key,
                     unified_session=unified_session,
                     session_metadata=session_metadata,
+                    extra_bootstrap_paths=extra_bootstrap_paths,
                 ),
             },
             *history,

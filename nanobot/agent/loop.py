@@ -381,6 +381,7 @@ class AgentLoop:
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
         self.sessions.set_file_cap_archiver(self._archive_file_cap)
+        self._group_workspace_registries: dict[str, Any] = {}
         self.tools = ToolRegistry()
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
@@ -695,6 +696,41 @@ class AgentLoop:
             extra_read_dirs_for=provider,
         )
 
+    def set_group_workspace_registry(
+        self,
+        registries: Mapping[str, Any],
+    ) -> None:
+        """Install per-chat workspace registries keyed by channel name.
+
+        A registry resolves a chat id (e.g. a WhatsApp group JID) to an
+        additional workspace whose ``AGENTS.md``/``SOUL.md`` are appended to
+        the system prompt for turns originating in that chat. The wiring is
+        lazy and tolerant of missing or empty dicts so channels can install
+        independently.
+        """
+        cleaned = {
+            channel_name: registry
+            for channel_name, registry in (registries or {}).items()
+            if registry is not None
+        }
+        self._group_workspace_registries: dict[str, Any] = cleaned
+
+    def _group_workspace_for(self, channel: str | None, chat_id: str | None) -> Path | None:
+        """Return the configured group-workspace root for this turn, if any."""
+        if not channel or not chat_id:
+            return None
+        registry = self._group_workspace_registries.get(channel)
+        if registry is None:
+            return None
+        resolve = getattr(registry, "resolve", None)
+        if not callable(resolve):
+            return None
+        try:
+            root = resolve(chat_id)
+        except Exception:
+            return None
+        return root if isinstance(root, Path) else None
+
     def _runtime_events(self) -> RuntimeEventPublisher:
         return ensure_runtime_event_publisher(self)
 
@@ -756,6 +792,7 @@ class AgentLoop:
         """Build the initial message list for the LLM turn."""
         assert ctx.session is not None
         scope = self.workspace_scopes.for_message(ctx.msg, ctx.session.metadata)
+        extra_paths = self._collect_group_bootstrap_paths(ctx)
         return self.context.build_messages(
             history=ctx.history,
             current_message=ctx.msg.content,
@@ -773,7 +810,21 @@ class AgentLoop:
             include_memory_recent_history=not ctx.ephemeral,
             session_key=ctx.session.key,
             unified_session=self._unified_session,
+            extra_bootstrap_paths=extra_paths or None,
         )
+
+    def _collect_group_bootstrap_paths(self, ctx: TurnContext) -> list[Path]:
+        """Return additional workspace roots whose AGENTS.md should load for this turn.
+
+        Only the inbound chat's channel/chat_id is consulted. Cross-channel
+        delivery targets (e.g. message tool sending to a group from a DM turn)
+        are handled by a separate post-tool loop so the original turn keeps
+        its own prompt stable.
+        """
+        channel = ctx.delivery.route.channel
+        chat_id = ctx.delivery.route.chat_id
+        root = self._group_workspace_for(channel, chat_id)
+        return [root] if root is not None else []
 
     def _request_context_for_turn(self, ctx: TurnContext) -> RequestContext:
         assert ctx.session is not None
