@@ -26,7 +26,7 @@ export function TodosSurface({
     } else {
       void todos.openList(null);
     }
-  }, [todoSlug, todos]);
+  }, [todoSlug, todos.openList]);
 
   // If the index is empty on first open, try migrating (idempotent).
   useEffect(() => {
