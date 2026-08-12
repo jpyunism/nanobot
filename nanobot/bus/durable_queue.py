@@ -126,6 +126,22 @@ def _dict_to_inbound(data: dict[str, Any]) -> InboundMessage:
     return InboundMessage(**data)
 
 
+def _durable_session_key(data: dict[str, Any]) -> str:
+    """Derive the session key for a persisted inbound message.
+
+    Mirrors ``InboundMessage.session_key`` (override wins), falling back to
+    ``{channel}:{chat_id}``.
+    """
+    override = data.get("session_key_override")
+    if isinstance(override, str) and override:
+        return override
+    channel = data.get("channel")
+    chat_id = data.get("chat_id")
+    if isinstance(channel, str) and isinstance(chat_id, str):
+        return f"{channel}:{chat_id}"
+    return ""
+
+
 def _dict_to_outbound(data: dict[str, Any]) -> OutboundMessage:
     data.pop("_delivery_kind", None)
     data.pop("_delivery_id", None)
@@ -162,16 +178,34 @@ class DurableMessageQueue:
         os.replace(path, processing_path)
         return delivery_id, processing_path
 
-    async def recover(self) -> int:
-        """Move files left in processing back to inbox and return the count."""
+    async def recover(
+        self,
+        active_session_keys: set[str] | None = None,
+    ) -> int:
+        """Move files left in processing back to inbox and return the count.
+
+        When ``active_session_keys`` is provided, only messages whose session
+        key is in that set are requeued; the rest are dropped. This prevents
+        ``recover()`` from replaying stale messages for sessions that finished
+        or were deleted before the restart.
+        """
         recovered = 0
         for path in sorted(self.processing_dir.glob("*.json")):
             try:
-                target = self.inbox_dir / path.name
-                counter = 0
-                while target.exists():
-                    counter += 1
-                    target = self.inbox_dir / f"{path.stem}-{counter}{path.suffix}"
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                logger.exception("Failed to read durable queue file {}", path)
+                continue
+            key = _durable_session_key(data)
+            if active_session_keys is not None and key not in active_session_keys:
+                path.unlink(missing_ok=True)
+                continue
+            target = self.inbox_dir / path.name
+            counter = 0
+            while target.exists():
+                counter += 1
+                target = self.inbox_dir / f"{path.stem}-{counter}{path.suffix}"
+            try:
                 os.replace(path, target)
                 recovered += 1
             except OSError:
@@ -210,6 +244,33 @@ class DurableInboundQueue(DurableMessageQueue):
 
     def __init__(self, workspace: Path) -> None:
         super().__init__(workspace / "bus" / "inbound")
+
+    def purge_for_session(self, session_key: str) -> int:
+        """Delete durable inbound messages bound to *session_key*.
+
+        Messages store ``channel``/``chat_id`` (the session key is derived as
+        ``{channel}:{chat_id}``). This removes matching inbox and processing
+        files so a deleted session is not recreated by ``recover()`` on the
+        next gateway start.
+        """
+        removed = 0
+        chat_id = session_key.split(":", 1)[1] if ":" in session_key else session_key
+        for directory in (self.inbox_dir, self.processing_dir):
+            for path in directory.glob("*.json"):
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if not isinstance(data, dict):
+                    continue
+                if data.get("chat_id") != chat_id:
+                    continue
+                try:
+                    path.unlink(missing_ok=True)
+                    removed += 1
+                except OSError:
+                    logger.exception("Failed to purge durable inbound message {}", path)
+        return removed
 
     async def publish(self, msg: InboundMessage) -> None:
         await self._publish(

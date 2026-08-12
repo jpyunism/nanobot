@@ -74,6 +74,32 @@ async def test_durable_inbound_nack_requeues(bus: MessageBus, tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_durable_inbound_recover_filters_by_active_session(
+    bus: MessageBus, tmp_path: Path
+) -> None:
+    """recover() only requeues messages for active sessions; others are dropped."""
+    active = InboundMessage(channel="discord", sender_id="u1", chat_id="c-active", content="keep")
+    stale = InboundMessage(channel="telegram", sender_id="u2", chat_id="c-deleted", content="drop")
+    await bus.publish_inbound(active)
+    await bus.publish_inbound(stale)
+
+    # Both are claimed but not acked, simulating a crash before completion.
+    await bus.consume_inbound()
+    await bus.consume_inbound()
+
+    bus2 = MessageBus(workspace=tmp_path)
+    recovered = await bus2.recover(active_session_keys={"discord:c-active"})
+    assert recovered == 1
+    assert bus2.inbound_size == 1
+
+    re_consumed = await bus2.consume_inbound()
+    assert re_consumed.content == "keep"
+    await bus2.ack_inbound(re_consumed)
+    assert bus2.inbound_size == 0
+
+
+
+@pytest.mark.asyncio
 async def test_durable_outbound_roundtrip(bus: MessageBus, tmp_path: Path) -> None:
     msg = OutboundMessage(channel="telegram", chat_id="c1", content="reply")
     await bus.publish_outbound(msg)

@@ -1197,7 +1197,16 @@ class AgentLoop:
             if restored:
                 logger.info("Restored {} interrupted session(s) after restart", restored)
 
-            await self.bus.recover()
+            # Only requeue durable inbound messages for sessions that were
+            # actively running when the gateway stopped. Stale messages for
+            # finished/deleted sessions must be dropped, not replayed, or they
+            # would recreate those sessions on startup.
+            active_keys = {
+                info["key"]
+                for info in self.sessions.list_sessions()
+                if info.get("interrupted")
+            }
+            await self.bus.recover(active_keys)
 
             while self._running:
                 try:
@@ -1284,6 +1293,12 @@ class AgentLoop:
                                 effective_key,
                                 exc_info=True,
                             )
+                        # The message content is now persisted via the session's
+                        # pending-injection metadata, which turn-resume restores on
+                        # startup. Ack the durable copy here so it does not stay in
+                        # processing/ and get replayed by recover() on the next
+                        # gateway start, which would recreate a deleted session.
+                        await self.bus.ack_inbound(msg)
                         logger.info(
                             "Routed follow-up message to pending queue for session {}",
                             effective_key,

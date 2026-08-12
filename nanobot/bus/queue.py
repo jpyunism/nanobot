@@ -54,11 +54,16 @@ class MessageBus:
             return await self._durable_outbound.consume()
         return await self.outbound.get()
 
-    async def recover(self) -> int:
-        """Requeue durable messages left unacknowledged by a previous process."""
+    async def recover(self, active_session_keys: set[str] | None = None) -> int:
+        """Requeue durable messages left unacknowledged by a previous process.
+
+        When ``active_session_keys`` is provided, only inbound messages for
+        those sessions are requeued; the rest are dropped. Outbound messages
+        are always requeued (responses must still be delivered).
+        """
         recovered = 0
         if self._durable_inbound is not None:
-            recovered += await self._durable_inbound.recover()
+            recovered += await self._durable_inbound.recover(active_session_keys)
         if self._durable_outbound is not None:
             recovered += await self._durable_outbound.recover()
         return recovered
@@ -82,6 +87,16 @@ class MessageBus:
         """Requeue a consumed outbound message; no-op for in-memory queues."""
         if self._durable_outbound is not None:
             await self._durable_outbound.nack(msg)
+
+    async def purge_inbound_for_session(self, session_key: str) -> int:
+        """Remove durable inbound messages bound to *session_key* (inbox + processing).
+
+        Used when a session is deleted so ``recover()`` cannot replay orphaned
+        messages on the next gateway start and recreate the deleted session.
+        """
+        if self._durable_inbound is None:
+            return 0
+        return await asyncio.to_thread(self._durable_inbound.purge_for_session, session_key)
 
     @property
     def inbound_size(self) -> int:
