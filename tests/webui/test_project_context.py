@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 from pathlib import Path
 from typing import Any
 
@@ -67,9 +68,10 @@ def test_compile_project_context_includes_file_paths(data_dir: Path) -> None:
     files_dir = c.files_dir_for(s.id)
     block = compile_project_context(c, s.id)
     assert block is not None
-    assert f'<files_dir path="{files_dir}" />' in block.content
+    # Paths are rendered through json.dumps, which escapes backslashes on Windows.
+    assert f'<files_dir path={json.dumps(str(files_dir))} />' in block.content
     assert f'id="{f.id}"' in block.content
-    assert f'path="{files_dir / f"{f.id}.bin"}"' in block.content
+    assert f'path={json.dumps(str(files_dir / f"{f.id}.bin"))}' in block.content
 
 
 def test_compile_project_context_truncates_to_budget(data_dir: Path) -> None:

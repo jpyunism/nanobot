@@ -29,8 +29,28 @@ from nanobot.utils.helpers import sync_workspace_templates
 
 @pytest.fixture(autouse=True)
 def _fake_tty_stdin(monkeypatch):
-    """Run_onboard guards on a TTY; tests run under pytest's non-tty stdin."""
-    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    """Run_onboard guards on a TTY; tests run under pytest's non-tty stdin.
+
+    ``_require_interactive_terminal`` also probes that the OS selector accepts
+    stdin (macOS kqueue guard). pytest's stdin is a pseudofile without a real
+    fileno, so we swap in a fake stdin backed by a real socket fd — selectable
+    on every platform (Linux epoll, Windows select) — without patching the
+    global ``selectors`` module (which asyncio's event loop also uses).
+    """
+    import socket
+
+    sock = socket.socket()
+
+    class _FakeStdin:
+        def isatty(self):
+            return True
+
+        def fileno(self):
+            return sock.fileno()
+
+    monkeypatch.setattr("sys.stdin", _FakeStdin())
+    yield
+    sock.close()
 
 
 class TestMergeMissingDefaults:
