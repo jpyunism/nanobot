@@ -195,7 +195,8 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
             except Exception:
                 break
     return OutboundMessage(
-        channel=msg.channel, chat_id=msg.chat_id, content="",
+        channel=msg.channel, chat_id=msg.chat_id,
+        content=f"Stopped {total} task(s)." if total else "No active task to stop.",
         metadata=dict(msg.metadata or {})
     )
 
