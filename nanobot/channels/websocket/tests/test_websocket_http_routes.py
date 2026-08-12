@@ -146,6 +146,7 @@ def _ch(
 def bus() -> MagicMock:
     b = MagicMock()
     b.publish_inbound = AsyncMock()
+    b.purge_inbound_for_session = AsyncMock(return_value=0)
     return b
 
 
