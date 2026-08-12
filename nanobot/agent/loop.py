@@ -862,13 +862,43 @@ class AgentLoop:
         raw: str,
         dispatch_fn: Callable[[CommandContext], Awaitable[OutboundMessage | None]],
     ) -> None:
-        """Dispatch a command directly from the run() loop and publish the result."""
+        """Dispatch a command directly from the run() loop and publish the result.
+
+        Inline-dispatched messages bypass ``_dispatch()``, so they must be
+        acknowledged here: otherwise they stay in ``bus/inbound/processing/``
+        and ``recover()`` re-queues them on the next gateway start, replaying
+        old /stop and /status messages as a spam burst.
+        """
         ctx = CommandContext(msg=msg, session=None, key=key, raw=raw, loop=self)
-        result = await dispatch_fn(ctx)
+        try:
+            result = await dispatch_fn(ctx)
+        except Exception:
+            logger.exception("Inline command '{}' dispatch failed; nacking", raw)
+            await self.bus.nack_inbound(msg)
+            return
         if result and result.content:
             await self.bus.publish_outbound(result)
         else:
             logger.warning("Command '{}' matched but dispatch returned None", raw)
+        await self.bus.ack_inbound(msg)
+
+    async def _handle_runtime_control_ack(self, msg: InboundMessage) -> bool:
+        """Handle a runtime-control message (image/MCP hot reload) and ack it.
+
+        Runtime-control messages are consumed inline from ``run()`` and never
+        reach ``_dispatch()``, so they must be acknowledged here or they stay
+        in ``bus/inbound/processing/`` and get replayed by ``recover()`` on
+        the next gateway start.
+        """
+        try:
+            handled = await agent_context.handle_runtime_control(self, msg, self.tools)
+        except Exception:
+            logger.exception("Runtime control handler failed; nacking")
+            await self.bus.nack_inbound(msg)
+            return False
+        if handled:
+            await self.bus.ack_inbound(msg)
+        return handled
 
     async def _cancel_active_tasks(self, key: str) -> int:
         """Cancel and await all active tasks and subagents for *key*.
@@ -1194,7 +1224,7 @@ class AgentLoop:
 
                 raw = msg.content.strip()
                 effective_key = self._effective_session_key(msg)
-                if await agent_context.handle_runtime_control(self, msg, self.tools):
+                if await self._handle_runtime_control_ack(msg):
                     continue
                 if self.commands.is_priority(raw):
                     await self._dispatch_command_inline(

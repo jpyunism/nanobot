@@ -1,25 +1,20 @@
-# Tasks: Check updates desde GitHub
+# Tasks: ACK de mensajes inline (comandos priority y runtime-control)
 
-Spec: `docs/spec-check-updates-github.md` · Plan: `tasks/plan.md`
+Spec: `docs/spec-inline-ack-replay.md` · Plan: `tasks/plan.md`
 
 ## Tareas
 
-- [ ] **T1: Reescribir `nanobot/webui/version_check.py`**
-  - Acceptance: `check_for_update()` consulta `get_remote_pyproject_version()` (GitHub main), nunca pypi.org; mantiene cache 5 min; retorna `None` ante error de red/versión inválida/up-to-date; payload con `githubUrl`
-  - Verify: `python -c "from nanobot.webui.version_check import check_for_update"` + grep sin "pypi"
-  - Files: `nanobot/webui/version_check.py`
+- [x] **T1: Tests de regresión `tests/agent/test_inline_ack.py`**
+  - Acceptance: cubre (1) `/stop` inline → ack (processing vacío), (2) dispatch inline que lanza → nack (vuelve a inbox), (3) runtime-control consumido → ack, (4) runtime-control que lanza → nack, (5) recover no revive un `/stop` ya acked
+  - Verify: `pytest tests/agent/test_inline_ack.py -v` verde (5 passed)
+  - Files: `tests/agent/test_inline_ack.py`
 
-- [ ] **T2: Tests backend `tests/webui/test_version_check.py`**
-  - Acceptance: cubre update disponible, up-to-date, remota menor, error de red, cache TTL, versión inválida (monkeypatch de `get_remote_pyproject_version`)
-  - Verify: `pytest tests/webui/test_version_check.py -v` verde
-  - Files: `tests/webui/test_version_check.py`
+- [x] **T2: Implementación en `nanobot/agent/loop.py`**
+  - Acceptance: `_dispatch_command_inline()` ackea tras publish exitoso y nackea si el dispatch lanza; `run()` ackea tras `handle_runtime_control()` exitoso y nackea si lanza
+  - Verify: `pytest tests/agent/test_inline_ack.py -v` verde + `ruff check` limpio
+  - Files: `nanobot/agent/loop.py`
 
-- [ ] **T3: Frontend — contrato `githubUrl`**
-  - Acceptance: `VersionCheckResult` en `api.ts` usa `githubUrl`; `VersionCheckRow` muestra link "GitHub" apuntando a `githubUrl`
-  - Verify: `cd webui && npm run build` + `npm run test` verdes
-  - Files: `webui/src/lib/api.ts`, `webui/src/components/settings/SettingsView.tsx`
-
-- [ ] **T4: Verificación final + PR**
-  - Acceptance: pytest (nuevo + smoke settings_routes), ruff, build WebUI verdes; branch en fork; PR a madkoding/nanobot
-  - Verify: checkpoints del plan completos
+- [x] **T3: Verificación final + PR**
+  - Acceptance: pytest (nuevo + smoke durable_queue/stop_pending_queue/auto_compact), ruff verdes; branch en fork; PR a madkoding/nanobot con tests
+  - Verify: suite completa 5504 passed (excl. whatsapp/neonize); PR #15 abierto
   - Files: — (git ops)
