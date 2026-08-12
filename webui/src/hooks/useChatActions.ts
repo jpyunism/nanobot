@@ -421,7 +421,9 @@ export function useChatActions(args: UseChatActionsArgs): ActionsApi {
       dialogs.closeSessionSearch();
       navigate({
         view,
-        activeKey,
+        // The projects route uses activeKey as the project id; the generic
+        // sidebar button must not leak the active chat session key into it.
+        activeKey: view === "projects" ? null : activeKey,
         settingsSection: view === "projects" || view === "workspace" ? "overview" : view,
       });
       setMobileSidebarOpen(false);
