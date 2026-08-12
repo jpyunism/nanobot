@@ -2372,8 +2372,14 @@ class AgentLoop:
         _, chat_id = self._channel_chat_id_from_session_key(session_key)
         return f"websocket:{chat_id}"
 
-    def _write_transcript_resume_events(self, session_key: str) -> None:
-        """Write a synthetic turn_end event to clear phantom spinners."""
+    def _write_transcript_resume_events(
+        self,
+        session_key: str,
+        *,
+        resumed: bool,
+        closed: bool,
+    ) -> None:
+        """Write synthetic transcript events to clear phantom spinners."""
         try:
             from nanobot.webui.transcript import append_transcript_object
         except Exception:
@@ -2390,6 +2396,30 @@ class AgentLoop:
                 "created_at_ms": now_ms,
             },
         )
+        if resumed:
+            append_transcript_object(
+                webui_key,
+                {
+                    "event": "message",
+                    "chat_id": chat_id,
+                    "role": "system",
+                    "text": "Turno reanudado tras reinicio del gateway.",
+                    "kind": "notice",
+                    "created_at_ms": now_ms,
+                },
+            )
+        elif closed:
+            append_transcript_object(
+                webui_key,
+                {
+                    "event": "message",
+                    "chat_id": chat_id,
+                    "role": "system",
+                    "text": "El gateway se reinició; el turno anterior se cerró.",
+                    "kind": "notice",
+                    "created_at_ms": now_ms,
+                },
+            )
 
     async def _restore_interrupted_sessions(self) -> int:
         """Resume sessions whose last turn was interrupted by a gateway restart.
@@ -2446,7 +2476,11 @@ class AgentLoop:
                             await self.bus.publish_inbound(injection)
                     self._clear_pending_injections(session)
                     self.sessions.save(session)
-                    self._write_transcript_resume_events(session_key)
+                    self._write_transcript_resume_events(
+                        session_key,
+                        resumed=True,
+                        closed=False,
+                    )
                     count += 1
                     continue
 
@@ -2462,7 +2496,11 @@ class AgentLoop:
                         session_key,
                         "idle",
                     )
-                    self._write_transcript_resume_events(session_key)
+                    self._write_transcript_resume_events(
+                        session_key,
+                        resumed=False,
+                        closed=True,
+                    )
                     count += 1
             except Exception:
                 logger.exception("Failed to restore interrupted session {}", session_key)
