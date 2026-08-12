@@ -5,7 +5,7 @@
   <p>
     <img src="https://img.shields.io/badge/python-≥3.11-blue" alt="Python">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-    <img src="https://img.shields.io/badge/version-0.3.11-blueviolet" alt="Version">
+    <img src="https://img.shields.io/badge/version-0.3.12-blueviolet" alt="Version">
     <a href="https://github.com/madkoding/nanobot/graphs/commit-activity"><img src="https://img.shields.io/github/commit-activity/m/madkoding/nanobot" alt="Commits last month"></a>
     <a href="https://github.com/madkoding/nanobot/issues?q=is%3Aissue%20is%3Aclosed"><img src="https://img.shields.io/github/issues-search?query=repo%3Amadkoding%2Fnanobot%20is%3Aissue%20is%3Aclosed&label=issues%20closed" alt="Issues closed"></a>
   </p>
