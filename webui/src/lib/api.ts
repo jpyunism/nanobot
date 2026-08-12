@@ -600,7 +600,7 @@ export interface VersionCheckResult {
   updateAvailable: {
     currentVersion: string;
     latestVersion: string;
-    pypiUrl?: string;
+    githubUrl?: string;
   } | null;
 }
 

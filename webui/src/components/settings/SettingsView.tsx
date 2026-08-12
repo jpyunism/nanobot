@@ -2735,7 +2735,7 @@ function VersionCheckRow({ currentVersion }: { currentVersion?: string }) {
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<
     | { type: "up-to-date" }
-    | { type: "update"; latestVersion: string; pypiUrl?: string }
+    | { type: "update"; latestVersion: string; githubUrl?: string }
     | { type: "error"; message: string }
     | null
   >(null);
@@ -2749,7 +2749,7 @@ function VersionCheckRow({ currentVersion }: { currentVersion?: string }) {
         setResult({
           type: "update",
           latestVersion: res.updateAvailable.latestVersion,
-          pypiUrl: res.updateAvailable.pypiUrl,
+          githubUrl: res.updateAvailable.githubUrl,
         });
       } else {
         setResult({ type: "up-to-date" });
@@ -2801,14 +2801,14 @@ function VersionCheckRow({ currentVersion }: { currentVersion?: string }) {
               defaultValue: "Update available v{{version}}",
               version: result.latestVersion,
             })}
-            {result.pypiUrl ? (
+            {result.githubUrl ? (
               <a
-                href={result.pypiUrl}
+                href={result.githubUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-0.5 underline-offset-2 hover:underline"
               >
-                PyPI
+                GitHub
                 <ExternalLink className="h-2.5 w-2.5" aria-hidden />
               </a>
             ) : null}
