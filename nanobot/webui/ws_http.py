@@ -521,7 +521,7 @@ class GatewayHTTPHandler:
 
         m = re.match(r"^/api/sessions/([^/]+)/delete$", got)
         if m:
-            return self._handle_session_delete(request, m.group(1))
+            return await self._handle_session_delete(request, m.group(1))
 
         m = re.match(r"^/api/sessions/([^/]+)/project$", got)
         if m:
@@ -1387,7 +1387,7 @@ class GatewayHTTPHandler:
             )
         )
 
-    def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
+    async def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         if self.session_manager is None:
@@ -1420,6 +1420,10 @@ class GatewayHTTPHandler:
                 elif self.cron_service is not None:
                     self.cron_service.remove_job(job.id)
         deleted = self.session_manager.delete_session(decoded_key)
+        if deleted and self.bus is not None:
+            purge = getattr(self.bus, "purge_inbound_for_session", None)
+            if purge is not None:
+                await purge(decoded_key)
         delete_webui_thread(decoded_key)
         # ponytail: invalidate the WebUI session list index cache so deleted
         # sessions don't reappear in the sidebar before the next reconciliation.
