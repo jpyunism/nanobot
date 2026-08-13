@@ -1433,13 +1433,17 @@ def test_gateway_restart_transcript_events_clear_pending_spinner(tmp_path, monke
     from nanobot.agent.loop import AgentLoop
 
     loop = AgentLoop.__new__(AgentLoop)
-    loop._write_transcript_resume_events("websocket:resume-chat")
+    loop._write_transcript_resume_events(
+        "websocket:resume-chat",
+        resumed=True,
+        closed=False,
+    )
 
     lines = read_transcript_lines(key)
     events = [line["event"] for line in lines]
-    assert events == ["message", "turn_end"]
-    assert lines[-1]["event"] == "turn_end"
-    assert lines[-1]["reason"] == "gateway_restart"
+    assert events == ["message", "turn_end", "message"]
+    assert lines[-1].get("kind") == "notice"
+    assert lines[-1]["text"] == "Turno reanudado tras reinicio del gateway."
     out = build_webui_thread_response(key)
     assert out["has_pending_tool_calls"] is False
-    assert not any(msg.get("content") == "Turno reanudado tras reinicio del gateway." for msg in out["messages"])
+    assert any(msg.get("content") == "Turno reanudado tras reinicio del gateway." for msg in out["messages"])
