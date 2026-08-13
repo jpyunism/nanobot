@@ -68,7 +68,7 @@ The gateway runs from the venv as `nanobot-gateway.service` (user systemd). Beca
    # User then hard-refreshes the browser (Ctrl+Shift+R / Cmd+Shift+R).
    ```
 
-3. **Verify the running version** matches the source: open the WebUI at `http://localhost:8765/` and check the version in Settings → About (e.g. `v0.1.0+4f21e13e`). The SHA is injected at build time from `git rev-parse` of this repo.
+3. **Verify the running version** matches the source: open the WebUI at `http://localhost:8765/` and check the version shown next to the sidebar logo and in Settings → About. Both read `pyproject.toml`'s `version` field (the canonical semver source).
 
 > If the user reports the gateway is "stale" (old code still running), the cause is almost always missing service restart or missing browser hard-refresh.
 

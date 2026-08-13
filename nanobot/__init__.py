@@ -18,11 +18,17 @@ def _read_pyproject_version() -> str | None:
 
 
 def _resolve_version() -> str:
+    # pyproject.toml is the canonical semver source; prefer it so source-tree
+    # checkouts always report the real current version even when the installed
+    # dist-info is stale (e.g. editable install not yet reinstalled after a bump).
+    return _read_pyproject_version() or _pkg_version_safe() or "0.0.0+unknown"
+
+
+def _pkg_version_safe() -> str | None:
     try:
         return _pkg_version("nanobot-ai")
     except PackageNotFoundError:
-        # Source checkouts often import nanobot without installed dist-info.
-        return _read_pyproject_version() or "0.3.12"
+        return None
 
 
 __version__ = _resolve_version()

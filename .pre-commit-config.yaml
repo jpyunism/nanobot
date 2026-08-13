@@ -4,3 +4,11 @@ repos:
     hooks:
       - id: ruff
         args: [--fix]
+  - repo: local
+    hooks:
+      - id: sync-versions
+        name: sync webui/package.json version to pyproject.toml
+        entry: python scripts/sync_versions.py --check
+        language: system
+        files: ^(pyproject\.toml|webui/package\.json)$
+        pass_filenames: false

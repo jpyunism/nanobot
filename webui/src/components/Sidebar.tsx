@@ -66,6 +66,7 @@ interface SidebarProps {
   archivedCount?: number;
   defaultWorkspacePath?: string | null;
   hostChromeInset?: boolean;
+  version?: string;
 }
 
 type NavigatorWithUserAgentData = Navigator & {
@@ -91,6 +92,7 @@ export function Sidebar(props: SidebarProps) {
   const collapsed = Boolean(props.collapsed);
   const toggleLabel = t("thread.header.toggleSidebar");
   const newChatShortcut = newChatShortcutLabel();
+  const version = props.version;
 
   return (
     <nav
@@ -129,14 +131,16 @@ export function Sidebar(props: SidebarProps) {
               className="h-8 w-8 select-none object-contain"
               draggable={false}
             />
-            <span
-              aria-hidden
-              className="pointer-events-none absolute right-0.5 top-0.5 text-[12px] font-bold leading-none text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.55)]"
-            >
-              2
-            </span>
           </span>
         </button>
+        {!collapsed && version && (
+          <span
+            className="ml-1 self-center text-[11px] font-medium leading-none text-muted-foreground/80 select-none"
+            title={t("sidebar.version", { defaultValue: "nanobot version" })}
+          >
+            v{version}
+          </span>
+        )}
         {!collapsed && !props.hostChromeInset && (
           <Button
             variant="ghost"

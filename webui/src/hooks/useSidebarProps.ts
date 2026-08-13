@@ -21,6 +21,7 @@ type Args = {
   projects: ProjectSummary[];
   onOpenProject: (id: string | null) => void;
   token: string;
+  version?: string;
 };
 
 export function useSidebarProps({
@@ -41,6 +42,7 @@ export function useSidebarProps({
   projects,
   onOpenProject,
   token,
+  version,
 }: Args) {
   const projectNameOverrides = useProjectNames(
     "",
@@ -93,6 +95,7 @@ export function useSidebarProps({
       showArchived: sidebarState.view.show_archived,
       archivedCount: sidebarState.archived_keys.length,
       defaultWorkspacePath: workspaces?.default_scope.project_path ?? null,
+      version,
     }),
     [
       sessions,
@@ -112,6 +115,7 @@ export function useSidebarProps({
       projects,
       onOpenProject,
       projectNameOverrides,
+      version,
     ],
   );
 }
