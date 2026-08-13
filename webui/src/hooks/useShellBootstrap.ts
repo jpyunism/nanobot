@@ -277,6 +277,7 @@ export function useShellBootstrap({
     projects: projectsState.projects,
     onOpenProject,
     token,
+    version: settingsSnapshot?.version?.current,
   });
 
   return {
