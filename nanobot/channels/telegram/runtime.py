@@ -22,6 +22,7 @@ from telegram import (
     KeyboardButton,
     ReactionTypeEmoji,
     ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
     ReplyParameters,
     Update,
 )
@@ -867,10 +868,14 @@ class TelegramChannel(BaseChannel):
                 await self._set_chat_menu_commands(chat_id, menu_commands)
 
             # Reply keyboard (teclado de respuesta) — solo en el último chunk.
-            reply_keyboard = getattr(msg, "reply_keyboard", None) or []
+            # Una lista vacía ([]) remueve el teclado previo (ReplyKeyboardRemove).
+            reply_keyboard = getattr(msg, "reply_keyboard", None)
             reply_markup_final = None
             if reply_keyboard:
                 reply_markup_final = self._build_reply_keyboard(reply_keyboard)
+            elif reply_keyboard is not None:
+                # reply_keyboard=[] explícito → quitar el teclado pegado.
+                reply_markup_final = self._build_reply_keyboard_remove()
 
             # Ephemeral (Bot API 10.2): visible solo para un usuario en grupos.
             ephemeral = bool(getattr(msg, "ephemeral", False))
@@ -1832,6 +1837,11 @@ class TelegramChannel(BaseChannel):
             input_field_placeholder="Elige una opción…",
             resize_keyboard=True,
         )
+
+    @staticmethod
+    def _build_reply_keyboard_remove() -> ReplyKeyboardRemove:
+        """Build a ReplyKeyboardRemove to dismiss a previously shown keyboard."""
+        return ReplyKeyboardRemove()
 
     async def _set_chat_menu_commands(self, chat_id: int, commands: list[dict]) -> None:
         """Register per-chat dynamic commands (setMyCommands with chat scope).

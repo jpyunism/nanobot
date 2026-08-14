@@ -62,6 +62,6 @@ class OutboundMessage:
     # - menu_commands: comandos dinámicos por chat (setMyCommands con scope).
     # - ephemeral: mensaje visible solo para un usuario en grupos (Bot API 10.2).
     rich: bool | None = None
-    reply_keyboard: list[list[str]] = field(default_factory=list)
+    reply_keyboard: list[list[str]] | None = None
     menu_commands: list[dict] = field(default_factory=list)
     ephemeral: bool = False
