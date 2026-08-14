@@ -27,7 +27,14 @@ from telegram import (
     Update,
 )
 from telegram.error import BadRequest, NetworkError, TimedOut
-from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    ContextTypes,
+    MessageHandler,
+    PollAnswerHandler,
+    filters,
+)
 from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
@@ -394,6 +401,9 @@ class TelegramConfig(Base):
     webhook_path: str = "/telegram"
     webhook_secret_token: str = ""
     webhook_max_connections: int = Field(default=4, ge=1, le=100)
+    # Efecto de mensaje por defecto (message_effect_id) para celebración
+    # automática (aprobaciones, tareas completadas). None → sin efecto.
+    message_effect_id: str | None = None
 
     @field_validator("webhook_path")
     @classmethod
@@ -487,6 +497,11 @@ class TelegramChannel(BaseChannel):
         # a streaming turn; applied to the consolidated final message.
         self._pending_stream_reply_keyboard: dict[str, list[list[str]]] = {}
         self._pending_stream_menu_commands: dict[str, list[dict]] = {}
+        # Task lists rich administradas por el agente: chat_id -> message_id de
+        # la última task list enviada (para updates in-place con checklist_update).
+        self._task_lists: dict[str, int] = {}
+        # Polls nativos: poll_id -> {chat_id, options} para resolver poll_answer.
+        self._polls_cache: dict[str, dict] = {}
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -591,6 +606,11 @@ class TelegramChannel(BaseChannel):
         else:
             allowed_updates = ["message"]
 
+        # Polls nativos: el voto del usuario llega como poll_answer.
+        self._app.add_handler(PollAnswerHandler(self._on_poll_answer))
+        if "poll_answer" not in allowed_updates:
+            allowed_updates.append("poll_answer")
+
         if self.config.mode == "webhook":
             self.logger.info("Starting bot (webhook mode)...")
         else:
@@ -680,6 +700,23 @@ class TelegramChannel(BaseChannel):
     def _is_remote_media_url(path: str) -> bool:
         return path.startswith(("http://", "https://"))
 
+    # Efecto de mensaje (Bot API 10.2): confeti por defecto.
+    _MESSAGE_EFFECT_CONFETI = "5046509860389126442"
+    _MESSAGE_EFFECTS: dict[str, str] = {
+        "confeti": _MESSAGE_EFFECT_CONFETI,
+        "confetti": _MESSAGE_EFFECT_CONFETI,
+    }
+
+    @classmethod
+    def _resolve_message_effect(cls, effect: str | None) -> str | None:
+        """Resolve a named effect to its message_effect_id (or pass through an id).
+
+        None (sin override ni config) → confeti por defecto (D3 de la spec).
+        """
+        if not effect:
+            return cls._MESSAGE_EFFECT_CONFETI
+        return cls._MESSAGE_EFFECTS.get(effect.lower(), effect)
+
     @staticmethod
     def _is_rich_capability_error(exc: Exception) -> bool:
         """True when the error indicates sendRichMessage is unavailable."""
@@ -702,6 +739,7 @@ class TelegramChannel(BaseChannel):
         receiver_user_id: int | None = None,
         reply_keyboard_markup=None,
         draft_id: int | None = None,
+        message_effect_id: str | None = None,
     ) -> bool:
         """Attempt sendRichMessage (Bot API 10.1). Returns True on success.
 
@@ -719,6 +757,9 @@ class TelegramChannel(BaseChannel):
                     "markdown": chunk,
                 },
             }
+            if message_effect_id is not None and i == len(chunks) - 1:
+                # Efecto de mensaje (Bot API 10.2) solo en el último chunk.
+                payload["message_effect_id"] = message_effect_id
             if draft_id is not None and i == len(chunks) - 1:
                 # Reemplaza el draft efímero del stream por el mensaje final
                 # (mismo draft_id → Telegram lo sustituye en vez de dejarlo
@@ -755,6 +796,18 @@ class TelegramChannel(BaseChannel):
                 if self._is_rich_capability_error(exc):
                     self.logger.debug("sendRichMessage not available, disabling")
                     self._rich_send_disabled = True
+                elif message_effect_id is not None and "effect" in str(exc).lower():
+                    # Efecto no soportado (grupos/servidor viejo): reintento
+                    # sin efecto (best-effort, sin latch).
+                    self.logger.debug("message_effect_id rejected, retrying without it: {}", exc)
+                    return await self._try_send_rich(
+                        chat_id, content, reply_params, thread_kwargs, reply_markup,
+                        is_ephemeral=is_ephemeral,
+                        receiver_user_id=receiver_user_id,
+                        reply_keyboard_markup=reply_keyboard_markup,
+                        draft_id=draft_id,
+                        message_effect_id=None,
+                    )
                 else:
                     self.logger.debug("sendRichMessage rejected: {}", exc)
                 return False
@@ -802,6 +855,29 @@ class TelegramChannel(BaseChannel):
                     message_id=reply_to_message_id,
                     allow_sending_without_reply=True
                 )
+
+        # Task list rich (checkboxes nativos) — el agente la administra.
+        checklist = getattr(msg, "checklist", None)
+        if checklist:
+            await self._send_task_list(
+                chat_id, checklist, reply_params, thread_kwargs,
+                message_effect_id=self._resolve_message_effect(
+                    getattr(msg, "effect", None) or self.config.message_effect_id
+                ),
+            )
+            return
+
+        # Edición in-place de una task list existente (progreso).
+        checklist_update = getattr(msg, "checklist_update", None)
+        if checklist_update:
+            await self._update_task_list(chat_id, checklist_update)
+            return
+
+        # Poll nativo (decisiones visibles, respuesta única).
+        poll = getattr(msg, "poll", None)
+        if poll:
+            await self._send_poll(chat_id, poll, reply_params, thread_kwargs)
+            return
 
         # Send media files
         for media_path in (msg.media or []):
@@ -869,6 +945,12 @@ class TelegramChannel(BaseChannel):
             if buttons and reply_markup is None:
                 text = f"{text}\n\n{self._buttons_as_text(buttons)}"
 
+            # Efecto de mensaje (Bot API 10.2): override por mensaje o default
+            # de config (confeti). Best-effort: si el servidor lo rechaza, se
+            # reintenta sin efecto (sin latch).
+            effect = getattr(msg, "effect", None) or self.config.message_effect_id
+            message_effect_id = self._resolve_message_effect(effect)
+
             # Comandos dinámicos por chat (setMyCommands con scope) — best-effort.
             menu_commands = getattr(msg, "menu_commands", None) or []
             if menu_commands:
@@ -906,6 +988,7 @@ class TelegramChannel(BaseChannel):
                     is_ephemeral=ephemeral,
                     receiver_user_id=receiver_user_id,
                     reply_keyboard_markup=reply_markup_final,
+                    message_effect_id=message_effect_id,
                 )
                 if rich_ok:
                     return
@@ -920,7 +1003,147 @@ class TelegramChannel(BaseChannel):
                     is_ephemeral=ephemeral if is_last else False,
                     receiver_user_id=receiver_user_id if is_last else None,
                     reply_keyboard_markup=reply_markup_final if is_last else None,
+                    message_effect_id=message_effect_id if is_last else None,
                 )
+
+    async def _send_task_list(
+        self,
+        chat_id: int,
+        checklist: dict,
+        reply_params=None,
+        thread_kwargs: dict | None = None,
+        *,
+        message_effect_id: str | None = None,
+    ) -> None:
+        """Send a rich task list (native checkboxes) via sendRichMessage.
+
+        The agent manages the list: the message_id is registered per chat so
+        later checklist_update calls can edit it in place.
+        """
+        title = checklist.get("title", "")
+        tasks = checklist.get("tasks") or []
+        lines = [f"# {title}", ""] if title else []
+        lines += [f"- [ ] {task}" for task in tasks]
+        markdown = "\n".join(lines)
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "rich_message": {"markdown": markdown},
+        }
+        if message_effect_id is not None:
+            payload["message_effect_id"] = message_effect_id
+        if reply_params is not None:
+            if hasattr(reply_params, "message_id"):
+                payload["reply_parameters"] = {
+                    "message_id": reply_params.message_id,
+                    "allow_sending_without_reply": True,
+                }
+            else:
+                payload["reply_parameters"] = reply_params
+        if thread_kwargs:
+            payload.update({k: v for k, v in thread_kwargs.items() if v is not None})
+        try:
+            result = await self._call_with_retry(
+                self._app.bot.do_api_request,
+                "sendRichMessage",
+                api_kwargs=payload,
+            )
+        except BadRequest as exc:
+            if self._is_rich_capability_error(exc):
+                self.logger.debug("sendRichMessage not available, disabling")
+                self._rich_send_disabled = True
+            elif message_effect_id is not None and "effect" in str(exc).lower():
+                self.logger.debug("message_effect_id rejected, retrying without it: {}", exc)
+                await self._send_task_list(
+                    chat_id, checklist, reply_params, thread_kwargs,
+                    message_effect_id=None,
+                )
+                return
+            else:
+                self.logger.warning("sendRichMessage rejected for task list: {}", exc)
+            return
+        except Exception as exc:
+            self.logger.warning("sendRichMessage failed for task list: {}", exc)
+            return
+        message_id = getattr(result, "message_id", None)
+        if message_id is not None:
+            self._task_lists[str(chat_id)] = {
+                "message_id": message_id,
+                "tasks": tasks,
+            }
+
+    async def _update_task_list(self, chat_id: int, checklist_update: dict) -> None:
+        """Edit a task list in place, marking done tasks and showing progress."""
+        message_id = checklist_update.get("message_id")
+        done = set(checklist_update.get("done") or [])
+        registered = self._task_lists.get(str(chat_id))
+        tasks: list[str] = []
+        if registered and registered.get("message_id") == message_id:
+            tasks = registered.get("tasks") or []
+        if not tasks:
+            self.logger.warning(
+                "checklist_update for unknown task list {} in chat {}",
+                message_id, chat_id,
+            )
+            return
+        lines = [f"- [x] {task}" if i in done else f"- [ ] {task}" for i, task in enumerate(tasks)]
+        done_count = sum(1 for i in range(len(tasks)) if i in done)
+        summary = f"✅ {done_count}/{len(tasks)} tareas completadas"
+        markdown = "\n".join(lines) + f"\n\n{summary}"
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "rich_message": {"markdown": markdown},
+        }
+        try:
+            await self._call_with_retry(
+                self._app.bot.do_api_request,
+                "editMessageText",
+                api_kwargs=payload,
+            )
+        except BadRequest as exc:
+            if self._is_rich_capability_error(exc):
+                self.logger.debug("editMessageText rich not available, disabling")
+                self._rich_send_disabled = True
+            else:
+                self.logger.warning("editMessageText rejected for task list: {}", exc)
+        except Exception as exc:
+            self.logger.warning("editMessageText failed for task list: {}", exc)
+
+    async def _send_poll(
+        self,
+        chat_id: int,
+        poll: dict,
+        reply_params=None,
+        thread_kwargs: dict | None = None,
+    ) -> None:
+        """Send a native poll (visible results, single answer) and cache it."""
+        question = poll.get("question", "")
+        options = poll.get("options") or []
+        try:
+            result = await self._call_with_retry(
+                self._app.bot.send_poll,
+                chat_id=chat_id,
+                question=question,
+                options=options,
+                is_anonymous=False,
+                allows_multiple_answers=False,
+                reply_parameters=reply_params,
+                **thread_kwargs,
+            )
+        except Exception as exc:
+            self.logger.warning("send_poll failed: {}", exc)
+            return
+        poll_obj = getattr(result, "poll", None)
+        poll_id = getattr(poll_obj, "id", None)
+        if poll_id:
+            self._polls_cache[poll_id] = {
+                "chat_id": chat_id,
+                "options": options,
+            }
+            # Limpieza básica: mantener el cache acotado.
+            if len(self._polls_cache) > 200:
+                oldest = next(iter(self._polls_cache))
+                self._polls_cache.pop(oldest, None)
 
     async def _call_with_retry(self, fn, *args, **kwargs):
         """Call an async Telegram API function with retry on pool/network timeout and RetryAfter."""
@@ -960,6 +1183,7 @@ class TelegramChannel(BaseChannel):
         is_ephemeral: bool = False,
         receiver_user_id: int | None = None,
         reply_keyboard_markup=None,
+        message_effect_id: str | None = None,
     ) -> None:
         """Send a plain text message with HTML fallback."""
         markup = reply_markup if reply_markup is not None else reply_keyboard_markup
@@ -972,6 +1196,8 @@ class TelegramChannel(BaseChannel):
             "reply_markup": markup,
             **(thread_kwargs or {}),
         }
+        if message_effect_id is not None:
+            send_kwargs["message_effect_id"] = message_effect_id
         if is_ephemeral:
             send_kwargs["is_ephemeral"] = True
             if receiver_user_id is not None:
@@ -982,6 +1208,19 @@ class TelegramChannel(BaseChannel):
                 **send_kwargs,
             )
         except BadRequest as e:
+            # Efecto no soportado (grupos/servidor viejo): reintento sin efecto.
+            if message_effect_id is not None and "effect" in str(e).lower():
+                self.logger.debug("message_effect_id rejected, retrying without it: {}", e)
+                await self._send_text(
+                    chat_id, text, reply_params, thread_kwargs,
+                    render_as_blockquote=render_as_blockquote,
+                    reply_markup=reply_markup,
+                    is_ephemeral=is_ephemeral,
+                    receiver_user_id=receiver_user_id,
+                    reply_keyboard_markup=reply_keyboard_markup,
+                    message_effect_id=None,
+                )
+                return
             # Ephemeral no soportado (Bot API < 10.2): reintentar sin ephemeral.
             if is_ephemeral and "ephemeral" in str(e).lower():
                 self.logger.debug("is_ephemeral not supported, retrying without it: {}", e)
@@ -992,6 +1231,7 @@ class TelegramChannel(BaseChannel):
                     is_ephemeral=False,
                     receiver_user_id=None,
                     reply_keyboard_markup=reply_keyboard_markup,
+                    message_effect_id=message_effect_id,
                 )
                 return
             self.logger.warning("HTML parse failed, falling back to plain text: {}", e)
@@ -1003,6 +1243,8 @@ class TelegramChannel(BaseChannel):
                     "reply_markup": markup,
                     **(thread_kwargs or {}),
                 }
+                if message_effect_id is not None:
+                    plain_kwargs["message_effect_id"] = message_effect_id
                 if is_ephemeral:
                     plain_kwargs["is_ephemeral"] = True
                     if receiver_user_id is not None:
@@ -2155,6 +2397,42 @@ class TelegramChannel(BaseChannel):
     def _buttons_as_text(buttons: list[list[str]]) -> str:
         # Buttons are semantic options; when we can't render a keyboard, the user still needs to see them.
         return "\n".join(" ".join(f"[{label}]" for label in row) for row in buttons if row)
+
+    async def _on_poll_answer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle poll answers: publish the vote as a normal agent turn."""
+        if not update.poll_answer or not update.effective_user:
+            return
+        poll_answer = update.poll_answer
+        user = update.effective_user
+        sender_id = self._sender_id(user)
+        if not self.is_allowed(sender_id):
+            return
+        poll_id = poll_answer.poll_id
+        option_ids = poll_answer.option_ids or []
+        cached = self._polls_cache.get(poll_id)
+        if cached and option_ids:
+            options = cached.get("options") or []
+            chosen = [options[i] for i in option_ids if 0 <= i < len(options)]
+            label = ", ".join(chosen) if chosen else poll_id
+        else:
+            # Sin cache (gateway reiniciado): publicar el poll_id crudo.
+            label = poll_id
+        chat_id = str(cached.get("chat_id")) if cached else str(user.id)
+        self.logger.debug("Poll answer from {}: {} -> {}", sender_id, poll_id, label)
+        self._start_typing(chat_id)
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=chat_id,
+            content=f"🗳️ El usuario votó: {label}",
+            metadata={
+                "poll_id": poll_id,
+                "option_ids": option_ids,
+                "user_id": user.id,
+                "username": user.username,
+                "first_name": user.first_name,
+                "is_poll_answer": True,
+            },
+        )
 
     async def _on_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle inline keyboard button clicks (callback queries)."""

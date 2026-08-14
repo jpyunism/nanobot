@@ -65,3 +65,12 @@ class OutboundMessage:
     reply_keyboard: list[list[str]] | None = None
     menu_commands: list[dict] = field(default_factory=list)
     ephemeral: bool = False
+    # Telegram UX (spec-telegram-ux-checklists-polls-effects.md):
+    # - checklist: task list rich {title, tasks} (checkboxes nativos).
+    # - checklist_update: edición in-place {message_id, done: [indices]}.
+    # - poll: poll nativo {question, options}.
+    # - effect: efecto de mensaje (nombre o message_effect_id).
+    checklist: dict | None = None
+    checklist_update: dict | None = None
+    poll: dict | None = None
+    effect: str | None = None

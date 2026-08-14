@@ -90,10 +90,26 @@ class _FakeBot:
     async def send_chat_action(self, **kwargs) -> None:
         pass
 
+    async def send_poll(self, **kwargs):
+        self.sent_polls = getattr(self, "sent_polls", [])
+        self.sent_polls.append(kwargs)
+        return SimpleNamespace(
+            poll=SimpleNamespace(id=f"poll_{len(self.sent_polls)}"),
+            message_id=len(self.sent_polls),
+        )
+
     async def edit_message_text(self, **kwargs):
         self.edited_messages = getattr(self, "edited_messages", [])
         self.edited_messages.append(kwargs.get("message_id"))
         return SimpleNamespace(message_id=kwargs.get("message_id"))
+
+    async def do_api_request(self, method: str, **kwargs):
+        """Fake Bot API 10.x method (sendRichMessage, editMessageText rich, etc.)."""
+        self.api_calls = getattr(self, "api_calls", [])
+        self.api_calls.append({"method": method, **kwargs})
+        if method == "sendRichMessage":
+            return SimpleNamespace(message_id=len(self.api_calls))
+        return SimpleNamespace(message_id=len(self.api_calls))
 
     async def get_file(self, file_id: str):
         """Return a fake file that 'downloads' to a path (for reply-to-media tests)."""
@@ -438,7 +454,7 @@ async def test_start_webhook_mode(monkeypatch) -> None:
         "port": 8081,
         "url_path": "telegram",
         "webhook_url": "https://example.com/telegram",
-        "allowed_updates": ["message"],
+        "allowed_updates": ["message", "poll_answer"],
         "drop_pending_updates": False,
         "secret_token": "secret-token",
         "max_connections": 1,
@@ -2919,3 +2935,280 @@ async def test_stream_without_reasoning_has_no_details() -> None:
     md = edit_calls[0].kwargs["api_kwargs"]["rich_message"]["markdown"]
     assert "<details>" not in md
     assert "hola" in md
+
+
+# ---------------------------------------------------------------------------
+# T2: Telegram UX — Task lists rich administradas por el agente, polls de
+# aprobación y efectos de mensaje (spec-telegram-ux-checklists-polls-effects.md)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_send_checklist_sends_rich_task_list() -> None:
+    """T2.1: send() con checklist={title, tasks} → sendRichMessage con
+    markdown rich `# title` + `- [ ] task` por tarea (checkboxes nativos)."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock(return_value=SimpleNamespace(message_id=1))
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="",
+            checklist={"title": "Plan SDD", "tasks": ["Spec", "Plan", "Tareas"]},
+        )
+    )
+
+    call = channel._app.bot.do_api_request.call_args
+    assert call.args[0] == "sendRichMessage"
+    payload = call.kwargs["api_kwargs"]
+    md = payload["rich_message"]["markdown"]
+    assert md.startswith("# Plan SDD")
+    assert "- [ ] Spec" in md
+    assert "- [ ] Plan" in md
+    assert "- [ ] Tareas" in md
+    # El message_id de la task list queda registrado para updates posteriores.
+    assert channel._task_lists["123"]["message_id"] == 1
+    assert channel._task_lists["123"]["tasks"] == ["Spec", "Plan", "Tareas"]
+
+
+@pytest.mark.asyncio
+async def test_send_checklist_update_edits_rich_in_place() -> None:
+    """T2.2: checklist_update={message_id, done} → editMessageText rich con
+    `- [x]` en las marcadas, `- [ ]` en el resto y resumen de progreso."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock(return_value=SimpleNamespace(message_id=1))
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="",
+            checklist={"title": "Plan SDD", "tasks": ["Spec", "Plan", "Tareas"]},
+        )
+    )
+    channel._app.bot.do_api_request.reset_mock()
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="",
+            checklist_update={"message_id": 1, "done": [0, 2]},
+        )
+    )
+
+    call = channel._app.bot.do_api_request.call_args
+    assert call.args[0] == "editMessageText"
+    payload = call.kwargs["api_kwargs"]
+    assert payload["message_id"] == 1
+    md = payload["rich_message"]["markdown"]
+    assert "- [x] Spec" in md
+    assert "- [ ] Plan" in md
+    assert "- [x] Tareas" in md
+    assert "✅ 2/3 tareas completadas" in md
+
+
+@pytest.mark.asyncio
+async def test_send_poll_sends_native_poll() -> None:
+    """T2.3: send() con poll={question, options} → send_poll nativo con
+    is_anonymous=False y allows_multiple_answers=False; poll cacheado."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="",
+            poll={"question": "¿Apruebas el plan?", "options": ["APROBAR", "CAMBIOS", "RECHAZAR"]},
+        )
+    )
+
+    assert len(channel._app.bot.sent_polls) == 1
+    kwargs = channel._app.bot.sent_polls[0]
+    assert kwargs["chat_id"] == 123
+    assert kwargs["question"] == "¿Apruebas el plan?"
+    assert kwargs["options"] == ["APROBAR", "CAMBIOS", "RECHAZAR"]
+    assert kwargs["is_anonymous"] is False
+    assert kwargs["allows_multiple_answers"] is False
+    # El poll queda cacheado (poll_id → chat_id + options).
+    assert "poll_1" in channel._polls_cache
+    assert channel._polls_cache["poll_1"]["options"] == ["APROBAR", "CAMBIOS", "RECHAZAR"]
+
+
+@pytest.mark.asyncio
+async def test_poll_answer_publishes_vote_as_turn_context() -> None:
+    """T2.4: poll_answer → InboundMessage con prefijo "🗳️ El usuario votó:"
+    y la opción resuelta vía cache; se encola como turno normal."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._polls_cache["poll_1"] = {
+        "chat_id": 123,
+        "options": ["APROBAR", "CAMBIOS", "RECHAZAR"],
+    }
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+
+    poll_answer = SimpleNamespace(
+        poll_id="poll_1",
+        option_ids=[0],
+        user=SimpleNamespace(id=12345, username="alice", first_name="Alice"),
+    )
+    update = SimpleNamespace(poll_answer=poll_answer, effective_user=poll_answer.user)
+
+    await channel._on_poll_answer(update, None)
+
+    assert len(handled) == 1
+    assert handled[0]["content"] == "🗳️ El usuario votó: APROBAR"
+    assert handled[0]["chat_id"] == "123"
+    assert handled[0]["metadata"]["poll_id"] == "poll_1"
+
+
+@pytest.mark.asyncio
+async def test_poll_answer_without_cache_falls_back_to_poll_id() -> None:
+    """T2.4: sin cache (gateway reiniciado) → se publica el poll_id crudo."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+
+    poll_answer = SimpleNamespace(
+        poll_id="poll_desconocido",
+        option_ids=[1],
+        user=SimpleNamespace(id=12345, username="alice", first_name="Alice"),
+    )
+    update = SimpleNamespace(poll_answer=poll_answer, effective_user=poll_answer.user)
+
+    await channel._on_poll_answer(update, None)
+
+    assert len(handled) == 1
+    assert "poll_desconocido" in handled[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_send_effect_applies_message_effect_id_rich() -> None:
+    """T2.5: effect → message_effect_id en el payload de sendRichMessage."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock()
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="¡Aprobado! 🎉",
+            effect="confeti",
+        )
+    )
+
+    call = channel._app.bot.do_api_request.call_args
+    assert call.args[0] == "sendRichMessage"
+    payload = call.kwargs["api_kwargs"]
+    assert payload["message_effect_id"] == "5046509860389126442"
+
+
+@pytest.mark.asyncio
+async def test_send_effect_applies_message_effect_id_legacy() -> None:
+    """T2.5: effect → message_effect_id en send_message (path legacy)."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="¡Aprobado! 🎉",
+            effect="confeti",
+        )
+    )
+
+    assert len(channel._app.bot.sent_messages) == 1
+    assert channel._app.bot.sent_messages[0]["message_effect_id"] == "5046509860389126442"
+
+
+@pytest.mark.asyncio
+async def test_send_effect_config_default_applies_when_no_override() -> None:
+    """T2.5: config message_effect_id (default confeti) se aplica si el
+    mensaje no trae override."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(channel="telegram", chat_id="123", content="¡Listo!")
+    )
+
+    assert len(channel._app.bot.sent_messages) == 1
+    assert channel._app.bot.sent_messages[0]["message_effect_id"] == "5046509860389126442"
+
+
+@pytest.mark.asyncio
+async def test_send_effect_bad_request_retries_without_effect() -> None:
+    """T2.5: BadRequest por efecto no soportado → reintento sin efecto
+    (best-effort, sin latch)."""
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    real_send = channel._app.bot.send_message
+    calls = []
+
+    async def flaky_send(**kwargs):
+        calls.append(kwargs)
+        if kwargs.get("message_effect_id"):
+            raise BadRequest("Bad Request: message effect is not supported")
+        return await real_send(**kwargs)
+
+    channel._app.bot.send_message = flaky_send
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="¡Aprobado! 🎉",
+            effect="confeti",
+        )
+    )
+
+    assert len(calls) == 2
+    assert calls[0].get("message_effect_id") == "5046509860389126442"
+    assert "message_effect_id" not in calls[1]
+    assert len(channel._app.bot.sent_messages) == 1
