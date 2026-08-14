@@ -2570,6 +2570,42 @@ async def test_send_reply_keyboard_on_final_chunk() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_reply_keyboard_remove_on_empty_list() -> None:
+    """T1.3b: reply_keyboard=[] (lista vacía explícita) envía ReplyKeyboardRemove
+    para descartar un teclado pegado; reply_keyboard=None no envía markup."""
+    from telegram import ReplyKeyboardRemove
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    # [] explícito → ReplyKeyboardRemove
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="Teclado removido",
+            reply_keyboard=[],
+        )
+    )
+    sent = channel._app.bot.sent_messages[-1]
+    assert isinstance(sent.get("reply_markup"), ReplyKeyboardRemove)
+
+    # None (default) → sin markup
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="Sin teclado",
+        )
+    )
+    sent = channel._app.bot.sent_messages[-1]
+    assert sent.get("reply_markup") is None
+
+
+@pytest.mark.asyncio
 async def test_send_menu_commands_uses_chat_scope() -> None:
     """T1.4: menu_commands registra setMyCommands con scope por chat; un
     fallo del registro no rompe el envío."""
