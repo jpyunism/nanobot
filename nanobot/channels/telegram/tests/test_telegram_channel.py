@@ -90,6 +90,11 @@ class _FakeBot:
     async def send_chat_action(self, **kwargs) -> None:
         pass
 
+    async def edit_message_text(self, **kwargs):
+        self.edited_messages = getattr(self, "edited_messages", [])
+        self.edited_messages.append(kwargs.get("message_id"))
+        return SimpleNamespace(message_id=kwargs.get("message_id"))
+
     async def get_file(self, file_id: str):
         """Return a fake file that 'downloads' to a path (for reply-to-media tests)."""
         async def _fake_download(path) -> None:
@@ -2407,9 +2412,11 @@ async def test_send_rich_splits_oversized_content_into_chunks() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_delta_rich_uses_native_drafts() -> None:
-    """T1.2: con rich_messages, el streaming usa sendRichMessageDraft con
-    draft_id estable por stream y fija el mensaje con sendRichMessage."""
+async def test_send_delta_rich_finalizes_with_edit_rich_in_place() -> None:
+    """T1.2: con rich_messages, el streaming usa un preview legacy
+    (send_message + edit_message_text) y en stream_end convierte el preview
+    en rich message in-place con editMessageText(rich_message=...) — un solo
+    mensaje, sin drafts huérfanos ni duplicados."""
     channel = TelegramChannel(
         TelegramConfig(
             enabled=True, token="123:abc", allow_from=["*"],
@@ -2424,33 +2431,35 @@ async def test_send_delta_rich_uses_native_drafts() -> None:
     await asyncio.sleep(0.15)
     await channel.send_delta("123", "mundo", stream_id="s:0")
 
+    # Preview legacy: un solo mensaje real, editado durante el stream.
+    assert len(channel._app.bot.sent_messages) == 1
+    assert channel._stream_bufs["123"].message_id == 1
+    # No se usaron drafts rich durante el streaming.
     draft_calls = [
         c for c in channel._app.bot.do_api_request.call_args_list
         if c.args[0] == "sendRichMessageDraft"
     ]
-    assert len(draft_calls) == 2
-    draft_ids = {c.kwargs["api_kwargs"]["draft_id"] for c in draft_calls}
-    assert len(draft_ids) == 1 and 0 not in draft_ids
-    # El contenido acumulado viaja en el draft.
-    assert draft_calls[-1].kwargs["api_kwargs"]["rich_message"]["markdown"] == "hola mundo"
-    # No se envió ningún mensaje real durante el streaming.
-    assert channel._app.bot.sent_messages == []
+    assert draft_calls == []
 
     await channel.send_delta("123", "", stream_id="s:0", stream_end=True)
 
-    final_calls = [
+    # Final: editMessageText rich in-place sobre el preview.
+    edit_calls = [
         c for c in channel._app.bot.do_api_request.call_args_list
-        if c.args[0] == "sendRichMessage"
+        if c.args[0] == "editMessageText"
     ]
-    assert len(final_calls) == 1
-    assert final_calls[0].kwargs["api_kwargs"]["rich_message"]["markdown"] == "hola mundo"
+    assert len(edit_calls) == 1
+    assert edit_calls[0].kwargs["api_kwargs"]["message_id"] == 1
+    assert edit_calls[0].kwargs["api_kwargs"]["rich_message"]["markdown"] == "hola mundo"
+    # Un solo mensaje en el chat: el preview editado, sin huérfanos.
+    assert len(channel._app.bot.sent_messages) == 1
     assert "123" not in channel._stream_bufs
 
 
 @pytest.mark.asyncio
-async def test_send_delta_rich_reply_parameters_propagate_to_draft_and_final() -> None:
+async def test_send_delta_rich_reply_parameters_propagate_to_preview_and_final() -> None:
     """T1.2: cuando el stream responde a un mensaje (metadata.message_id),
-    el draft y el sendRichMessage final llevan reply_parameters."""
+    el preview legacy y el edit rich final llevan reply_parameters."""
     channel = TelegramChannel(
         TelegramConfig(
             enabled=True, token="123:abc", allow_from=["*"],
@@ -2466,34 +2475,28 @@ async def test_send_delta_rich_reply_parameters_propagate_to_draft_and_final() -
     await asyncio.sleep(0.15)
     await channel.send_delta("123", "mundo", stream_id="s:0", metadata=meta)
 
-    draft_calls = [
-        c for c in channel._app.bot.do_api_request.call_args_list
-        if c.args[0] == "sendRichMessageDraft"
-    ]
-    assert len(draft_calls) == 2
-    for c in draft_calls:
-        rp = c.kwargs["api_kwargs"].get("reply_parameters")
-        assert rp is not None
-        assert rp["message_id"] == 10
-        assert rp["allow_sending_without_reply"] is True
+    # El preview legacy se envía como reply al mensaje original.
+    assert len(channel._app.bot.sent_messages) == 1
+    rp = channel._app.bot.sent_messages[0].get("reply_parameters")
+    assert rp is not None
+    assert rp["message_id"] == 10
+    assert rp["allow_sending_without_reply"] is True
 
     await channel.send_delta("123", "", stream_id="s:0", stream_end=True, metadata=meta)
 
-    final_calls = [
+    edit_calls = [
         c for c in channel._app.bot.do_api_request.call_args_list
-        if c.args[0] == "sendRichMessage"
+        if c.args[0] == "editMessageText"
     ]
-    assert len(final_calls) == 1
-    rp = final_calls[0].kwargs["api_kwargs"].get("reply_parameters")
-    assert rp is not None
-    assert rp["message_id"] == 10
+    assert len(edit_calls) == 1
+    assert edit_calls[0].kwargs["api_kwargs"]["rich_message"]["markdown"] == "hola mundo"
     assert "123" not in channel._stream_bufs
 
 
 @pytest.mark.asyncio
-async def test_send_delta_rich_falls_back_to_legacy_when_drafts_unsupported() -> None:
-    """T1.2: si sendRichMessageDraft no está disponible, se cae al path
-    legacy (send + edit) y se hace latch-off del rich."""
+async def test_send_delta_rich_falls_back_to_legacy_edit_when_rich_unsupported() -> None:
+    """T1.2: si editMessageText rich no está disponible, se cae al path
+    legacy (edit HTML in-place) y se hace latch-off del rich."""
     from telegram.error import BadRequest
 
     channel = TelegramChannel(
@@ -2504,10 +2507,13 @@ async def test_send_delta_rich_falls_back_to_legacy_when_drafts_unsupported() ->
     channel._app.bot.do_api_request = AsyncMock(side_effect=BadRequest("Method not found"))
 
     await channel.send_delta("123", "hola", stream_id="s:0")
+    await channel.send_delta("123", "", stream_id="s:0", stream_end=True)
 
     assert channel._rich_send_disabled is True
-    assert len(channel._app.bot.sent_messages) == 1  # preview legacy enviado
-    assert channel._stream_bufs["123"].message_id == 1
+    # El preview legacy se editó con HTML (un solo mensaje, sin huérfanos).
+    assert len(channel._app.bot.sent_messages) == 1
+    assert channel._app.bot.edited_messages == [1]
+    assert "123" not in channel._stream_bufs
 
 
 @pytest.mark.asyncio

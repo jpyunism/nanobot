@@ -1040,12 +1040,11 @@ class TelegramChannel(BaseChannel):
                 thread_kwargs["message_thread_id"] = message_thread_id
             raw_text = buf.text
 
-            # Rich draft streaming: finalize with sendRichMessage. The draft is
-            # ephemeral (30s preview) and expires on its own — nothing to delete.
-            # Update it with the full text first so the preview doesn't freeze
-            # mid-stream, then persist the final message with sendRichMessage.
-            # Also apply any staged reply_keyboard / menu_commands from the
-            # message tool so the consolidated message shows the keyboard.
+            # Rich final (Bot API 10.1): convert the streaming preview in place
+            # to a rich message via editMessageText(rich_message=...). This
+            # keeps a single message (no orphaned draft, no delete-and-resend
+            # flicker) and renders the full markdown. Also apply any staged
+            # reply_keyboard / menu_commands from the message tool.
             staging_reply_keyboard = self._pending_stream_reply_keyboard.pop(chat_id, None)
             staging_menu_commands = self._pending_stream_menu_commands.pop(chat_id, None)
             reply_keyboard_markup = (
@@ -1053,66 +1052,36 @@ class TelegramChannel(BaseChannel):
                 if staging_reply_keyboard else None
             )
             if (
-                buf.draft_id is not None
-                and self.config.rich_messages
+                self.config.rich_messages
                 and not getattr(self, "_rich_send_disabled", False)
             ):
-                reply_params = None
-                if reply_to_message_id := meta.get("message_id"):
-                    reply_params = {"message_id": int(reply_to_message_id), "allow_sending_without_reply": True}
+                edit_kwargs: dict[str, Any] = {
+                    "chat_id": int_chat_id,
+                    "message_id": buf.message_id,
+                    "rich_message": {"markdown": raw_text},
+                    **thread_kwargs,
+                }
+                if reply_keyboard_markup is not None:
+                    edit_kwargs["reply_markup"] = reply_keyboard_markup
                 try:
                     await self._call_with_retry(
                         self._app.bot.do_api_request,
-                        "sendRichMessageDraft",
-                        api_kwargs={
-                            "chat_id": int_chat_id,
-                            "draft_id": buf.draft_id,
-                            "rich_message": {"markdown": raw_text},
-                            **thread_kwargs,
-                        },
+                        "editMessageText",
+                        api_kwargs=edit_kwargs,
                     )
-                except Exception as exc:
-                    self.logger.debug("sendRichMessageDraft final update failed: {}", exc)
-                rich_ok = await self._try_send_rich(
-                    int_chat_id, raw_text, reply_params, thread_kwargs, None,
-                    draft_id=buf.draft_id,
-                    reply_keyboard_markup=reply_keyboard_markup,
-                )
-                if rich_ok:
                     if staging_menu_commands:
                         await self._set_chat_menu_commands(int_chat_id, staging_menu_commands)
                     self._stream_bufs.pop(chat_id, None)
                     return
-                # Rich finalize failed: send the full text as a normal message.
-                await self._send_text(
-                    int_chat_id, raw_text, reply_params, thread_kwargs,
-                    reply_keyboard_markup=reply_keyboard_markup,
-                )
-                self._stream_bufs.pop(chat_id, None)
-                return
-
-            # Try sendRichMessage for final output (Bot API 10.1).
-            # Skip when a streaming preview already exists to avoid the
-            # delete-and-resend pattern that causes flickering and drops
-            # line breaks (issue #4470).
-            if not buf.message_id and self.config.rich_messages and not getattr(self, "_rich_send_disabled", False):
-                reply_params = None
-                if reply_to_message_id := meta.get("message_id"):
-                    reply_params = {"message_id": int(reply_to_message_id), "allow_sending_without_reply": True}
-                rich_ok = await self._try_send_rich(
-                    int_chat_id, raw_text, reply_params, thread_kwargs, None,
-                )
-                if rich_ok:
-                    # Delete the streaming preview message
-                    try:
-                        await self._call_with_retry(
-                            self._app.bot.delete_message,
-                            chat_id=int_chat_id, message_id=buf.message_id,
-                        )
-                    except Exception:
-                        pass  # Preview stays if delete fails
-                    self._stream_bufs.pop(chat_id, None)
-                    return
+                except BadRequest as exc:
+                    if self._is_rich_capability_error(exc):
+                        self.logger.debug("editMessageText rich not available, disabling")
+                        self._rich_send_disabled = True
+                    else:
+                        self.logger.debug("editMessageText rich rejected: {}", exc)
+                except Exception as exc:
+                    self.logger.debug("editMessageText rich failed: {}", exc)
+                # Fall through to the legacy HTML edit path (edits in place).
 
             # Legacy path: edit existing streaming message with HTML
             html_chunks = _split_telegram_markdown_html(raw_text, TELEGRAM_HTML_MAX_LEN)
@@ -1123,6 +1092,7 @@ class TelegramChannel(BaseChannel):
                     self._app.bot.edit_message_text,
                     chat_id=int_chat_id, message_id=buf.message_id,
                     text=primary_html, parse_mode="HTML",
+                    reply_markup=reply_keyboard_markup,
                 )
             except BadRequest as e:
                 # Only fall back to plain text on actual HTML parse/format errors.
@@ -1177,55 +1147,22 @@ class TelegramChannel(BaseChannel):
         if message_thread_id := meta.get("message_thread_id"):
             thread_kwargs["message_thread_id"] = message_thread_id
 
-        # Rich draft streaming (Bot API 10.1): ephemeral preview animated with
-        # a stable draft_id; finalized with sendRichMessage on stream_end.
-        rich_streaming = (
-            self.config.rich_messages
-            and not getattr(self, "_rich_send_disabled", False)
-        )
-        if rich_streaming and buf.draft_id is None:
-            buf.draft_id = random.randint(1, 100_000_000)
-
-        if rich_streaming and (
-            buf.last_edit == 0.0 or (now - buf.last_edit) >= self.config.stream_edit_interval
-        ):
-            draft_kwargs: dict[str, Any] = {
+        if buf.message_id is None:
+            preview = _strip_md_block(buf.text)
+            preview_kwargs: dict[str, Any] = {
                 "chat_id": int_chat_id,
-                "draft_id": buf.draft_id,
-                "rich_message": {"markdown": buf.text},
+                "text": preview,
                 **thread_kwargs,
             }
             if reply_to_message_id := meta.get("message_id"):
-                draft_kwargs["reply_parameters"] = {
+                preview_kwargs["reply_parameters"] = {
                     "message_id": int(reply_to_message_id),
                     "allow_sending_without_reply": True,
                 }
             try:
-                await self._call_with_retry(
-                    self._app.bot.do_api_request,
-                    "sendRichMessageDraft",
-                    api_kwargs=draft_kwargs,
-                )
-                buf.last_edit = now
-                return
-            except BadRequest as exc:
-                if self._is_rich_capability_error(exc):
-                    self.logger.debug("sendRichMessageDraft not available, disabling")
-                else:
-                    self.logger.debug("sendRichMessageDraft rejected: {}", exc)
-                self._rich_send_disabled = True
-            except Exception as exc:
-                self.logger.debug("sendRichMessageDraft failed: {}", exc)
-                self._rich_send_disabled = True
-            buf.draft_id = None  # fall back to the legacy path for this stream
-
-        if buf.message_id is None:
-            preview = _strip_md_block(buf.text)
-            try:
                 sent = await self._call_with_retry(
                     self._app.bot.send_message,
-                    chat_id=int_chat_id, text=preview,
-                    **thread_kwargs,
+                    **preview_kwargs,
                 )
                 buf.message_id = sent.message_id
                 buf.last_edit = now
