@@ -2359,6 +2359,25 @@ async def test_send_rich_includes_reply_markup_and_ephemeral() -> None:
     payload = call.kwargs["api_kwargs"]
     assert isinstance(payload.get("reply_markup"), InlineKeyboardMarkup)
 
+    # Con reply_keyboard (teclado de respuesta) viaja como ReplyKeyboardMarkup
+    # en el payload rich (solo en el último chunk).
+    from telegram import ReplyKeyboardMarkup
+
+    channel._app.bot.do_api_request.reset_mock()
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="**hola**",
+            reply_keyboard=[["Sí", "No"]],
+        )
+    )
+    call = channel._app.bot.do_api_request.call_args
+    payload = call.kwargs["api_kwargs"]
+    assert isinstance(payload.get("reply_markup"), ReplyKeyboardMarkup)
+    labels = [btn.text for row in payload["reply_markup"].keyboard for btn in row]
+    assert labels == ["Sí", "No"]
+
 
 @pytest.mark.asyncio
 async def test_send_rich_splits_oversized_content_into_chunks() -> None:

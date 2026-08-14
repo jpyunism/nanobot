@@ -688,6 +688,7 @@ class TelegramChannel(BaseChannel):
         *,
         is_ephemeral: bool = False,
         receiver_user_id: int | None = None,
+        reply_keyboard_markup=None,
     ) -> bool:
         """Attempt sendRichMessage (Bot API 10.1). Returns True on success.
 
@@ -698,7 +699,7 @@ class TelegramChannel(BaseChannel):
             return False
 
         chunks = _split_telegram_markdown(content, TELEGRAM_RICH_MAX_LEN)
-        for chunk in chunks:
+        for i, chunk in enumerate(chunks):
             payload: dict[str, Any] = {
                 "chat_id": chat_id,
                 "rich_message": {
@@ -718,6 +719,9 @@ class TelegramChannel(BaseChannel):
                 payload.update({k: v for k, v in thread_kwargs.items() if v is not None})
             if reply_markup is not None:
                 payload["reply_markup"] = reply_markup
+            elif reply_keyboard_markup is not None and i == len(chunks) - 1:
+                # Reply keyboard (ReplyKeyboardMarkup) solo en el último chunk.
+                payload["reply_markup"] = reply_keyboard_markup
             if is_ephemeral:
                 payload["is_ephemeral"] = True
                 if receiver_user_id is not None:
@@ -879,6 +883,7 @@ class TelegramChannel(BaseChannel):
                     chat_id, text, reply_params, thread_kwargs, reply_markup,
                     is_ephemeral=ephemeral,
                     receiver_user_id=receiver_user_id,
+                    reply_keyboard_markup=reply_markup_final,
                 )
                 if rich_ok:
                     return
@@ -1026,7 +1031,9 @@ class TelegramChannel(BaseChannel):
             raw_text = buf.text
 
             # Rich draft streaming: finalize with sendRichMessage. The draft is
-            # ephemeral and gets replaced automatically — nothing to delete.
+            # ephemeral (30s preview) and expires on its own — nothing to delete.
+            # Update it with the full text first so the preview doesn't freeze
+            # mid-stream, then persist the final message with sendRichMessage.
             if (
                 buf.draft_id is not None
                 and self.config.rich_messages
@@ -1035,6 +1042,19 @@ class TelegramChannel(BaseChannel):
                 reply_params = None
                 if reply_to_message_id := meta.get("message_id"):
                     reply_params = {"message_id": int(reply_to_message_id), "allow_sending_without_reply": True}
+                try:
+                    await self._call_with_retry(
+                        self._app.bot.do_api_request,
+                        "sendRichMessageDraft",
+                        api_kwargs={
+                            "chat_id": int_chat_id,
+                            "draft_id": buf.draft_id,
+                            "rich_message": {"markdown": raw_text},
+                            **thread_kwargs,
+                        },
+                    )
+                except Exception as exc:
+                    self.logger.debug("sendRichMessageDraft final update failed: {}", exc)
                 rich_ok = await self._try_send_rich(
                     int_chat_id, raw_text, reply_params, thread_kwargs, None,
                 )
