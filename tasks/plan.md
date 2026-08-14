@@ -1,49 +1,50 @@
-# Plan: ACK de mensajes inline (comandos priority y runtime-control)
+# Plan: Telegram Generative UI — Rich Messages + App Actions
 
-Spec: `docs/spec-inline-ack-replay.md`
+Spec: `docs/spec-telegram-generative-ui.md`
 
 ## Componentes y dependencias
 
 ```
-run() (loop.py)
-   ├── handle_runtime_control (loop.py:1223)  → + ack/nack del inbound
-   ├── _dispatch_command_inline (loop.py:872) → + ack/nack del inbound
-   │     ├── ruta priority (loop.py:1226)
-   │     └── ruta no-priority en turno activo (loop.py:1254)
-   └── _dispatch (loop.py:1302)               → SIN cambios (ya ackea/nackea)
+TelegramChannel (runtime.py)
+   ├── _try_send_rich()        → + actions, chunks rich >4096
+   ├── send_delta()            → + sendRichMessageDraft (draft_id por stream)
+   ├── _on_action_updated()    → nuevo handler (action_updated → bus)
+   └── _register_actions()     → setMyActions con scope por chat
+
+OutboundMessage (bus/events.py) → + actions: list[dict]
+MessageTool (agent/tools/message.py) → + actions param
+TelegramConfig (runtime.py) → + app_actions: bool
+manifest.py + webui/index.ts → + appActions en setup
 ```
 
 ## Orden de implementación
 
-1. **Tests primero (TDD)**: crear `tests/agent/test_inline_ack.py`
-   - Test 1: `/stop` despachado inline → `processing/` queda vacío (ack)
-   - Test 2: dispatch inline que lanza → mensaje vuelve a `inbox/` (nack)
-   - Test 3: runtime-control consumido → `processing/` queda vacío (ack)
-   - Test 4: runtime-control que lanza → nack
-   - Test 5: recover no revive un `/stop` ya acked (integración con cola durable)
-2. **Implementación** en `nanobot/agent/loop.py`:
-   - `_dispatch_command_inline()`: try/except → ack tras publish exitoso, nack ante error
-   - `run()`: tras `handle_runtime_control()` → ack; try/except → nack
-3. **Verificación**: pytest (nuevo + smoke durable_queue/stop_pending_queue/auto_compact),
-   ruff, luego PR a madkoding/nanobot
+1. **T1: Tests primero (TDD)** — `tests/channels/telegram/test_telegram_channel.py`
+   - Test 1: `_try_send_rich` envía markdown + actions + reply_markup (payload dict)
+   - Test 2: rich send con contenido > 30.000 chars → chunks rich
+   - Test 3: fallback legacy cuando el servidor no soporta rich (latch-off)
+   - Test 4: `send_delta` con rich → `sendRichMessageDraft` con draft_id estable y
+     `sendRichMessage` en stream_end
+   - Test 5: `send_delta` sin rich → path legacy (send + edit) intacto
+   - Test 6: `_on_action_updated` → mensaje `[action: <id>]` al bus con metadata
+   - Test 7: `setMyActions` con scope por chat
+2. **T2: Implementación** — `nanobot/channels/telegram/runtime.py`:
+   - `_try_send_rich()`: payload con `actions` (si hay), split rich en 30.000
+   - `send_delta()`: path draft nativo (draft_id por stream, throttle, fix final)
+   - `_on_action_updated()` + `_register_actions()` + `app_actions` en config
+   - allowed_updates incluye "action_updated" cuando app_actions
+3. **T3: Bus + tool** — `nanobot/bus/events.py` (`actions` en OutboundMessage) y
+   `nanobot/agent/tools/message.py` (parámetro `actions` con validación)
+4. **T4: Setup del canal** — `manifest.py` (campo appActions) + `webui/index.ts`
+5. **T5: Verificación + PR** — pytest (nuevo + smoke), ruff, branch en fork,
+   PR a madkoding/nanobot con tests
 
 ## Riesgos y mitigaciones
 
-- **Doble ack con `cmd_restart`**: `ack_inbound` es idempotente (pop + unlink
-  missing_ok). Sin riesgo.
-- **Nack de mensajes ya procesados**: solo se nackea si el dispatch/handler lanza; el
-  mensaje vuelve a `inbox/` y se reintenta (comportamiento deseado, consistente con
-  `_dispatch()`).
-- **Cambio de comportamiento en tests existentes**: los tests actuales de
-  `_dispatch_command_inline` no existen; los de `cmd_stop`/`cmd_status` usan mocks y no
-  tocan el bus. Verificar con smoke suite.
-- **PR Guardian (motoko-section9)**: exige tests para código de producción — los tests
-  TDD del paso 1 lo cubren.
-
-## Verificaciones (checkpoints)
-
-- [ ] `pytest tests/agent/test_inline_ack.py -v` verde
-- [ ] `pytest tests/bus/test_durable_queue.py tests/command/test_stop_pending_queue.py -v` verde (smoke)
-- [ ] `pytest tests/agent/test_auto_compact.py -v` verde (priority commands path)
-- [ ] `ruff check nanobot/agent/loop.py` limpio
-- [ ] grep: `_dispatch_command_inline` contiene `ack_inbound` y `nack_inbound`
+- **PTB sin tipos rich (22.8)**: payloads dict vía `do_api_request` (patrón existente);
+  si PTB 23 sale con tipos, migrar después sin cambio de contrato.
+- **Draft expirado (30 s)**: el fix final con `sendRichMessage` siempre envía el
+  mensaje completo; el draft se descarta solo.
+- **Servidor viejo**: latch-off `_rich_send_disabled` + fallback legacy (ya existe).
+- **Flood control**: throttle con `stream_edit_interval` (ya existe) + retry con
+  backoff en `_call_with_retry`.
