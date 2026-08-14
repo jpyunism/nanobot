@@ -20,6 +20,7 @@ from nanobot.bus.outbound_events import (
     StreamDeltaEvent,
     StreamedResponseEvent,
     StreamEndEvent,
+    outbound_event_from_message,
     outbound_message_for_event,
 )
 from nanobot.bus.queue import MessageBus
@@ -2948,6 +2949,104 @@ def test_outbound_duplicate_suppression_is_scoped_to_origin_message() -> None:
     assert mgr._should_suppress_outbound(duplicate) is True
     assert mgr._should_suppress_outbound(separate_turn) is False
     assert mgr._should_suppress_outbound(new_origin_content) is False
+
+
+@pytest.mark.asyncio
+async def test_dispatch_drops_legacy_send_when_channel_wants_stream() -> None:
+    """When a channel opts into streaming (`_wants_stream=True`), a final
+    outbound without `StreamedResponseEvent` must NOT trigger `channel.send()`,
+    otherwise the user gets a duplicate message above the streaming preview.
+    Regression: previously, short single-chunk streams fell through to the
+    legacy path and produced an extra top-level message.
+    """
+    send_calls: list[OutboundMessage] = []
+    delta_calls: list[tuple[str, str, str | None, bool]] = []
+
+    class _StreamedChannel(BaseChannel):
+        name = "streamed"
+        display_name = "Streamed"
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        async def send(self, msg: OutboundMessage) -> None:
+            send_calls.append(msg)
+
+        async def send_delta(
+            self,
+            chat_id: str,
+            delta: str,
+            metadata: dict | None = None,
+            *,
+            stream_id: str | None = None,
+            stream_end: bool = False,
+            resuming: bool = False,
+        ) -> None:
+            delta_calls.append((chat_id, delta, stream_id, stream_end))
+
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig(send_max_retries=3),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr.config = fake_config
+    mgr.bus = MessageBus()
+    mgr.channels = {"streamed": _StreamedChannel(fake_config, mgr.bus)}
+    mgr._dispatch_task = None
+
+    msg = OutboundMessage(
+        channel="streamed",
+        chat_id="123",
+        content="duplicate content",
+        event=None,
+        metadata={"_wants_stream": True, "message_id": "u1"},
+    )
+    await mgr._send_once(mgr.channels["streamed"], msg)
+    assert send_calls == []
+    assert delta_calls == []
+
+
+@pytest.mark.asyncio
+async def test_dispatch_legacy_send_falls_through_without_wants_stream() -> None:
+    """When the channel did NOT opt into streaming, the legacy path still
+    invokes `channel.send()` — no regression to non-streaming channels."""
+    send_calls: list[OutboundMessage] = []
+
+    class _LegacyChannel(BaseChannel):
+        name = "legacy"
+        display_name = "Legacy"
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        async def send(self, msg: OutboundMessage) -> None:
+            send_calls.append(msg)
+
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig(send_max_retries=3),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr.config = fake_config
+    mgr.bus = MessageBus()
+    mgr.channels = {"legacy": _LegacyChannel(fake_config, mgr.bus)}
+    mgr._dispatch_task = None
+
+    msg = OutboundMessage(
+        channel="legacy",
+        chat_id="123",
+        content="hello",
+        event=None,
+        metadata={"message_id": "u1"},
+    )
+    await mgr._send_once(mgr.channels["legacy"], msg)
+    assert len(send_calls) == 1
 
 
 @pytest.mark.asyncio

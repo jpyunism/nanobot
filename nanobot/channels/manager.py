@@ -880,6 +880,18 @@ class ChannelManager:
         elif isinstance(event, StreamEndEvent):
             await ChannelManager._send_stream_event(channel, msg, event)
         elif not isinstance(event, StreamedResponseEvent):
+            # Channels opted into streaming must NEVER receive the final
+            # message as a plain send(): the runner emits stream deltas for
+            # the full content and a StreamedResponseEvent to mark the final
+            # text. A fallback send here would create a duplicate message
+            # above the streaming preview.
+            wants_stream = bool((msg.metadata or {}).get("_wants_stream"))
+            if wants_stream:
+                logger.debug(
+                    "Dropping legacy outbound to {}:{} (channel wants stream)",
+                    msg.channel, msg.chat_id,
+                )
+                return
             await channel.send(msg)
 
     def _coalesce_stream_deltas(
