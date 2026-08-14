@@ -475,6 +475,10 @@ class TelegramChannel(BaseChannel):
         self._inbound_buffers: dict[str, list[_QueuedTelegramUpdate]] = {}
         self._inbound_workers: dict[str, asyncio.Task] = {}
         self._rich_send_disabled: bool = False  # Latch off if Bot API < 10.1
+        # Reply keyboard / menu commands staged by the message tool during
+        # a streaming turn; applied to the consolidated final message.
+        self._pending_stream_reply_keyboard: dict[str, list[list[str]]] = {}
+        self._pending_stream_menu_commands: dict[str, list[dict]] = {}
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -1040,6 +1044,14 @@ class TelegramChannel(BaseChannel):
             # ephemeral (30s preview) and expires on its own — nothing to delete.
             # Update it with the full text first so the preview doesn't freeze
             # mid-stream, then persist the final message with sendRichMessage.
+            # Also apply any staged reply_keyboard / menu_commands from the
+            # message tool so the consolidated message shows the keyboard.
+            staging_reply_keyboard = self._pending_stream_reply_keyboard.pop(chat_id, None)
+            staging_menu_commands = self._pending_stream_menu_commands.pop(chat_id, None)
+            reply_keyboard_markup = (
+                self._build_reply_keyboard(staging_reply_keyboard)
+                if staging_reply_keyboard else None
+            )
             if (
                 buf.draft_id is not None
                 and self.config.rich_messages
@@ -1064,12 +1076,18 @@ class TelegramChannel(BaseChannel):
                 rich_ok = await self._try_send_rich(
                     int_chat_id, raw_text, reply_params, thread_kwargs, None,
                     draft_id=buf.draft_id,
+                    reply_keyboard_markup=reply_keyboard_markup,
                 )
                 if rich_ok:
+                    if staging_menu_commands:
+                        await self._set_chat_menu_commands(int_chat_id, staging_menu_commands)
                     self._stream_bufs.pop(chat_id, None)
                     return
                 # Rich finalize failed: send the full text as a normal message.
-                await self._send_text(int_chat_id, raw_text, reply_params, thread_kwargs)
+                await self._send_text(
+                    int_chat_id, raw_text, reply_params, thread_kwargs,
+                    reply_keyboard_markup=reply_keyboard_markup,
+                )
                 self._stream_bufs.pop(chat_id, None)
                 return
 
