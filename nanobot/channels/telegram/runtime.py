@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import re
 import time
 import unicodedata
@@ -17,7 +18,9 @@ from telegram import (
     BotCommand,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
     ReactionTypeEmoji,
+    ReplyKeyboardMarkup,
     ReplyParameters,
     Update,
 )
@@ -41,6 +44,9 @@ TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
 # raw markdown into chunks whose rendered HTML fits Telegram's true 4096-char
 # boundary so the final rendered message never overflows.
 TELEGRAM_HTML_MAX_LEN = 4096
+# Rich Messages (Bot API 10.1) allow up to 32768 UTF-8 chars; we chunk at
+# 30000 to leave margin for markdown→HTML expansion and entity overhead.
+TELEGRAM_RICH_MAX_LEN = 30000
 TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message
 
 
@@ -342,6 +348,7 @@ class _StreamBuf:
     message_id: int | None = None
     last_edit: float = 0.0
     stream_id: str | None = None
+    draft_id: int | None = None  # sendRichMessageDraft id (rich streaming)
 
 
 @dataclass
@@ -677,53 +684,66 @@ class TelegramChannel(BaseChannel):
         reply_params=None,
         thread_kwargs: dict | None = None,
         reply_markup=None,
+        *,
+        is_ephemeral: bool = False,
+        receiver_user_id: int | None = None,
     ) -> bool:
-        """Attempt sendRichMessage (Bot API 10.1). Returns True on success."""
+        """Attempt sendRichMessage (Bot API 10.1). Returns True on success.
+
+        Content longer than TELEGRAM_RICH_MAX_LEN is split into rich chunks
+        (the rich limit is 32768 chars, well above the legacy 4096).
+        """
         if not self._app:
             return False
 
-        payload: dict[str, Any] = {
-            "chat_id": chat_id,
-            "rich_message": {
-                "markdown": content,
-            },
-        }
-        if reply_params is not None:
-            # sendRichMessage uses reply_parameters (object), not reply_to_message_id.
-            if hasattr(reply_params, "message_id"):
-                payload["reply_parameters"] = {
-                    "message_id": reply_params.message_id,
-                    "allow_sending_without_reply": True,
-                }
-            else:
-                payload["reply_parameters"] = reply_params
-        if thread_kwargs:
-            payload.update({k: v for k, v in thread_kwargs.items() if v is not None})
-        if reply_markup is not None:
-            payload["reply_markup"] = reply_markup
+        chunks = _split_telegram_markdown(content, TELEGRAM_RICH_MAX_LEN)
+        for chunk in chunks:
+            payload: dict[str, Any] = {
+                "chat_id": chat_id,
+                "rich_message": {
+                    "markdown": chunk,
+                },
+            }
+            if reply_params is not None:
+                # sendRichMessage uses reply_parameters (object), not reply_to_message_id.
+                if hasattr(reply_params, "message_id"):
+                    payload["reply_parameters"] = {
+                        "message_id": reply_params.message_id,
+                        "allow_sending_without_reply": True,
+                    }
+                else:
+                    payload["reply_parameters"] = reply_params
+            if thread_kwargs:
+                payload.update({k: v for k, v in thread_kwargs.items() if v is not None})
+            if reply_markup is not None:
+                payload["reply_markup"] = reply_markup
+            if is_ephemeral:
+                payload["is_ephemeral"] = True
+                if receiver_user_id is not None:
+                    payload["receiver_user_id"] = receiver_user_id
 
-        try:
-            await self._call_with_retry(
-                self._app.bot.do_api_request,
-                "sendRichMessage",
-                api_kwargs=payload,
-            )
-            return True
-        except BadRequest as exc:
-            if self._is_rich_capability_error(exc):
-                self.logger.debug("sendRichMessage not available, disabling")
-                self._rich_send_disabled = True
-            else:
-                self.logger.debug("sendRichMessage rejected: {}", exc)
-            return False
-        except Exception as exc:
-            err_str = str(exc).lower()
-            is_timeout = "timed out" in err_str or isinstance(exc, TimedOut)
-            if is_timeout:
-                self.logger.debug("sendRichMessage timeout, falling back to legacy path")
+            try:
+                await self._call_with_retry(
+                    self._app.bot.do_api_request,
+                    "sendRichMessage",
+                    api_kwargs=payload,
+                )
+            except BadRequest as exc:
+                if self._is_rich_capability_error(exc):
+                    self.logger.debug("sendRichMessage not available, disabling")
+                    self._rich_send_disabled = True
+                else:
+                    self.logger.debug("sendRichMessage rejected: {}", exc)
                 return False
-            self.logger.debug("sendRichMessage failed: {}", exc)
-            return False
+            except Exception as exc:
+                err_str = str(exc).lower()
+                is_timeout = "timed out" in err_str or isinstance(exc, TimedOut)
+                if is_timeout:
+                    self.logger.debug("sendRichMessage timeout, falling back to legacy path")
+                else:
+                    self.logger.debug("sendRichMessage failed: {}", exc)
+                return False
+        return True
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
@@ -827,6 +847,26 @@ class TelegramChannel(BaseChannel):
             if buttons and reply_markup is None:
                 text = f"{text}\n\n{self._buttons_as_text(buttons)}"
 
+            # Comandos dinámicos por chat (setMyCommands con scope) — best-effort.
+            menu_commands = getattr(msg, "menu_commands", None) or []
+            if menu_commands:
+                await self._set_chat_menu_commands(chat_id, menu_commands)
+
+            # Reply keyboard (teclado de respuesta) — solo en el último chunk.
+            reply_keyboard = getattr(msg, "reply_keyboard", None) or []
+            reply_markup_final = None
+            if reply_keyboard:
+                reply_markup_final = self._build_reply_keyboard(reply_keyboard)
+
+            # Ephemeral (Bot API 10.2): visible solo para un usuario en grupos.
+            ephemeral = bool(getattr(msg, "ephemeral", False))
+            receiver_user_id = None
+            if ephemeral:
+                try:
+                    receiver_user_id = int(msg.metadata.get("user_id", 0) or 0) or None
+                except (TypeError, ValueError):
+                    receiver_user_id = None
+
             # Bot API 10.1 rich fast-path: send raw markdown via sendRichMessage.
             # All non-blockquote content tries rich first; _rich_send_disabled
             # latches off permanently if the server doesn't support it.
@@ -837,6 +877,8 @@ class TelegramChannel(BaseChannel):
             ):
                 rich_ok = await self._try_send_rich(
                     chat_id, text, reply_params, thread_kwargs, reply_markup,
+                    is_ephemeral=ephemeral,
+                    receiver_user_id=receiver_user_id,
                 )
                 if rich_ok:
                     return
@@ -848,6 +890,9 @@ class TelegramChannel(BaseChannel):
                     chat_id, chunk, reply_params, thread_kwargs,
                     render_as_blockquote=render_as_blockquote,
                     reply_markup=reply_markup if is_last else None,
+                    is_ephemeral=ephemeral if is_last else False,
+                    receiver_user_id=receiver_user_id if is_last else None,
+                    reply_keyboard_markup=reply_markup_final if is_last else None,
                 )
 
     async def _call_with_retry(self, fn, *args, **kwargs):
@@ -884,27 +929,60 @@ class TelegramChannel(BaseChannel):
         thread_kwargs: dict | None = None,
         render_as_blockquote: bool = False,
         reply_markup=None,
+        *,
+        is_ephemeral: bool = False,
+        receiver_user_id: int | None = None,
+        reply_keyboard_markup=None,
     ) -> None:
         """Send a plain text message with HTML fallback."""
+        markup = reply_markup if reply_markup is not None else reply_keyboard_markup
+        html = _tool_hint_to_telegram_blockquote(text) if render_as_blockquote else _markdown_to_telegram_html(text)
+        send_kwargs: dict[str, Any] = {
+            "chat_id": chat_id,
+            "text": html,
+            "parse_mode": "HTML",
+            "reply_parameters": reply_params,
+            "reply_markup": markup,
+            **(thread_kwargs or {}),
+        }
+        if is_ephemeral:
+            send_kwargs["is_ephemeral"] = True
+            if receiver_user_id is not None:
+                send_kwargs["receiver_user_id"] = receiver_user_id
         try:
-            html = _tool_hint_to_telegram_blockquote(text) if render_as_blockquote else _markdown_to_telegram_html(text)
             await self._call_with_retry(
                 self._app.bot.send_message,
-                chat_id=chat_id, text=html, parse_mode="HTML",
-                reply_parameters=reply_params,
-                reply_markup=reply_markup,
-                **(thread_kwargs or {}),
+                **send_kwargs,
             )
         except BadRequest as e:
+            # Ephemeral no soportado (Bot API < 10.2): reintentar sin ephemeral.
+            if is_ephemeral and "ephemeral" in str(e).lower():
+                self.logger.debug("is_ephemeral not supported, retrying without it: {}", e)
+                await self._send_text(
+                    chat_id, text, reply_params, thread_kwargs,
+                    render_as_blockquote=render_as_blockquote,
+                    reply_markup=reply_markup,
+                    is_ephemeral=False,
+                    receiver_user_id=None,
+                    reply_keyboard_markup=reply_keyboard_markup,
+                )
+                return
             self.logger.warning("HTML parse failed, falling back to plain text: {}", e)
             try:
+                plain_kwargs: dict[str, Any] = {
+                    "chat_id": chat_id,
+                    "text": text,
+                    "reply_parameters": reply_params,
+                    "reply_markup": markup,
+                    **(thread_kwargs or {}),
+                }
+                if is_ephemeral:
+                    plain_kwargs["is_ephemeral"] = True
+                    if receiver_user_id is not None:
+                        plain_kwargs["receiver_user_id"] = receiver_user_id
                 await self._call_with_retry(
                     self._app.bot.send_message,
-                    chat_id=chat_id,
-                    text=text,
-                    reply_parameters=reply_params,
-                    reply_markup=reply_markup,
-                    **(thread_kwargs or {}),
+                    **plain_kwargs,
                 )
             except Exception:
                 self.logger.exception("Error sending message")
@@ -932,7 +1010,9 @@ class TelegramChannel(BaseChannel):
 
         if stream_end:
             buf = self._stream_bufs.get(chat_id)
-            if not buf or not buf.message_id or not buf.text:
+            if not buf or not buf.text:
+                return
+            if buf.message_id is None and buf.draft_id is None:
                 return
             if stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id:
                 return
@@ -944,6 +1024,27 @@ class TelegramChannel(BaseChannel):
             if message_thread_id := meta.get("message_thread_id"):
                 thread_kwargs["message_thread_id"] = message_thread_id
             raw_text = buf.text
+
+            # Rich draft streaming: finalize with sendRichMessage. The draft is
+            # ephemeral and gets replaced automatically — nothing to delete.
+            if (
+                buf.draft_id is not None
+                and self.config.rich_messages
+                and not getattr(self, "_rich_send_disabled", False)
+            ):
+                reply_params = None
+                if reply_to_message_id := meta.get("message_id"):
+                    reply_params = {"message_id": int(reply_to_message_id), "allow_sending_without_reply": True}
+                rich_ok = await self._try_send_rich(
+                    int_chat_id, raw_text, reply_params, thread_kwargs, None,
+                )
+                if rich_ok:
+                    self._stream_bufs.pop(chat_id, None)
+                    return
+                # Rich finalize failed: send the full text as a normal message.
+                await self._send_text(int_chat_id, raw_text, reply_params, thread_kwargs)
+                self._stream_bufs.pop(chat_id, None)
+                return
 
             # Try sendRichMessage for final output (Bot API 10.1).
             # Skip when a streaming preview already exists to avoid the
@@ -1030,6 +1131,43 @@ class TelegramChannel(BaseChannel):
         thread_kwargs = {}
         if message_thread_id := meta.get("message_thread_id"):
             thread_kwargs["message_thread_id"] = message_thread_id
+
+        # Rich draft streaming (Bot API 10.1): ephemeral preview animated with
+        # a stable draft_id; finalized with sendRichMessage on stream_end.
+        rich_streaming = (
+            self.config.rich_messages
+            and not getattr(self, "_rich_send_disabled", False)
+        )
+        if rich_streaming and buf.draft_id is None:
+            buf.draft_id = random.randint(1, 100_000_000)
+
+        if rich_streaming and (
+            buf.last_edit == 0.0 or (now - buf.last_edit) >= self.config.stream_edit_interval
+        ):
+            try:
+                await self._call_with_retry(
+                    self._app.bot.do_api_request,
+                    "sendRichMessageDraft",
+                    api_kwargs={
+                        "chat_id": int_chat_id,
+                        "draft_id": buf.draft_id,
+                        "rich_message": {"markdown": buf.text},
+                        **thread_kwargs,
+                    },
+                )
+                buf.last_edit = now
+                return
+            except BadRequest as exc:
+                if self._is_rich_capability_error(exc):
+                    self.logger.debug("sendRichMessageDraft not available, disabling")
+                else:
+                    self.logger.debug("sendRichMessageDraft rejected: {}", exc)
+                self._rich_send_disabled = True
+            except Exception as exc:
+                self.logger.debug("sendRichMessageDraft failed: {}", exc)
+                self._rich_send_disabled = True
+            buf.draft_id = None  # fall back to the legacy path for this stream
+
         if buf.message_id is None:
             preview = _strip_md_block(buf.text)
             try:
@@ -1686,6 +1824,39 @@ class TelegramChannel(BaseChannel):
             for row in buttons
         ]
         return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def _build_reply_keyboard(rows: list[list[str]]) -> ReplyKeyboardMarkup:
+        """Build a reply keyboard (replaces the user's keyboard) with options."""
+        keyboard = [[KeyboardButton(label) for label in row] for row in rows if row]
+        return ReplyKeyboardMarkup(
+            keyboard,
+            one_time_keyboard=True,
+            input_field_placeholder="Elige una opción…",
+            resize_keyboard=True,
+        )
+
+    async def _set_chat_menu_commands(self, chat_id: int, commands: list[dict]) -> None:
+        """Register per-chat dynamic commands (setMyCommands with chat scope).
+
+        Best-effort: a failure only logs at debug level and never breaks the
+        message send.
+        """
+        if not self._app:
+            return
+        try:
+            bot_commands = [
+                BotCommand(command=str(c.get("command", "")), description=str(c.get("description", "")))
+                for c in commands
+                if c.get("command")
+            ]
+            await self._call_with_retry(
+                self._app.bot.set_my_commands,
+                commands=bot_commands,
+                scope={"type": "chat", "chat_id": chat_id},
+            )
+        except Exception as e:
+            self.logger.debug("setMyCommands (chat scope) failed: {}", e)
 
     @staticmethod
     def _safe_callback_data(label: str) -> str:

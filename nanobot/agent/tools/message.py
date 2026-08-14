@@ -9,7 +9,13 @@ from loguru import logger
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.path_utils import resolve_workspace_path
-from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
+from nanobot.agent.tools.schema import (
+    ArraySchema,
+    BooleanSchema,
+    ObjectSchema,
+    StringSchema,
+    tool_parameters_schema,
+)
 from nanobot.bus.events import OutboundMessage
 from nanobot.config.paths import get_workspace_path
 from nanobot.security.workspace_access import current_tool_workspace
@@ -27,6 +33,26 @@ from nanobot.security.workspace_access import current_tool_workspace
         buttons=ArraySchema(
             ArraySchema(StringSchema("")),
             description="Inline keyboard buttons: list of rows, each row is list of labels.",
+        ),
+        rich=BooleanSchema(
+            description="Force Telegram Rich Message (Bot API 10.1) for this message: headings, tables, todo-lists, details. Default: channel config.",
+        ),
+        reply_keyboard=ArraySchema(
+            ArraySchema(StringSchema("")),
+            description="Reply keyboard replacing the user's keyboard: list of rows, each row is list of labels (Telegram only).",
+        ),
+        menu_commands=ArraySchema(
+            ObjectSchema(
+                properties={
+                    "command": StringSchema("Command name without slash, e.g. 'agenda'."),
+                    "description": StringSchema("Short description shown in the menu."),
+                },
+                required=["command", "description"],
+            ),
+            description="Per-chat dynamic commands for the Telegram menu button (setMyCommands with chat scope).",
+        ),
+        ephemeral=BooleanSchema(
+            description="Send as ephemeral message visible only to the target user in groups (Telegram Bot API 10.2).",
         ),
         required=["content"],
     )
@@ -149,6 +175,10 @@ class MessageTool(Tool):
         message_id: str | None = None,
         media: list[str] | None = None,
         buttons: list[list[str]] | None = None,
+        rich: bool | None = None,
+        reply_keyboard: list[list[str]] | None = None,
+        menu_commands: list[dict] | None = None,
+        ephemeral: bool | None = None,
         **kwargs: Any,
     ) -> str:
         from nanobot.utils.helpers import strip_think
@@ -161,6 +191,22 @@ class MessageTool(Tool):
                 for row in buttons
             ):
                 return ToolResult.error("Error: buttons must be a list of list of strings")
+        if reply_keyboard is not None:
+            if not isinstance(reply_keyboard, list) or any(
+                not isinstance(row, list) or any(not isinstance(label, str) for label in row)
+                for row in reply_keyboard
+            ):
+                return ToolResult.error("Error: reply_keyboard must be a list of list of strings")
+        if menu_commands is not None:
+            if not isinstance(menu_commands, list) or any(
+                not isinstance(cmd, dict)
+                or not isinstance(cmd.get("command"), str)
+                or not isinstance(cmd.get("description"), str)
+                for cmd in menu_commands
+            ):
+                return ToolResult.error(
+                    "Error: menu_commands must be a list of objects with 'command' and 'description' strings"
+                )
         request_ctx = current_request_context()
         default_channel = (
             request_ctx.channel if request_ctx is not None else self._fallback_channel
@@ -230,6 +276,10 @@ class MessageTool(Tool):
             media=media or [],
             buttons=buttons or [],
             metadata=metadata,
+            rich=rich,
+            reply_keyboard=reply_keyboard or [],
+            menu_commands=menu_commands or [],
+            ephemeral=bool(ephemeral),
         )
 
         if self._suppress_delivery_var.get():

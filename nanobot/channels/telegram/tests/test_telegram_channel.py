@@ -2305,3 +2305,266 @@ async def test_callback_query_ignores_unauthorized_user_before_side_effects() ->
     query.answer.assert_not_awaited()
     query.message.edit_reply_markup.assert_not_awaited()
     channel._handle_message.assert_not_awaited()
+
+# ---------------------------------------------------------------------------
+# T1: Telegram Generative UI — Rich Messages, drafts, reply keyboards,
+# comandos dinámicos y ephemeral messages (spec-telegram-generative-ui.md)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_send_rich_includes_reply_markup_and_ephemeral() -> None:
+    """T1.1: sendRichMessage payload carries reply_markup and ephemeral fields."""
+    from telegram import InlineKeyboardMarkup
+
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True, token="123:abc", allow_from=["*"],
+            rich_messages=True, inline_keyboards=True,
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock()
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="**hola**",
+            metadata={"user_id": 12345},
+            ephemeral=True,
+        )
+    )
+
+    # Sin reply_markup en este caso; verificar ephemeral en el payload rich.
+    call = channel._app.bot.do_api_request.call_args
+    assert call.args[0] == "sendRichMessage"
+    payload = call.kwargs["api_kwargs"]
+    assert payload["rich_message"]["markdown"] == "**hola**"
+    assert payload.get("is_ephemeral") is True
+    assert payload.get("receiver_user_id") == 12345
+
+    # Con reply_markup explícito (inline keyboard) también viaja en el payload.
+    channel._app.bot.do_api_request.reset_mock()
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="**hola**",
+            buttons=[["Go"]],
+        )
+    )
+    call = channel._app.bot.do_api_request.call_args
+    payload = call.kwargs["api_kwargs"]
+    assert isinstance(payload.get("reply_markup"), InlineKeyboardMarkup)
+
+
+@pytest.mark.asyncio
+async def test_send_rich_splits_oversized_content_into_chunks() -> None:
+    """T1.1: contenido > 30.000 chars se parte en chunks rich (límite 32.768)."""
+    from nanobot.channels.telegram.runtime import TELEGRAM_RICH_MAX_LEN
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock()
+
+    big = "# Título\n\n" + ("párrafo **bold** con texto\n\n" * 2000)
+    assert len(big) > TELEGRAM_RICH_MAX_LEN
+
+    await channel.send(OutboundMessage(channel="telegram", chat_id="123", content=big))
+
+    calls = [c for c in channel._app.bot.do_api_request.call_args_list if c.args[0] == "sendRichMessage"]
+    assert len(calls) >= 2
+    for c in calls:
+        md = c.kwargs["api_kwargs"]["rich_message"]["markdown"]
+        assert len(md) <= TELEGRAM_RICH_MAX_LEN
+    # El contenido completo se preserva (sin pérdida de texto).
+    joined = "".join(c.kwargs["api_kwargs"]["rich_message"]["markdown"] for c in calls)
+    assert "".join(joined.split()) == "".join(big.split())
+
+
+@pytest.mark.asyncio
+async def test_send_delta_rich_uses_native_drafts() -> None:
+    """T1.2: con rich_messages, el streaming usa sendRichMessageDraft con
+    draft_id estable por stream y fija el mensaje con sendRichMessage."""
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True, token="123:abc", allow_from=["*"],
+            rich_messages=True, stream_edit_interval=0.1,
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock()
+
+    await channel.send_delta("123", "hola ", stream_id="s:0")
+    await asyncio.sleep(0.15)
+    await channel.send_delta("123", "mundo", stream_id="s:0")
+
+    draft_calls = [
+        c for c in channel._app.bot.do_api_request.call_args_list
+        if c.args[0] == "sendRichMessageDraft"
+    ]
+    assert len(draft_calls) == 2
+    draft_ids = {c.kwargs["api_kwargs"]["draft_id"] for c in draft_calls}
+    assert len(draft_ids) == 1 and 0 not in draft_ids
+    # El contenido acumulado viaja en el draft.
+    assert draft_calls[-1].kwargs["api_kwargs"]["rich_message"]["markdown"] == "hola mundo"
+    # No se envió ningún mensaje real durante el streaming.
+    assert channel._app.bot.sent_messages == []
+
+    await channel.send_delta("123", "", stream_id="s:0", stream_end=True)
+
+    final_calls = [
+        c for c in channel._app.bot.do_api_request.call_args_list
+        if c.args[0] == "sendRichMessage"
+    ]
+    assert len(final_calls) == 1
+    assert final_calls[0].kwargs["api_kwargs"]["rich_message"]["markdown"] == "hola mundo"
+    assert "123" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
+async def test_send_delta_rich_falls_back_to_legacy_when_drafts_unsupported() -> None:
+    """T1.2: si sendRichMessageDraft no está disponible, se cae al path
+    legacy (send + edit) y se hace latch-off del rich."""
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock(side_effect=BadRequest("Method not found"))
+
+    await channel.send_delta("123", "hola", stream_id="s:0")
+
+    assert channel._rich_send_disabled is True
+    assert len(channel._app.bot.sent_messages) == 1  # preview legacy enviado
+    assert channel._stream_bufs["123"].message_id == 1
+
+
+@pytest.mark.asyncio
+async def test_send_delta_without_rich_keeps_legacy_path() -> None:
+    """T1.2: sin rich_messages, el streaming sigue usando send + edit."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock()
+
+    await channel.send_delta("123", "hola", stream_id="s:0")
+    await channel.send_delta("123", " mundo", stream_id="s:0")
+
+    channel._app.bot.do_api_request.assert_not_called()
+    assert len(channel._app.bot.sent_messages) == 1
+    assert channel._stream_bufs["123"].message_id == 1
+
+
+@pytest.mark.asyncio
+async def test_send_reply_keyboard_on_final_chunk() -> None:
+    """T1.3: reply_keyboard se adjunta como ReplyKeyboardMarkup (one_time +
+    placeholder) solo en el último chunk del mensaje."""
+    from telegram import ReplyKeyboardMarkup
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    long_text = "línea\n" * 700  # fuerza múltiples chunks (> 4000 chars)
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content=long_text,
+            reply_keyboard=[["Sí", "No"], ["Cancelar"]],
+        )
+    )
+
+    assert len(channel._app.bot.sent_messages) > 1
+    for i, sent in enumerate(channel._app.bot.sent_messages):
+        if i < len(channel._app.bot.sent_messages) - 1:
+            assert sent.get("reply_markup") is None
+        else:
+            markup = sent.get("reply_markup")
+            assert isinstance(markup, ReplyKeyboardMarkup)
+            assert markup.one_time_keyboard is True
+            assert markup.input_field_placeholder == "Elige una opción…"
+            labels = [btn.text for row in markup.keyboard for btn in row]
+            assert labels == ["Sí", "No", "Cancelar"]
+
+
+@pytest.mark.asyncio
+async def test_send_menu_commands_uses_chat_scope() -> None:
+    """T1.4: menu_commands registra setMyCommands con scope por chat; un
+    fallo del registro no rompe el envío."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.set_my_commands = AsyncMock()
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="Usa el menú",
+            menu_commands=[
+                {"command": "agenda", "description": "Ver agenda de hoy"},
+                {"command": "compras", "description": "Lista de compras"},
+            ],
+        )
+    )
+
+    channel._app.bot.set_my_commands.assert_awaited_once()
+    kwargs = channel._app.bot.set_my_commands.call_args.kwargs
+    assert kwargs["scope"] == {"type": "chat", "chat_id": 123}
+    assert [c.command for c in kwargs["commands"]] == ["agenda", "compras"]
+
+    # Fallo del registro: best-effort, no lanza.
+    channel._app.bot.set_my_commands = AsyncMock(side_effect=RuntimeError("boom"))
+    await channel.send(
+        OutboundMessage(channel="telegram", chat_id="123", content="ok", menu_commands=[{"command": "x", "description": "y"}])
+    )
+    assert channel._app.bot.sent_messages[-1]["text"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_send_ephemeral_falls_back_when_unsupported() -> None:
+    """T1.5: ephemeral=True envía is_ephemeral + receiver_user_id; si el
+    servidor no lo soporta (BadRequest), reintenta sin ephemeral."""
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.send_message = AsyncMock(
+        side_effect=[BadRequest("Bad Request: is_ephemeral is not supported"), None]
+    )
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="respuesta privada",
+            metadata={"user_id": 12345},
+            ephemeral=True,
+        )
+    )
+
+    calls = channel._app.bot.send_message.call_args_list
+    assert len(calls) == 2
+    assert calls[0].kwargs.get("is_ephemeral") is True
+    assert calls[0].kwargs.get("receiver_user_id") == 12345
+    assert "is_ephemeral" not in calls[1].kwargs
+    assert calls[1].kwargs["text"] == "respuesta privada"
