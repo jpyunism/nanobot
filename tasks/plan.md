@@ -1,114 +1,110 @@
-# Plan: Telegram Generative UI — Rich Messages, streaming nativo y teclados generados por el agente
+# Plan: Telegram Thinking Blocks — razonamiento interno del agente visible en el chat
 
-Spec: `docs/spec-telegram-generative-ui.md`
+Spec: `docs/spec-telegram-thinking-blocks.md`
 
 ## Componentes y dependencias
 
 ```
 TelegramChannel (runtime.py)
-   ├── _try_send_rich()          → + reply_markup, is_ephemeral/receiver_user_id, chunks rich >4096
-   ├── send_delta()              → + sendRichMessageDraft (draft_id por stream) + fix final
-   ├── _StreamBuf                → + draft_id: int | None
-   ├── _send_reply_keyboard()    → nuevo: ReplyKeyboardMarkup (one_time + placeholder)
-   ├── _set_chat_menu_commands() → nuevo: setMyCommands con scope por chat
-   └── _send_ephemeral()         → nuevo: is_ephemeral + receiver_user_id (fallback sin ephemeral)
+   ├── send_reasoning_delta()   → nuevo: acumula reasoning + draft <tg-thinking> (privado) o blockquote expandible (legacy)
+   ├── send_reasoning_end()     → nuevo: cierra segmento de reasoning
+   ├── send_delta()             → + draft rich con thinking + contenido; fijación con draft_id en stream_end
+   ├── _StreamBuf               → + reasoning: str, using_draft: bool, draft_expires_at: float
+   ├── _finalize_stream()       → extraído de stream_end: rich (draft_id o editMessageText) + <details> reasoning
+   └── _fallback_legacy()       → nuevo: expiración de draft / grupos / latch-off
 
-OutboundMessage (bus/events.py) → + rich: bool|None, reply_keyboard, menu_commands, ephemeral
-MessageTool (agent/tools/message.py) → + rich, reply_keyboard, menu_commands, ephemeral (validación)
-manifest.py + webui/index.ts → + richMessages en setup del canal
+ChannelManager (manager.py)     → ya despacha reasoning si show_reasoning (no se toca)
+AgentRunner (runner.py)         → ya emite reasoning (no se toca)
 ```
 
 ## Orden de implementación
 
 ### T1: Tests primero (TDD) — `nanobot/channels/telegram/tests/test_telegram_channel.py`
 
-1. **T1.1 Rich send extendido**
-   - `_try_send_rich` envía markdown + reply_markup (payload dict con `reply_markup`)
-   - `_try_send_rich` con `is_ephemeral=True` + `receiver_user_id` en el payload
-   - Rich send con contenido > 30.000 chars → chunks rich (2+ llamadas a
-     `sendRichMessage`)
-   - Fallback legacy con latch-off (ya existe, se mantiene verde)
-2. **T1.2 Draft streaming**
-   - `send_delta` con `rich_messages=True`: primer delta → `sendRichMessageDraft` con
-     `draft_id` no nulo; deltas siguientes → mismo `draft_id`, contenido acumulado
-   - `stream_end` → `sendRichMessage` con el texto final; buffer limpiado
-   - `send_delta` sin `rich_messages` → path legacy (send + edit) intacto
-   - `sendRichMessageDraft` falla (BadRequest "Method not found") → fallback al path
-     legacy (send_message + edit_message_text)
-3. **T1.3 Reply keyboard**
-   - `send()` con `reply_keyboard=[["A","B"],["C"]]` → `send_message` con
-     `reply_markup=ReplyKeyboardMarkup` (one_time_keyboard=True,
-     input_field_placeholder presente)
-   - Reply keyboard solo en el último chunk (mensaje final), no en chunks intermedios
-4. **T1.4 Comandos dinámicos**
-   - `send()` con `menu_commands=[{command, description}]` → `setMyCommands` llamado
-     con `scope={"type": "chat", "chat_id": ...}`
-   - `setMyCommands` falla → no lanza (best-effort, log debug)
-5. **T1.5 Ephemeral**
-   - `send()` con `ephemeral=True` → `send_message` con `is_ephemeral=True` +
-     `receiver_user_id`
-   - BadRequest por ephemeral no soportado → reintento sin `is_ephemeral` (mensaje
-     normal enviado)
-6. **T1.6 Tool message**
-   - `MessageTool.execute` con `rich=True`, `reply_keyboard`, `menu_commands`,
-     `ephemeral=True` → `OutboundMessage` con los campos seteados
-   - Validación: `reply_keyboard` debe ser list[list[str]] (error si no)
+1. **T1.1 Reasoning delta acumula y abre draft**
+   - `send_reasoning_delta` con `rich_messages=True` + chat privado → primer delta
+     llama `sendRichMessageDraft` con `draft_id` no nulo y markdown con
+     `<tg-thinking>…</tg-thinking>`
+   - Deltas siguientes → mismo `draft_id`, reasoning acumulado
+   - `send_reasoning_end` → cierra el segmento (no envía nada nuevo; el draft queda
+     con el thinking completo)
+2. **T1.2 Reasoning en legacy (grupos / rich off)**
+   - `send_reasoning_delta` con `rich_messages=False` → preview legacy
+     (`send_message` + `edit_message_text`) con `<blockquote expandable>`
+   - `send_reasoning_end` → no-op (el blockquote se cierra solo)
+3. **T1.3 Fijación con draft_id + details final**
+   - `stream_end` con draft activo → `sendRichMessage` con `draft_id` (reemplaza el
+     draft) y markdown final = contenido + `<details><summary>🧠 Razonamiento</summary>…</details>`
+   - `reply_parameters` conservado en el payload de fijación
+   - Buffer limpiado tras fijar
+4. **T1.4 Fallback por expiración del draft**
+   - Draft con `draft_expires_at` vencido en `stream_end` → path legacy
+     (`send_message` + `edit_message_text`) con el contenido acumulado
+5. **T1.5 Fallback por fallo de fijación**
+   - `sendRichMessage` falla al fijar (BadRequest) → fallback legacy con el contenido
+     acumulado; latch-off `_rich_send_disabled` si es error de capacidad
+6. **T1.6 show_reasoning=False**
+   - `send_reasoning_delta` con `show_reasoning=False` → no-op (sin draft, sin
+     acumulación)
+7. **T1.7 Sin reasoning (regresión)**
+   - `send_delta` sin reasoning previo → path actual intacto (preview legacy +
+     editMessageText rich in-place en stream_end, sin `<details>`)
 
 ### T2: Implementación en `nanobot/channels/telegram/runtime.py`
 
-1. `_try_send_rich()`: acepta `is_ephemeral`/`receiver_user_id`; split rich en 30.000
-   chars (loop de chunks con `sendRichMessage` por chunk)
-2. `send_delta()`: path draft nativo
-   - `_StreamBuf.draft_id: int | None`
-   - Primer delta rich: `sendRichMessageDraft(chat_id, draft_id, rich_message={markdown})`
-   - Deltas rich: mismo draft_id, contenido acumulado, throttle `stream_edit_interval`
-   - `stream_end` rich: `sendRichMessage` con texto final; pop buffer
-   - Fallback: si `sendRichMessageDraft` lanza BadRequest de capacidad → latch-off
-     `_rich_send_disabled` + path legacy
-3. `_send_reply_keyboard()`: construye `ReplyKeyboardMarkup` y lo adjunta al último
-   chunk del mensaje final
-4. `_set_chat_menu_commands()`: `setMyCommands(commands, scope={"type": "chat",
-   "chat_id": chat_id})` best-effort
-5. `_send_ephemeral()`: `send_message(..., is_ephemeral=True, receiver_user_id=...)`;
-   BadRequest → reintento sin ephemeral
-6. `send()`: orquesta los nuevos campos (rich, reply_keyboard, menu_commands,
-   ephemeral) según el `OutboundMessage`
+1. `_StreamBuf` + `reasoning: str = ""`, `using_draft: bool = False`,
+   `draft_expires_at: float = 0.0`
+2. `send_reasoning_delta(chat_id, delta, metadata, *, stream_id)`:
+   - Si `not self.show_reasoning` → return
+   - Acumula en `buf.reasoning` (crea buffer si no existe, con `stream_id`)
+   - Privado + rich habilitado → `sendRichMessageDraft` con `draft_id` estable
+     (reutiliza `_next_draft_id()` si existe o genera uno por stream) y markdown
+     `<tg-thinking>{reasoning}</tg-thinking>`; setea `using_draft=True`,
+     `draft_expires_at = now + 25s` (margen bajo el límite de 30s)
+   - Legacy → preview `send_message` con `<blockquote expandable>{reasoning}</blockquote>`
+     (HTML) y `edit_message_text` en deltas siguientes (throttle `stream_edit_interval`)
+3. `send_reasoning_end(chat_id, metadata, *, stream_id)`:
+   - Marca `buf.reasoning_open = False`; si hay draft, lo deja como está (el
+     `stream_end` fija con el thinking completo)
+4. `send_delta()`:
+   - Si `buf.using_draft` y hay reasoning acumulado → el draft se actualiza con
+     `<tg-thinking>…</tg-thinking>` + contenido parcial (mismo `draft_id`)
+   - Si `buf.using_draft` y el draft expiró (`now > draft_expires_at`) → switch a
+     legacy: `send_message` con el contenido acumulado + reasoning en blockquote
+   - `stream_end` → `_finalize_stream()` (ver T2.5)
+5. `_finalize_stream()` (extraído del bloque `stream_end` actual):
+   - Draft activo y no expirado → `sendRichMessage` con `draft_id`,
+     `rich_message.markdown` = contenido + `<details><summary>🧠 Razonamiento</summary>…</details>`
+     (si hay reasoning), `reply_parameters` si aplica, `reply_markup` si hay
+     reply_keyboard staged
+   - Sin draft → path actual (editMessageText rich in-place o legacy HTML)
+   - Fallos → fallback legacy con contenido acumulado
+6. `_fallback_legacy()`: envía el contenido acumulado por `send_message` +
+   `edit_message_text` (reutiliza la lógica existente del path legacy)
+7. Truncado: `buf.reasoning` se recorta a 8.000 chars (constante
+   `TELEGRAM_REASONING_MAX_LEN`) para no inflar el mensaje final
 
-### T3: Bus + tool
-
-1. `nanobot/bus/events.py`: `OutboundMessage` + `rich: bool | None = None`,
-   `reply_keyboard: list[list[str]] = field(default_factory=list)`,
-   `menu_commands: list[dict] = field(default_factory=list)`,
-   `ephemeral: bool = False`
-2. `nanobot/agent/tools/message.py`: parámetros `rich`, `reply_keyboard`,
-   `menu_commands`, `ephemeral` con validación (reply_keyboard list[list[str]],
-   menu_commands list[dict] con `command`/`description` strings)
-
-### T4: Setup del canal (manifest + WebUI)
-
-1. `nanobot/channels/telegram/manifest.py`: campo `richMessages` en `SETUP_SPEC`
-   (bool, default false)
-2. `nanobot/channels/telegram/webui/index.ts`: field `channels.telegram.richMessages`
-   en `setup.fields`
-
-### T5: Verificación final + PR
+### T3: Verificación final + PR
 
 1. `pytest nanobot/channels/telegram/tests/test_telegram_channel.py -v` verde
-2. `ruff check nanobot/channels/telegram/ nanobot/agent/tools/message.py nanobot/bus/events.py`
+2. `ruff check nanobot/channels/telegram/`
 3. Smoke: `pytest tests/ -q` (suite completa)
-4. Commit conventional (`feat(telegram): ...`), push al fork, PR a madkoding/nanobot
-   con tests (requisito del PR Guardian)
+4. Sync a los 3 site-packages del gateway (pyenv, uv tool, uv cache)
+5. Commit conventional (`feat(telegram): thinking blocks para reasoning`), push al
+   fork, PR a madkoding/nanobot con tests (requisito del PR Guardian)
 
 ## Riesgos y mitigaciones
 
-- **PTB sin tipos rich (22.8)**: payloads dict vía `do_api_request` (patrón existente);
-  si PTB 23 sale con tipos, migrar después sin cambio de contrato.
-- **Draft expirado (30 s)**: el fix final con `sendRichMessage` siempre envía el
-  mensaje completo; el draft se descarta solo.
-- **Servidor viejo**: latch-off `_rich_send_disabled` + fallback legacy (ya existe).
+- **Draft expirado (30 s)**: `draft_expires_at` con margen de 25 s; al expirar se
+  switcha a legacy con el contenido acumulado (nunca se pierde texto).
+- **Draft huérfano**: fijación **siempre** con `draft_id` en `stream_end`; si el
+  stream se corta, el draft expira solo (~30 s) sin dejar basura permanente.
+- **Servidor viejo (sin rich)**: latch-off `_rich_send_disabled` + fallback legacy
+  (blockquote expandible) — ya existe el patrón.
+- **Grupos**: drafts solo en chats privados; en grupos legacy directo.
 - **Flood control**: throttle con `stream_edit_interval` (ya existe) + retry con
   backoff en `_call_with_retry`.
-- **Ephemeral en servidor 10.1**: BadRequest → reintento sin `is_ephemeral`
-  (best-effort, sin latch).
-- **Reply keyboard en streaming**: solo en stream_end (nunca en previews) para no
-  confundir al usuario con teclados que cambian.
+- **Reasoning largo**: truncado a 8.000 chars (constante) para no inflar el mensaje
+  final ni pasarse del límite rich (32.768).
+- **Reply keyboard en streaming**: solo en stream_end (ya implementado); el
+  reasoning no lo interfiere (REQ-006).

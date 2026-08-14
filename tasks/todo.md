@@ -1,80 +1,80 @@
-# Tasks: Telegram Generative UI — Rich Messages, streaming nativo y teclados generados por el agente
+# Tasks: Telegram Thinking Blocks — razonamiento interno del agente visible en el chat
 
-Spec: `docs/spec-telegram-generative-ui.md` · Plan: `tasks/plan.md`
+Spec: `docs/spec-telegram-thinking-blocks.md` · Plan: `tasks/plan.md`
 
 ## Tareas
 
-### T1: Tests de regresión — `nanobot/channels/telegram/tests/test_telegram_channel.py`
+### T1: Tests primero (TDD) — `nanobot/channels/telegram/tests/test_telegram_channel.py`
 
-- [x] **T1.1 Rich send extendido**
-  - Acceptance: `_try_send_rich` envía markdown + reply_markup; con `is_ephemeral=True` + `receiver_user_id` en payload; contenido > 30.000 chars → chunks rich (2+ llamadas)
+- [ ] **T1.1 Reasoning delta acumula y abre draft**
+  - Acceptance: `send_reasoning_delta` con `rich_messages=True` + chat privado → primer delta llama `sendRichMessageDraft` con `draft_id` no nulo y markdown con `<tg-thinking>…</tg-thinking>`; deltas siguientes → mismo `draft_id`, reasoning acumulado; `send_reasoning_end` cierra el segmento sin enviar nada nuevo
   - Verify: `pytest nanobot/channels/telegram/tests/test_telegram_channel.py -v` verde
   - Files: `nanobot/channels/telegram/tests/test_telegram_channel.py`
 
-- [x] **T1.2 Draft streaming**
-  - Acceptance: `send_delta` rich → `sendRichMessageDraft` con draft_id no nulo y estable; `stream_end` → `sendRichMessage` final; fallback legacy si el servidor no soporta drafts; path legacy intacto sin rich
+- [ ] **T1.2 Reasoning en legacy (grupos / rich off)**
+  - Acceptance: `send_reasoning_delta` con `rich_messages=False` → preview legacy (`send_message` + `edit_message_text`) con `<blockquote expandable>`; `send_reasoning_end` → no-op
   - Verify: `pytest nanobot/channels/telegram/tests/test_telegram_channel.py -v` verde
   - Files: `nanobot/channels/telegram/tests/test_telegram_channel.py`
 
-- [x] **T1.3 Reply keyboard**
-  - Acceptance: `send()` con `reply_keyboard` → `ReplyKeyboardMarkup` (one_time + placeholder) en el último chunk; no en chunks intermedios
+- [ ] **T1.3 Fijación con draft_id + details final**
+  - Acceptance: `stream_end` con draft activo → `sendRichMessage` con `draft_id` (reemplaza el draft) y markdown final = contenido + `<details><summary>🧠 Razonamiento</summary>…</details>`; `reply_parameters` conservado; buffer limpiado
   - Verify: `pytest nanobot/channels/telegram/tests/test_telegram_channel.py -v` verde
   - Files: `nanobot/channels/telegram/tests/test_telegram_channel.py`
 
-- [x] **T1.4 Comandos dinámicos**
-  - Acceptance: `send()` con `menu_commands` → `setMyCommands` con scope `{"type": "chat", "chat_id": ...}`; fallo de `setMyCommands` no lanza
+- [ ] **T1.4 Fallback por expiración del draft**
+  - Acceptance: draft con `draft_expires_at` vencido en `stream_end` → path legacy (`send_message` + `edit_message_text`) con el contenido acumulado
   - Verify: `pytest nanobot/channels/telegram/tests/test_telegram_channel.py -v` verde
   - Files: `nanobot/channels/telegram/tests/test_telegram_channel.py`
 
-- [x] **T1.5 Ephemeral**
-  - Acceptance: `send()` con `ephemeral=True` → `is_ephemeral` + `receiver_user_id`; BadRequest → reintento sin ephemeral (mensaje normal)
+- [ ] **T1.5 Fallback por fallo de fijación**
+  - Acceptance: `sendRichMessage` falla al fijar (BadRequest) → fallback legacy con el contenido acumulado; latch-off `_rich_send_disabled` si es error de capacidad
   - Verify: `pytest nanobot/channels/telegram/tests/test_telegram_channel.py -v` verde
   - Files: `nanobot/channels/telegram/tests/test_telegram_channel.py`
 
-- [x] **T1.6 Tool message**
-  - Acceptance: `MessageTool.execute` con `rich`/`reply_keyboard`/`menu_commands`/`ephemeral` → `OutboundMessage` con campos seteados; validación de tipos (error si `reply_keyboard` no es list[list[str]])
-  - Verify: `pytest nanobot/channels/telegram/tests/test_telegram_channel.py -v` verde (o test del tool si existe)
+- [ ] **T1.6 show_reasoning=False**
+  - Acceptance: `send_reasoning_delta` con `show_reasoning=False` → no-op (sin draft, sin acumulación)
+  - Verify: `pytest nanobot/channels/telegram/tests/test_telegram_channel.py -v` verde
+  - Files: `nanobot/channels/telegram/tests/test_telegram_channel.py`
+
+- [ ] **T1.7 Sin reasoning (regresión)**
+  - Acceptance: `send_delta` sin reasoning previo → path actual intacto (preview legacy + editMessageText rich in-place en stream_end, sin `<details>`)
+  - Verify: `pytest nanobot/channels/telegram/tests/test_telegram_channel.py -v` verde
   - Files: `nanobot/channels/telegram/tests/test_telegram_channel.py`
 
 ### T2: Implementación en `nanobot/channels/telegram/runtime.py`
 
-- [x] **T2.1 `_try_send_rich()` extendido**
-  - Acceptance: acepta `is_ephemeral`/`receiver_user_id`; split rich en 30.000 chars (loop de chunks)
-  - Verify: T1.1 verde + `ruff check` limpio
+- [ ] **T2.1 `_StreamBuf` + reasoning**
+  - Acceptance: campos `reasoning: str = ""`, `using_draft: bool = False`, `draft_expires_at: float = 0.0`
   - Files: `nanobot/channels/telegram/runtime.py`
 
-- [x] **T2.2 `send_delta()` con drafts nativos**
-  - Acceptance: `_StreamBuf.draft_id`; primer delta rich → `sendRichMessageDraft`; deltas → mismo draft_id con throttle; `stream_end` → `sendRichMessage` final; fallback legacy si falla
-  - Verify: T1.2 verde + `ruff check` limpio
+- [ ] **T2.2 `send_reasoning_delta`**
+  - Acceptance: acumula en `buf.reasoning`; privado + rich → `sendRichMessageDraft` con `draft_id` estable y `<tg-thinking>`; legacy → blockquote expandible; truncado a 8.000 chars
   - Files: `nanobot/channels/telegram/runtime.py`
 
-- [x] **T2.3 Reply keyboard + comandos dinámicos + ephemeral**
-  - Acceptance: `_send_reply_keyboard()` (one_time + placeholder, solo último chunk); `_set_chat_menu_commands()` (scope por chat, best-effort); `_send_ephemeral()` (fallback sin ephemeral); `send()` orquesta los campos nuevos
-  - Verify: T1.3/T1.4/T1.5 verde + `ruff check` limpio
+- [ ] **T2.3 `send_reasoning_end`**
+  - Acceptance: marca fin del segmento; no envía nada nuevo
   - Files: `nanobot/channels/telegram/runtime.py`
 
-### T3: Bus + tool message
+- [ ] **T2.4 `send_delta` con draft**
+  - Acceptance: draft activo → actualiza con thinking + contenido parcial; draft expirado → switch a legacy
+  - Files: `nanobot/channels/telegram/runtime.py`
 
-- [x] **T3.1 `OutboundMessage` extendido**
-  - Acceptance: campos `rich: bool | None`, `reply_keyboard: list[list[str]]`, `menu_commands: list[dict]`, `ephemeral: bool` con defaults
-  - Verify: `ruff check nanobot/bus/events.py` limpio
-  - Files: `nanobot/bus/events.py`
+- [ ] **T2.5 `_finalize_stream`**
+  - Acceptance: draft activo → `sendRichMessage` con `draft_id` + `<details>` reasoning; sin draft → path actual; fallos → fallback legacy
+  - Files: `nanobot/channels/telegram/runtime.py`
 
-- [x] **T3.2 `MessageTool` extendido**
-  - Acceptance: parámetros `rich`, `reply_keyboard`, `menu_commands`, `ephemeral` con validación de tipos
-  - Verify: T1.6 verde + `ruff check` limpio
-  - Files: `nanobot/agent/tools/message.py`
+- [ ] **T2.6 `_fallback_legacy`**
+  - Acceptance: envía contenido acumulado por `send_message` + `edit_message_text`
+  - Files: `nanobot/channels/telegram/runtime.py`
 
-### T4: Setup del canal (manifest + WebUI)
+### T3: Verificación final + PR
 
-- [x] **T4.1 Manifest + WebUI**
-  - Acceptance: campo `richMessages` en `SETUP_SPEC` y en `webui/index.ts` del canal
-  - Verify: revisión manual del JSON de setup
-  - Files: `nanobot/channels/telegram/manifest.py`, `nanobot/channels/telegram/webui/index.ts`, `nanobot/channels/telegram/webui/locales/*.json`
+- [ ] **T3.1 Suite completa**
+  - Acceptance: `pytest nanobot/channels/telegram/tests/ -q` verde + `ruff check nanobot/channels/telegram/` limpio + smoke `pytest tests/ -q`
+  - Verify: comandos de verificación
+  - Files: —
 
-### T5: Verificación final + PR
-
-- [x] **T5.1 Verificación + PR**
-  - Acceptance: pytest (nuevo + smoke), ruff verdes; branch en fork; PR a madkoding/nanobot con tests
-  - Verify: suite completa + PR #22 abierto (checks verdes, merge CLEAN)
-  - Files: — (git ops)
+- [ ] **T3.2 Sync + commit + push**
+  - Acceptance: sync a los 3 site-packages del gateway; commit conventional (`feat(telegram): thinking blocks para reasoning`); push a `feature/telegram-generative-ui`
+  - Verify: `git log --oneline -3` + `git push origin feature/telegram-generative-ui`
+  - Files: —
