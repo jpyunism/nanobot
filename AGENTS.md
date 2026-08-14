@@ -167,6 +167,17 @@ Messages flow through an async `MessageBus` (`nanobot/bus/queue.py`) that decoup
 - Security boundaries: [`.agent/security.md`](.agent/security.md)
 - Common gotchas: [`.agent/gotchas.md`](.agent/gotchas.md)
 
+## Telegram Rich Messages (SDD specs)
+
+When presenting SDD specs, plans, or task lists over Telegram with rich messages (Bot API 10.1+), follow these formatting rules so every instance behaves the same:
+
+- **Tables always at block level** — never inside blockquotes (`>`). Rich markdown does not render pipe tables as tables inside a blockquote; they degrade to plain text with raw pipes. Keep tables at the top level of the message.
+- Use headings for phases (Contexto / Requisitos / Decisiones / Alcance), tables for requirements with IDs (REQ-001…), checklists, collapsible `details` for design decisions, and readable code/JSON blocks.
+- **Approval reply keyboard**: end each spec/plan with a one-row reply keyboard `APROBAR` / `CAMBIOS` / `RECHAZAR` so the user decides with a tap.
+- **Clear the keyboard**: after the decision, send the next reply with `reply_keyboard=[]` (explicit empty list) to dismiss the stuck keyboard (sends `ReplyKeyboardRemove`). `reply_keyboard=None` (default) sends no markup.
+- **menu_commands**: register per-chat dynamic commands (e.g. `/spec`, `/plan`, `/tasks`) to navigate the SDD flow.
+- **ephemeral**: use for transient notices (e.g. "spec updated") to avoid cluttering history.
+
 ## Contribution Flow
 
 See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for contribution flow and PR guidelines.
