@@ -20,7 +20,6 @@ from nanobot.bus.outbound_events import (
     StreamDeltaEvent,
     StreamedResponseEvent,
     StreamEndEvent,
-    outbound_event_from_message,
     outbound_message_for_event,
 )
 from nanobot.bus.queue import MessageBus

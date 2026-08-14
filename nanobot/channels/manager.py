@@ -39,7 +39,6 @@ from nanobot.utils.restart import (
 )
 
 if TYPE_CHECKING:
-    from nanobot.channels.telegram.runtime import TelegramChannel
     from nanobot.channels.whatsapp.group_workspace import ChatWorkspaceRegistry
     from nanobot.session.manager import SessionManager
 
