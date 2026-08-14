@@ -74,12 +74,12 @@ Spec: `docs/spec-telegram-ux-checklists-polls-effects.md` · Plan: `tasks/plan.m
 
 ### T4: Verificación final + PR
 
-- [ ] **T4.1 Suite completa**
+- [x] **T4.1 Suite completa**
   - Acceptance: `pytest nanobot/channels/telegram/tests/ -q` verde + `ruff check` limpio + smoke `pytest tests/ -q`
   - Verify: comandos de verificación
   - Files: —
 
-- [ ] **T4.2 Sync + commit + push**
+- [x] **T4.2 Sync + commit + push**
   - Acceptance: sync a los 3 site-packages; commit conventional (`feat(telegram): task lists rich, polls y efectos`); push a `feature/telegram-generative-ui`
   - Verify: `git log --oneline -3` + `git push origin feature/telegram-generative-ui`
   - Files: —
