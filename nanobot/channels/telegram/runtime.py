@@ -689,6 +689,7 @@ class TelegramChannel(BaseChannel):
         is_ephemeral: bool = False,
         receiver_user_id: int | None = None,
         reply_keyboard_markup=None,
+        draft_id: int | None = None,
     ) -> bool:
         """Attempt sendRichMessage (Bot API 10.1). Returns True on success.
 
@@ -706,6 +707,11 @@ class TelegramChannel(BaseChannel):
                     "markdown": chunk,
                 },
             }
+            if draft_id is not None and i == len(chunks) - 1:
+                # Reemplaza el draft efímero del stream por el mensaje final
+                # (mismo draft_id → Telegram lo sustituye en vez de dejarlo
+                # congelado como preview separado).
+                payload["draft_id"] = draft_id
             if reply_params is not None:
                 # sendRichMessage uses reply_parameters (object), not reply_to_message_id.
                 if hasattr(reply_params, "message_id"):
@@ -1057,6 +1063,7 @@ class TelegramChannel(BaseChannel):
                     self.logger.debug("sendRichMessageDraft final update failed: {}", exc)
                 rich_ok = await self._try_send_rich(
                     int_chat_id, raw_text, reply_params, thread_kwargs, None,
+                    draft_id=buf.draft_id,
                 )
                 if rich_ok:
                     self._stream_bufs.pop(chat_id, None)
