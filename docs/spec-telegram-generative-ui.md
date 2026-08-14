@@ -1,32 +1,53 @@
-# Spec: Telegram Generative UI — Rich Messages + App Actions
+# Spec: Telegram Generative UI — Rich Messages, streaming nativo y teclados generados por el agente
 
 ## Objective
 
 Mejorar el canal Telegram de nanobot para aprovechar **todas las capacidades de UI que
-ofrece un bot de Telegram**, con foco en lo que Telegram llama **Generative UI**: que el
-modelo (el agente) genere interfaces interactivas dinámicamente, no solo texto.
+ofrece un bot de Telegram**, con foco en lo que la comunidad llama **Generative UI**: que
+el modelo (el agente) genere interfaces interactivas dinámicamente, no solo texto.
 
-La base es **Bot API 10.1/10.2 (jun–jul 2026)**:
+Capacidades reales de la Bot API (verificadas en core.telegram.org, jul 2026):
 
-- **Rich Messages** (`sendRichMessage`): mensajes altamente estructurados — headings,
-  tablas nativas, listas y todo-lists, blockquotes, `details` colapsables, fórmulas LaTeX,
-  footnotes, mapas, collages, slideshows, media embebida — hasta 32.768 chars y 500
-  bloques. Es el formato ideal para respuestas de IA (reportes, documentación, menús,
-  resúmenes).
-- **Streaming de Rich Messages** (`sendRichMessageDraft`): el bot muestra un borrador
-  efímero (~30 s) que se anima con cada update del mismo `draft_id`; al terminar se
-  "fija" con `sendRichMessage`. Reemplaza el patrón actual de "enviar mensaje y editarlo"
-  con algo nativo, sin parpadeos y sin dejar mensajes intermedios.
-- **App Actions** (Bot API 9.x, "generative UI" propiamente): el bot declara acciones
-  (`setMyActions` / `setMyDefaultActions`) que Telegram sugiere contextualmente al
-  usuario según el contenido del chat (p.ej. "Ver agenda de hoy", "Crear tarea",
-  "Resumir conversación"). El usuario toca la acción → el bot recibe un
-  `action_updated`/callback con payload → responde. Es UI generada por el agente: las
-  acciones se definen en runtime según el estado del usuario.
+1. **Rich Messages** (Bot API 10.1, 11 jun 2026): `sendRichMessage` — mensajes altamente
+   estructurados: headings (`#`…`######`), tablas nativas con alineación/colspan/rowspan,
+   listas y todo-lists (`- [ ]`), blockquotes y pull quotes, `details` colapsables,
+   fórmulas LaTeX (`<tg-math-block>`), footnotes con anclas, divisores, footers, mapas,
+   collages, slideshows, media embebida (foto/video/audio/voice), bloques `thinking`.
+   Límites: 32.768 chars UTF-8, 500 bloques, 16 niveles de anidación, 50 media, 20
+   columnas de tabla. Acepta **Rich Markdown** (GFM + tags HTML) o **Rich HTML**.
+   Es el formato ideal para respuestas de IA (reportes, documentación, menús, resúmenes).
+2. **Streaming de Rich Messages** (`sendRichMessageDraft`, 10.1): el bot muestra un
+   borrador **efímero** (~30 s) que se anima con cada update del mismo `draft_id`; al
+   terminar se "fija" con `sendRichMessage`. Reemplaza el patrón actual "send + edit"
+   con algo nativo: sin parpadeos, sin mensajes intermedios, sin basura si el stream se
+   corta. `editMessageText` acepta `rich_message` para editar rich ya enviados.
+3. **Inline keyboards** (ya implementado en nanobot, config `inline_keyboards`):
+   botones callback bajo el mensaje. Se extiende: el agente ya puede pedir `buttons` en
+   el tool `message`; se mantiene y se documenta como parte de la UI generativa.
+4. **Reply keyboards** (`ReplyKeyboardMarkup`): teclado que reemplaza el teclado del
+   usuario con opciones predefinidas; soporta `one_time_keyboard`,
+   `input_field_placeholder`, `request_contact`, `request_location`, `request_poll`,
+   `request_user`, `request_chat`. El agente puede ofrecer un menú de opciones sin
+   escribir texto.
+5. **Menu button + comandos dinámicos** (`setChatMenuButton`, `setMyCommands` con
+   scopes): el bot ya registra comandos globales; se agrega la posibilidad de que el
+   agente ajuste el menú por chat (p.ej. acciones contextuales del momento).
+6. **Ephemeral messages** (Bot API 10.2, 14 jul 2026): mensajes visibles solo para un
+   usuario específico en grupos (`is_ephemeral`, `receiver_user_id`,
+   `editEphemeralMessageText`, `deleteEphemeralMessage`). Útil para respuestas privadas
+   en grupos sin spam.
+7. **Deep linking** (`/start <param>`): parámetros de arranque; útil para pairing y
+   atajos (ya soportado por el handler `/start`).
+8. **Reacciones y typing** (ya implementado): `set_message_reaction`, `send_chat_action`.
+
+**No existe** "App Actions" ni `setMyActions` en la Bot API (verificado jul 2026); la
+spec anterior los incluía por error. La UI generativa se logra con Rich Messages +
+teclados + comandos dinámicos + ephemeral.
 
 **Usuario**: operador del gateway (Telegram/WebUI). **Éxito**: las respuestas del bot en
 Telegram usan Rich Messages cuando aportan (tablas/estructura), el streaming usa drafts
-nativos, y el bot ofrece acciones contextuales generadas por el agente.
+nativos, el agente puede ofrecer teclados (inline y reply) y comandos dinámicos, y puede
+responder de forma privada en grupos con ephemeral messages.
 
 ## Assumptions
 
@@ -39,16 +60,16 @@ nativos, y el bot ofrece acciones contextuales generadas por el agente.
 3. El streaming actual (`send_delta`) usa el patrón "send + edit_message_text" con
    previews en texto plano. Los drafts nativos son superiores (efímeros, animados, sin
    parpadeo) y se integran en `send_delta` sin cambiar el contrato del bus.
-4. App Actions requiere que el bot tenga `inline_keyboards`/acciones habilitadas y que el
-   usuario tenga la versión de Telegram que las soporta; el fallback es no hacer nada
-   (las acciones son sugerencias, no bloquean).
-5. El agente genera las acciones: se agrega un parámetro `actions` al tool `message`
-   (y al `OutboundMessage`), el canal las registra vía `setMyActions` con scope por chat.
-6. Los mensajes rich se envían con `reply_parameters` (no `reply_to_message_id`) y
+4. El tool `message` ya expone `buttons` (inline keyboards). Se agregan parámetros
+   nuevos sin romper los existentes: `rich` (bool o markdown explícito), `reply_keyboard`
+   (list[list[str]]), `menu_commands` (list[dict]) y `ephemeral` (bool).
+5. Los mensajes rich se envían con `reply_parameters` (no `reply_to_message_id`) y
    soportan `reply_markup` (inline keyboards) — ya implementado en `_try_send_rich`.
-7. El límite de 32.768 chars de Rich Messages es mayor que el de 4.096 de sendMessage;
+6. El límite de 32.768 chars de Rich Messages es mayor que el de 4.096 de sendMessage;
    el split actual (4000/4096) se mantiene para el path legacy, y el path rich puede
-   enviar chunks más grandes (se define en la spec: 30.000 chars por chunk rich).
+   enviar chunks más grandes (30.000 chars por chunk rich).
+7. Ephemeral messages requieren Bot API 10.2+; si el servidor no lo soporta, se cae a
+   mensaje normal (best-effort, sin latch).
 
 ## Tech Stack
 
@@ -60,41 +81,43 @@ nativos, y el bot ofrece acciones contextuales generadas por el agente.
 
 ```bash
 # Tests nuevos + regresión
-pytest tests/channels/telegram/test_telegram_channel.py -v
-pytest tests/agent/test_message_tool.py -v  # si existe
+pytest nanobot/channels/telegram/tests/test_telegram_channel.py -v
 
 # Lint
-ruff check nanobot/channels/telegram/ nanobot/agent/tools/message.py
+ruff check nanobot/channels/telegram/ nanobot/agent/tools/message.py nanobot/bus/events.py
 
 # Smoke general
-pytest tests/ -v -x -q  # suite completa (excl. whatsapp/neonize si fallan por deps)
+pytest tests/ -q  # suite completa (excl. whatsapp/neonize si fallan por deps)
 ```
 
 ## Project Structure
 
 - `nanobot/channels/telegram/runtime.py` → `TelegramChannel`:
-  - `_try_send_rich()`: extiende para soportar `rich_message` payload completo
-    (markdown + media + blocks) y chunks > 4096.
+  - `_try_send_rich()`: extiende para soportar payload completo (markdown + media +
+    blocks), `reply_markup`, `is_ephemeral`/`receiver_user_id`, y chunks > 4096.
   - `send_delta()`: nuevo path de streaming con `sendRichMessageDraft` (draft_id por
     stream) + fix final con `sendRichMessage`.
-  - `_on_action_updated()`: handler de updates `action_updated` → inyecta el payload
-    como mensaje al bus (como callback query).
-  - `_register_actions()`: `setMyActions` con scope por chat (Bot API 9.x).
-- `nanobot/bus/events.py` → `OutboundMessage`: campo `actions: list[dict]` (opcional).
-- `nanobot/agent/tools/message.py` → `MessageTool`: parámetro `actions` (lista de
-  dicts: `{id, title, description?, icon?}`).
-- `nanobot/channels/telegram/manifest.py` → `SETUP_SPEC`: campo `richMessages` y
-  `appActions` (bool, default false) en el setup del canal.
-- `webui/src/components/settings/channels/...` → campos de configuración del canal
-  Telegram (richMessages, appActions).
+  - `_send_reply_keyboard()`: envía `ReplyKeyboardMarkup` (one_time, placeholder).
+  - `_set_chat_menu_commands()`: `setMyCommands` con scope por chat.
+  - `_send_ephemeral()`: `sendMessage` con `is_ephemeral` + `receiver_user_id`.
+- `nanobot/bus/events.py` → `OutboundMessage`: campos `rich: bool | None`,
+  `reply_keyboard: list[list[str]]`, `menu_commands: list[dict]`, `ephemeral: bool`.
+- `nanobot/agent/tools/message.py` → `MessageTool`: parámetros `rich`, `reply_keyboard`,
+  `menu_commands`, `ephemeral` (con validación).
+- `nanobot/channels/telegram/manifest.py` → `SETUP_SPEC`: campo `richMessages` (ya
+  existe en config; se agrega al setup del canal).
+- `webui/src/components/settings/channels/...` → campo `richMessages` en el setup.
 
 ## Behavior
 
 ### 1. Rich Messages (extensión del fast-path existente)
 
 - `_try_send_rich()` ya envía `{rich_message: {markdown: content}}`. Se extiende:
-  - Si `msg.actions` está presente, se incluyen en el payload (ver §3).
+  - Si `msg.rich` es `True` o el contenido tiene estructura (tablas/headings), se usa
+    el path rich (ya es el comportamiento con `rich_messages=True`).
   - Si el contenido excede 30.000 chars, se parte en chunks rich (límite 32.768).
+  - `reply_markup` se pasa como parámetro (ya soportado).
+  - `is_ephemeral` + `receiver_user_id` se pasan si `msg.ephemeral` (10.2).
 - El latch `_rich_send_disabled` se mantiene: si el servidor no soporta
   `sendRichMessage`, se cae al path legacy (HTML) sin degradar.
 
@@ -109,27 +132,40 @@ pytest tests/ -v -x -q  # suite completa (excl. whatsapp/neonize si fallan por d
   - Si `sendRichMessageDraft` falla (servidor viejo), se cae al path actual
     (send + edit).
 - El draft es efímero: si el stream se corta (crash), no queda mensaje basura.
+- `_StreamBuf` gana `draft_id: int | None` para el streaming rich.
 
-### 3. App Actions (generative UI)
+### 3. Reply keyboards (teclado de respuesta)
 
-- El tool `message` acepta `actions: [{id, title, description?, icon?}]`.
-- `OutboundMessage.actions` se propaga al canal.
-- El canal llama `setMyActions(scope={type: "chat", chat_id}, actions=[...])` con las
-  acciones del último mensaje (se reemplazan por las del mensaje más reciente).
-- El bot recibe updates `action_updated` (allowed_updates incluye "action_updated"
-  cuando `appActions` está habilitado). El handler `_on_action_updated`:
-  - Valida `is_allowed(sender_id)`.
-  - Inyecta al bus un mensaje con contenido `[action: <action_id>]` + metadata
-    (`action_id`, `action_payload`, `user_id`, ...) — el agente lo interpreta y
-    responde.
-- Config: `appActions: bool = False` (opt-in, requiere Bot API 9.x+).
+- El tool `message` acepta `reply_keyboard: list[list[str]]`.
+- `OutboundMessage.reply_keyboard` se propaga al canal.
+- El canal envía `ReplyKeyboardMarkup(keyboard, one_time_keyboard=True,
+  input_field_placeholder="Elige una opción…")` en el mensaje final (no en previews).
+- El tap de un botón envía el texto como mensaje normal → el agente lo recibe y
+  responde (sin handler especial).
 
-### 4. Config del canal
+### 4. Comandos dinámicos por chat (menu button)
+
+- El tool `message` acepta `menu_commands: [{command, description}]`.
+- El canal llama `setMyCommands(commands, scope={type: "chat", chat_id})` (best-effort,
+  log debug si falla).
+- Se registran al enviar el mensaje que los pide; se reemplazan con el siguiente
+  `menu_commands` (o se limpian con lista vacía).
+
+### 5. Ephemeral messages (10.2)
+
+- El tool `message` acepta `ephemeral: bool` (solo tiene sentido en grupos).
+- El canal envía con `is_ephemeral=True` + `receiver_user_id=<user_id del chat>`.
+- Si el servidor no soporta 10.2 (BadRequest), se reintenta sin `is_ephemeral`
+  (best-effort, sin latch).
+
+### 6. Config del canal
 
 - `rich_messages: bool = False` (ya existe) — se mantiene.
-- `app_actions: bool = False` — nuevo, opt-in.
 - `streaming: bool = True` (ya existe) — los drafts se usan solo si `rich_messages`
   está activo.
+- `inline_keyboards: bool = False` (ya existe) — se mantiene para `buttons`.
+- No se agregan configs nuevas: `reply_keyboard`, `menu_commands` y `ephemeral` son
+  por-mensaje (el agente decide).
 
 ## Edge Cases
 
@@ -138,26 +174,30 @@ pytest tests/ -v -x -q  # suite completa (excl. whatsapp/neonize si fallan por d
 - **Draft expirado (30 s)**: si el stream tarda más, Telegram descarta el draft; el
   fix final con `sendRichMessage` igualmente envía el mensaje completo (el draft
   desaparece solo).
-- **Acciones sin soporte**: `setMyActions` falla silenciosamente (log debug); el bot
-  sigue funcionando sin acciones.
-- **`action_updated` sin chat**: se ignora (log warning).
+- **Ephemeral sin soporte (10.1 o menor)**: BadRequest → reintento sin `is_ephemeral`.
+- **`setMyCommands` con scope falla**: log debug; el bot sigue funcionando.
 - **Chunks rich > 32.768**: se parte en 30.000 por chunk (margen de seguridad).
 - **`reply_markup` en rich**: se pasa como parámetro (ya soportado por
   `sendRichMessage`).
+- **Reply keyboard en previews de streaming**: solo se adjunta en el mensaje final
+  (stream_end), nunca en el preview.
 
 ## Acceptance Criteria
 
-1. `_try_send_rich()` envía `sendRichMessage` con markdown y, si hay, `actions` y
-   `reply_markup`; fallback legacy intacto.
+1. `_try_send_rich()` envía `sendRichMessage` con markdown y, si hay, `reply_markup`,
+   `is_ephemeral`/`receiver_user_id`; fallback legacy intacto.
 2. `send_delta()` con `rich_messages=True` usa `sendRichMessageDraft` (draft_id
    estable por stream) y fija con `sendRichMessage` en `stream_end`; sin drafts si
    `rich_messages=False` o si el servidor no lo soporta.
-3. `OutboundMessage.actions` y el parámetro `actions` del tool `message` existen y se
-   propagan al canal.
-4. `_on_action_updated()` inyecta `[action: <id>]` al bus con metadata, validando
-   `is_allowed`.
-5. Config: `app_actions` en `TelegramConfig` + setup del canal (manifest + WebUI).
-6. Tests: (a) rich send con markdown/actions/reply_markup, (b) draft streaming con
-   draft_id estable y fix final, (c) fallback legacy cuando el servidor no soporta
-   rich, (d) action_updated → bus con metadata, (e) `setMyActions` con scope por chat.
-7. `pytest tests/channels/telegram/ -v` verde; `ruff check` limpio.
+3. `OutboundMessage` gana `rich`, `reply_keyboard`, `menu_commands`, `ephemeral` y el
+   tool `message` los expone con validación.
+4. Reply keyboard: se envía `ReplyKeyboardMarkup` con one_time + placeholder en el
+   mensaje final; el tap llega como mensaje normal.
+5. `menu_commands` → `setMyCommands` con scope por chat (best-effort).
+6. `ephemeral=True` → `is_ephemeral` + `receiver_user_id`; fallback sin ephemeral si
+   el servidor no lo soporta.
+7. Tests: (a) rich send con markdown/reply_markup/ephemeral, (b) chunks rich >
+   30.000 chars, (c) fallback legacy con latch-off, (d) draft streaming con draft_id
+   estable + fix final, (e) path legacy intacto sin rich, (f) reply keyboard en
+   stream_end, (g) setMyCommands con scope por chat, (h) ephemeral fallback.
+8. `pytest nanobot/channels/telegram/tests/ -v` verde; `ruff check` limpio.
