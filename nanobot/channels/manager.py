@@ -39,9 +39,9 @@ from nanobot.utils.restart import (
 )
 
 if TYPE_CHECKING:
-    from nanobot.channels.whatsapp.group_workspace import GroupWorkspaceRegistry
-    from nanobot.session.manager import SessionManager
+    from nanobot.channels.whatsapp.group_workspace import ChatWorkspaceRegistry
 
+from nanobot.session.manager import SessionManager
 
 # Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
 _SEND_RETRY_DELAYS = (1, 2, 4)
@@ -221,7 +221,7 @@ class ChannelManager:
         set_registry = getattr(loop, "set_group_workspace_registry", None)
         if not callable(set_registry):
             return
-        merged: dict[str, "GroupWorkspaceRegistry"] = {}
+        merged: dict[str, "ChatWorkspaceRegistry"] = {}
         for channel in self.channels.values():
             registry = getattr(channel, "group_workspace_registry", None)
             if registry is not None:
