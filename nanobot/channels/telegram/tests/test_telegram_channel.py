@@ -2448,6 +2448,49 @@ async def test_send_delta_rich_uses_native_drafts() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_delta_rich_reply_parameters_propagate_to_draft_and_final() -> None:
+    """T1.2: cuando el stream responde a un mensaje (metadata.message_id),
+    el draft y el sendRichMessage final llevan reply_parameters."""
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True, token="123:abc", allow_from=["*"],
+            rich_messages=True, stream_edit_interval=0.1,
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock()
+
+    meta = {"message_id": 10}
+    await channel.send_delta("123", "hola ", stream_id="s:0", metadata=meta)
+    await asyncio.sleep(0.15)
+    await channel.send_delta("123", "mundo", stream_id="s:0", metadata=meta)
+
+    draft_calls = [
+        c for c in channel._app.bot.do_api_request.call_args_list
+        if c.args[0] == "sendRichMessageDraft"
+    ]
+    assert len(draft_calls) == 2
+    for c in draft_calls:
+        rp = c.kwargs["api_kwargs"].get("reply_parameters")
+        assert rp is not None
+        assert rp["message_id"] == 10
+        assert rp["allow_sending_without_reply"] is True
+
+    await channel.send_delta("123", "", stream_id="s:0", stream_end=True, metadata=meta)
+
+    final_calls = [
+        c for c in channel._app.bot.do_api_request.call_args_list
+        if c.args[0] == "sendRichMessage"
+    ]
+    assert len(final_calls) == 1
+    rp = final_calls[0].kwargs["api_kwargs"].get("reply_parameters")
+    assert rp is not None
+    assert rp["message_id"] == 10
+    assert "123" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
 async def test_send_delta_rich_falls_back_to_legacy_when_drafts_unsupported() -> None:
     """T1.2: si sendRichMessageDraft no está disponible, se cae al path
     legacy (send + edit) y se hace latch-off del rich."""

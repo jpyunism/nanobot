@@ -1171,16 +1171,22 @@ class TelegramChannel(BaseChannel):
         if rich_streaming and (
             buf.last_edit == 0.0 or (now - buf.last_edit) >= self.config.stream_edit_interval
         ):
+            draft_kwargs: dict[str, Any] = {
+                "chat_id": int_chat_id,
+                "draft_id": buf.draft_id,
+                "rich_message": {"markdown": buf.text},
+                **thread_kwargs,
+            }
+            if reply_to_message_id := meta.get("message_id"):
+                draft_kwargs["reply_parameters"] = {
+                    "message_id": int(reply_to_message_id),
+                    "allow_sending_without_reply": True,
+                }
             try:
                 await self._call_with_retry(
                     self._app.bot.do_api_request,
                     "sendRichMessageDraft",
-                    api_kwargs={
-                        "chat_id": int_chat_id,
-                        "draft_id": buf.draft_id,
-                        "rich_message": {"markdown": buf.text},
-                        **thread_kwargs,
-                    },
+                    api_kwargs=draft_kwargs,
                 )
                 buf.last_edit = now
                 return
