@@ -1063,7 +1063,12 @@ class TelegramChannel(BaseChannel):
         except Exception as exc:
             self.logger.warning("sendRichMessage failed for task list: {}", exc)
             return
-        message_id = getattr(result, "message_id", None)
+        # do_api_request devuelve un dict (resultado crudo de la API), no un
+        # objeto PTB: soportar ambos para extraer el message_id.
+        if isinstance(result, dict):
+            message_id = result.get("message_id")
+        else:
+            message_id = getattr(result, "message_id", None)
         if message_id is not None:
             self._task_lists[str(chat_id)] = {
                 "message_id": message_id,
