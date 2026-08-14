@@ -143,6 +143,12 @@ class ChannelManager:
         self._watchdog_task: asyncio.Task | None = None
         self._started = False
         self._origin_reply_fingerprints: dict[tuple[str, str, str], str] = {}
+        # Streams currently active per (channel, chat_id). A stream is added
+        # on the first delta and removed on stream_end. Used to detect
+        # duplicate sends: if a stream is active for a chat, the runner also
+        # emits a final OutboundMessage with the streamed content, and we
+        # must drop it so the user doesn't see the reply twice.
+        self._active_streams: set[tuple[str, str]] = set()
 
         self._init_channels()
         self._wire_group_workspaces_to_agent_loop()
@@ -857,8 +863,7 @@ class ChannelManager:
             resuming=event.resuming if isinstance(event, StreamEndEvent) else False,
         )
 
-    @staticmethod
-    async def _send_once(channel: BaseChannel, msg: OutboundMessage) -> None:
+    async def _send_once(self, channel: BaseChannel, msg: OutboundMessage) -> None:
         """Send one outbound message without retry policy."""
         event = outbound_event_from_message(msg)
         if isinstance(event, ProgressEvent) and event.reasoning_end:
@@ -876,19 +881,20 @@ class ChannelManager:
                 msg.metadata,
             )
         elif isinstance(event, StreamDeltaEvent):
+            self._active_streams.add((msg.channel, msg.chat_id))
             await ChannelManager._send_stream_event(channel, msg, event)
         elif isinstance(event, StreamEndEvent):
             await ChannelManager._send_stream_event(channel, msg, event)
+            self._active_streams.discard((msg.channel, msg.chat_id))
         elif not isinstance(event, StreamedResponseEvent):
-            # Channels opted into streaming must NEVER receive the final
-            # message as a plain send(): the runner emits stream deltas for
-            # the full content and a StreamedResponseEvent to mark the final
-            # text. A fallback send here would create a duplicate message
-            # above the streaming preview.
-            wants_stream = bool((msg.metadata or {}).get("_wants_stream"))
-            if wants_stream:
+            # If a streaming reply is active for this chat, the runner will
+            # also emit a final OutboundMessage with the streamed content
+            # (without StreamedResponseEvent). Drop it so the user doesn't
+            # get the reply twice. Channels that don't stream (no prior
+            # deltas) continue through the legacy send path.
+            if (msg.channel, msg.chat_id) in self._active_streams:
                 logger.debug(
-                    "Dropping legacy outbound to {}:{} (channel wants stream)",
+                    "Dropping legacy outbound to {}:{} (stream active)",
                     msg.channel, msg.chat_id,
                 )
                 return
