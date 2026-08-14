@@ -46,6 +46,8 @@ TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
 # raw markdown into chunks whose rendered HTML fits Telegram's true 4096-char
 # boundary so the final rendered message never overflows.
 TELEGRAM_HTML_MAX_LEN = 4096
+TELEGRAM_REASONING_MAX_LEN = 8000  # reasoning truncado para no inflar el mensaje final
+_DRAFT_TTL_SECONDS = 25.0  # margen bajo el límite de 30 s de sendRichMessageDraft
 # Rich Messages (Bot API 10.1) allow up to 32768 UTF-8 chars; we chunk at
 # 30000 to leave margin for markdown→HTML expansion and entity overhead.
 TELEGRAM_RICH_MAX_LEN = 30000
@@ -351,6 +353,10 @@ class _StreamBuf:
     last_edit: float = 0.0
     stream_id: str | None = None
     draft_id: int | None = None  # sendRichMessageDraft id (rich streaming)
+    reasoning: str = ""  # razonamiento acumulado (thinking blocks)
+    using_draft: bool = False  # el stream vive en un sendRichMessageDraft
+    draft_expires_at: float = 0.0  # monotonic deadline; pasado → fallback legacy
+    reasoning_open: bool = False  # segmento de reasoning activo
 
 
 @dataclass
@@ -476,6 +482,7 @@ class TelegramChannel(BaseChannel):
         self._inbound_buffers: dict[str, list[_QueuedTelegramUpdate]] = {}
         self._inbound_workers: dict[str, asyncio.Task] = {}
         self._rich_send_disabled: bool = False  # Latch off if Bot API < 10.1
+        self._draft_counter: int = 0  # draft_id estables por stream (sendRichMessageDraft)
         # Reply keyboard / menu commands staged by the message tool during
         # a streaming turn; applied to the consolidated final message.
         self._pending_stream_reply_keyboard: dict[str, list[list[str]]] = {}
@@ -1012,6 +1019,344 @@ class TelegramChannel(BaseChannel):
     def _is_not_modified_error(exc: Exception) -> bool:
         return isinstance(exc, BadRequest) and "message is not modified" in str(exc).lower()
 
+    def _next_draft_id(self) -> int:
+        """Return a stable draft_id for sendRichMessageDraft (per stream)."""
+        self._draft_counter += 1
+        return self._draft_counter
+
+    async def send_reasoning_delta(
+        self,
+        chat_id: str,
+        delta: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
+    ) -> None:
+        """Stream a chunk of model reasoning/thinking content.
+
+        Rich + private chat → sendRichMessageDraft with <tg-thinking> (native
+        Thinking Block, animated "Thinking…"). Otherwise → legacy preview with
+        an expandable blockquote. The reasoning is accumulated in _StreamBuf
+        and rendered as <details> in the final message.
+        """
+        if not self._app or not self.show_reasoning or not delta:
+            return
+        meta = metadata or {}
+        int_chat_id = int(chat_id)
+        buf = self._stream_bufs.get(chat_id)
+        if buf is None or (stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id):
+            buf = _StreamBuf(stream_id=stream_id)
+            self._stream_bufs[chat_id] = buf
+        elif buf.stream_id is None:
+            buf.stream_id = stream_id
+        buf.reasoning = (buf.reasoning + delta)[:TELEGRAM_REASONING_MAX_LEN]
+        buf.reasoning_open = True
+
+        now = time.monotonic()
+        rich_ok = (
+            self.config.rich_messages
+            and not getattr(self, "_rich_send_disabled", False)
+            and not meta.get("is_group", False)
+        )
+        if rich_ok:
+            if buf.draft_id is None:
+                buf.draft_id = self._next_draft_id()
+                buf.using_draft = True
+                buf.draft_expires_at = now + _DRAFT_TTL_SECONDS
+            elif now > buf.draft_expires_at:
+                # Draft expirado: se autolimpia; switch a legacy.
+                buf.using_draft = False
+                buf.draft_id = None
+                await self._send_legacy_preview(int_chat_id, buf, meta, {})
+                return
+            if (now - buf.last_edit) >= self.config.stream_edit_interval:
+                payload: dict[str, Any] = {
+                    "chat_id": int_chat_id,
+                    "draft_id": buf.draft_id,
+                    "rich_message": {"markdown": f"<tg-thinking>{buf.reasoning}</tg-thinking>"},
+                }
+                try:
+                    await self._call_with_retry(
+                        self._app.bot.do_api_request,
+                        "sendRichMessageDraft",
+                        api_kwargs=payload,
+                    )
+                    buf.last_edit = now
+                except BadRequest as exc:
+                    if self._is_rich_capability_error(exc):
+                        self.logger.debug("sendRichMessageDraft not available, disabling")
+                        self._rich_send_disabled = True
+                    buf.using_draft = False
+                    buf.draft_id = None
+                    await self._send_legacy_preview(int_chat_id, buf, meta, {})
+                except Exception as exc:
+                    self.logger.debug("sendRichMessageDraft failed: {}", exc)
+            return
+
+        # Legacy: preview con blockquote expandible (se edita in-place).
+        if buf.message_id is None:
+            await self._send_legacy_preview(int_chat_id, buf, meta, {})
+        elif (now - buf.last_edit) >= self.config.stream_edit_interval:
+            try:
+                await self._call_with_retry(
+                    self._app.bot.edit_message_text,
+                    chat_id=int_chat_id, message_id=buf.message_id,
+                    text=self._reasoning_blockquote(buf.reasoning),
+                    parse_mode="HTML",
+                )
+                buf.last_edit = now
+            except Exception as e:
+                if self._is_not_modified_error(e):
+                    buf.last_edit = now
+                    return
+                self.logger.warning("Reasoning edit failed: {}", e)
+
+    async def send_reasoning_end(
+        self,
+        chat_id: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        stream_id: str | None = None,
+    ) -> None:
+        """Mark the end of a reasoning stream segment.
+
+        The draft/legacy preview keeps the accumulated thinking; the final
+        message (stream_end) renders it as <details>.
+        """
+        buf = self._stream_bufs.get(chat_id)
+        if buf is not None:
+            buf.reasoning_open = False
+
+    def _reasoning_blockquote(self, reasoning: str) -> str:
+        """Render accumulated reasoning as an expandable blockquote (legacy)."""
+        return f"<blockquote expandable>{_escape_telegram_html(reasoning)}</blockquote>" if reasoning else ""
+
+    def _reasoning_details(self, reasoning: str) -> str:
+        """Render accumulated reasoning as a collapsible <details> (rich final)."""
+        if not reasoning:
+            return ""
+        return (
+            "<details><summary>🧠 Razonamiento</summary>\n\n"
+            f"{reasoning}\n\n</details>"
+        )
+
+    async def _send_legacy_preview(
+        self,
+        int_chat_id: int,
+        buf: "_StreamBuf",
+        meta: dict[str, Any],
+        thread_kwargs: dict,
+    ) -> None:
+        """Send (or edit) the legacy streaming preview with reasoning blockquote."""
+        now = time.monotonic()
+        if buf.message_id is None:
+            preview = _strip_md_block(buf.text)
+            if buf.reasoning:
+                preview = f"{self._reasoning_blockquote(buf.reasoning)}\n\n{preview}"
+            preview_kwargs: dict[str, Any] = {
+                "chat_id": int_chat_id,
+                "text": preview,
+                **thread_kwargs,
+            }
+            if reply_to_message_id := meta.get("message_id"):
+                preview_kwargs["reply_parameters"] = {
+                    "message_id": int(reply_to_message_id),
+                    "allow_sending_without_reply": True,
+                }
+            try:
+                sent = await self._call_with_retry(
+                    self._app.bot.send_message,
+                    **preview_kwargs,
+                )
+                buf.message_id = sent.message_id
+                buf.last_edit = now
+            except Exception as e:
+                self.logger.warning("Stream initial send failed: {}", e)
+                raise  # Let ChannelManager handle retry
+        elif (now - buf.last_edit) >= self.config.stream_edit_interval:
+            preview = _strip_md_block(buf.text)
+            if buf.reasoning:
+                preview = f"{self._reasoning_blockquote(buf.reasoning)}\n\n{preview}"
+            try:
+                await self._call_with_retry(
+                    self._app.bot.edit_message_text,
+                    chat_id=int_chat_id, message_id=buf.message_id,
+                    text=preview,
+                )
+                buf.last_edit = now
+            except Exception as e:
+                if self._is_not_modified_error(e):
+                    buf.last_edit = now
+                    return
+                self.logger.warning("Stream edit failed: {}", e)
+                raise  # Let ChannelManager handle retry
+
+    async def _finalize_stream(
+        self,
+        chat_id: str,
+        buf: "_StreamBuf",
+        int_chat_id: int,
+        meta: dict[str, Any],
+        thread_kwargs: dict,
+        reply_keyboard_markup,
+        staging_menu_commands: list[dict] | None,
+    ) -> None:
+        """Finalize a stream: fix the draft (draft_id) or edit the legacy
+        preview in place, appending the reasoning as <details>."""
+        raw_text = buf.text
+        details = self._reasoning_details(buf.reasoning)
+        final_markdown = f"{raw_text}\n\n{details}" if details else raw_text
+
+        # Draft rich activo y no expirado → fijar con sendRichMessage(draft_id=...).
+        if (
+            buf.using_draft
+            and buf.draft_id is not None
+            and time.monotonic() <= buf.draft_expires_at
+            and self.config.rich_messages
+            and not getattr(self, "_rich_send_disabled", False)
+        ):
+            payload: dict[str, Any] = {
+                "chat_id": int_chat_id,
+                "draft_id": buf.draft_id,
+                "rich_message": {"markdown": final_markdown},
+                **thread_kwargs,
+            }
+            if reply_to_message_id := meta.get("message_id"):
+                payload["reply_parameters"] = {
+                    "message_id": int(reply_to_message_id),
+                    "allow_sending_without_reply": True,
+                }
+            if reply_keyboard_markup is not None:
+                payload["reply_markup"] = reply_keyboard_markup
+            try:
+                await self._call_with_retry(
+                    self._app.bot.do_api_request,
+                    "sendRichMessage",
+                    api_kwargs=payload,
+                )
+                if staging_menu_commands:
+                    await self._set_chat_menu_commands(int_chat_id, staging_menu_commands)
+                self._stream_bufs.pop(chat_id, None)
+                return
+            except BadRequest as exc:
+                if self._is_rich_capability_error(exc):
+                    self.logger.debug("sendRichMessage not available, disabling")
+                    self._rich_send_disabled = True
+                else:
+                    self.logger.debug("sendRichMessage rejected: {}", exc)
+            except Exception as exc:
+                self.logger.debug("sendRichMessage failed: {}", exc)
+            # Fall through to legacy.
+
+        # Rich final in-place (sin draft): editMessageText(rich_message=...).
+        if (
+            self.config.rich_messages
+            and not getattr(self, "_rich_send_disabled", False)
+            and buf.message_id is not None
+        ):
+            edit_kwargs: dict[str, Any] = {
+                "chat_id": int_chat_id,
+                "message_id": buf.message_id,
+                "rich_message": {"markdown": final_markdown},
+                **thread_kwargs,
+            }
+            if reply_keyboard_markup is not None:
+                edit_kwargs["reply_markup"] = reply_keyboard_markup
+            try:
+                await self._call_with_retry(
+                    self._app.bot.do_api_request,
+                    "editMessageText",
+                    api_kwargs=edit_kwargs,
+                )
+                if staging_menu_commands:
+                    await self._set_chat_menu_commands(int_chat_id, staging_menu_commands)
+                self._stream_bufs.pop(chat_id, None)
+                return
+            except BadRequest as exc:
+                if self._is_rich_capability_error(exc):
+                    self.logger.debug("editMessageText rich not available, disabling")
+                    self._rich_send_disabled = True
+                else:
+                    self.logger.debug("editMessageText rich rejected: {}", exc)
+            except Exception as exc:
+                self.logger.debug("editMessageText rich failed: {}", exc)
+            # Fall through to the legacy HTML edit path (edits in place).
+
+        # Legacy path: edit existing streaming message with HTML.
+        html_chunks = _split_telegram_markdown_html(raw_text, TELEGRAM_HTML_MAX_LEN)
+        primary_html = html_chunks[0]
+        extra_html_chunks = html_chunks[1:]
+        if buf.reasoning:
+            primary_html = f"{self._reasoning_blockquote(buf.reasoning)}\n\n{primary_html}"
+        if buf.message_id is None:
+            # No hay preview legacy (el stream vivía en el draft): enviar el
+            # contenido final como mensaje nuevo (nunca se pierde texto).
+            try:
+                await self._call_with_retry(
+                    self._app.bot.send_message,
+                    chat_id=int_chat_id, text=primary_html,
+                    parse_mode="HTML",
+                    reply_markup=reply_keyboard_markup,
+                    **thread_kwargs,
+                )
+            except Exception:
+                # Fall back to _send_text which handles HTML→plain gracefully.
+                await self._send_text(int_chat_id, primary_html)
+            for extra_html_chunk in extra_html_chunks:
+                try:
+                    await self._call_with_retry(
+                        self._app.bot.send_message,
+                        chat_id=int_chat_id, text=extra_html_chunk,
+                        parse_mode="HTML",
+                        **thread_kwargs,
+                    )
+                except Exception:
+                    await self._send_text(int_chat_id, extra_html_chunk)
+            self._stream_bufs.pop(chat_id, None)
+            return
+        try:
+            await self._call_with_retry(
+                self._app.bot.edit_message_text,
+                chat_id=int_chat_id, message_id=buf.message_id,
+                text=primary_html, parse_mode="HTML",
+                reply_markup=reply_keyboard_markup,
+            )
+        except BadRequest as e:
+            # Only fall back to plain text on actual HTML parse/format errors.
+            # Network errors (TimedOut, NetworkError) should propagate immediately
+            # to avoid doubling connection demand during pool exhaustion.
+            if self._is_not_modified_error(e):
+                self.logger.debug("Final stream edit already applied for {}", chat_id)
+                self._stream_bufs.pop(chat_id, None)
+                return
+            self.logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
+            # Fall back to raw markdown (not HTML) so users don't see raw tags.
+            primary_plain = split_message(raw_text, TELEGRAM_MAX_MESSAGE_LEN)[0] if len(raw_text) > TELEGRAM_MAX_MESSAGE_LEN else raw_text
+            try:
+                await self._call_with_retry(
+                    self._app.bot.edit_message_text,
+                    chat_id=int_chat_id, message_id=buf.message_id,
+                    text=primary_plain,
+                )
+            except Exception as e2:
+                if self._is_not_modified_error(e2):
+                    self.logger.debug("Final stream plain edit already applied for {}", chat_id)
+                else:
+                    self.logger.warning("Final stream edit failed: {}", e2)
+                    raise  # Let ChannelManager handle retry
+        for extra_html_chunk in extra_html_chunks:
+            try:
+                await self._call_with_retry(
+                    self._app.bot.send_message,
+                    chat_id=int_chat_id, text=extra_html_chunk,
+                    parse_mode="HTML",
+                    **thread_kwargs,
+                )
+            except Exception:
+                # Fall back to _send_text which handles HTML→plain gracefully.
+                await self._send_text(int_chat_id, extra_html_chunk)
+        self._stream_bufs.pop(chat_id, None)
+
     async def send_delta(
         self,
         chat_id: str,
@@ -1043,97 +1388,16 @@ class TelegramChannel(BaseChannel):
             thread_kwargs = {}
             if message_thread_id := meta.get("message_thread_id"):
                 thread_kwargs["message_thread_id"] = message_thread_id
-            raw_text = buf.text
-
-            # Rich final (Bot API 10.1): convert the streaming preview in place
-            # to a rich message via editMessageText(rich_message=...). This
-            # keeps a single message (no orphaned draft, no delete-and-resend
-            # flicker) and renders the full markdown. Also apply any staged
-            # reply_keyboard / menu_commands from the message tool.
             staging_reply_keyboard = self._pending_stream_reply_keyboard.pop(chat_id, None)
             staging_menu_commands = self._pending_stream_menu_commands.pop(chat_id, None)
             reply_keyboard_markup = (
                 self._build_reply_keyboard(staging_reply_keyboard)
                 if staging_reply_keyboard else None
             )
-            if (
-                self.config.rich_messages
-                and not getattr(self, "_rich_send_disabled", False)
-            ):
-                edit_kwargs: dict[str, Any] = {
-                    "chat_id": int_chat_id,
-                    "message_id": buf.message_id,
-                    "rich_message": {"markdown": raw_text},
-                    **thread_kwargs,
-                }
-                if reply_keyboard_markup is not None:
-                    edit_kwargs["reply_markup"] = reply_keyboard_markup
-                try:
-                    await self._call_with_retry(
-                        self._app.bot.do_api_request,
-                        "editMessageText",
-                        api_kwargs=edit_kwargs,
-                    )
-                    if staging_menu_commands:
-                        await self._set_chat_menu_commands(int_chat_id, staging_menu_commands)
-                    self._stream_bufs.pop(chat_id, None)
-                    return
-                except BadRequest as exc:
-                    if self._is_rich_capability_error(exc):
-                        self.logger.debug("editMessageText rich not available, disabling")
-                        self._rich_send_disabled = True
-                    else:
-                        self.logger.debug("editMessageText rich rejected: {}", exc)
-                except Exception as exc:
-                    self.logger.debug("editMessageText rich failed: {}", exc)
-                # Fall through to the legacy HTML edit path (edits in place).
-
-            # Legacy path: edit existing streaming message with HTML
-            html_chunks = _split_telegram_markdown_html(raw_text, TELEGRAM_HTML_MAX_LEN)
-            primary_html = html_chunks[0]
-            extra_html_chunks = html_chunks[1:]
-            try:
-                await self._call_with_retry(
-                    self._app.bot.edit_message_text,
-                    chat_id=int_chat_id, message_id=buf.message_id,
-                    text=primary_html, parse_mode="HTML",
-                    reply_markup=reply_keyboard_markup,
-                )
-            except BadRequest as e:
-                # Only fall back to plain text on actual HTML parse/format errors.
-                # Network errors (TimedOut, NetworkError) should propagate immediately
-                # to avoid doubling connection demand during pool exhaustion.
-                if self._is_not_modified_error(e):
-                    self.logger.debug("Final stream edit already applied for {}", chat_id)
-                    self._stream_bufs.pop(chat_id, None)
-                    return
-                self.logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
-                # Fall back to raw markdown (not HTML) so users don't see raw tags.
-                primary_plain = split_message(raw_text, TELEGRAM_MAX_MESSAGE_LEN)[0] if len(raw_text) > TELEGRAM_MAX_MESSAGE_LEN else raw_text
-                try:
-                    await self._call_with_retry(
-                        self._app.bot.edit_message_text,
-                        chat_id=int_chat_id, message_id=buf.message_id,
-                        text=primary_plain,
-                    )
-                except Exception as e2:
-                    if self._is_not_modified_error(e2):
-                        self.logger.debug("Final stream plain edit already applied for {}", chat_id)
-                    else:
-                        self.logger.warning("Final stream edit failed: {}", e2)
-                        raise  # Let ChannelManager handle retry
-            for extra_html_chunk in extra_html_chunks:
-                try:
-                    await self._call_with_retry(
-                        self._app.bot.send_message,
-                        chat_id=int_chat_id, text=extra_html_chunk,
-                        parse_mode="HTML",
-                        **thread_kwargs,
-                    )
-                except Exception:
-                    # Fall back to _send_text which handles HTML→plain gracefully.
-                    await self._send_text(int_chat_id, extra_html_chunk)
-            self._stream_bufs.pop(chat_id, None)
+            await self._finalize_stream(
+                chat_id, buf, int_chat_id, meta, thread_kwargs,
+                reply_keyboard_markup, staging_menu_commands,
+            )
             return
 
         buf = self._stream_bufs.get(chat_id)
@@ -1152,28 +1416,42 @@ class TelegramChannel(BaseChannel):
         if message_thread_id := meta.get("message_thread_id"):
             thread_kwargs["message_thread_id"] = message_thread_id
 
-        if buf.message_id is None:
-            preview = _strip_md_block(buf.text)
-            preview_kwargs: dict[str, Any] = {
-                "chat_id": int_chat_id,
-                "text": preview,
-                **thread_kwargs,
-            }
-            if reply_to_message_id := meta.get("message_id"):
-                preview_kwargs["reply_parameters"] = {
-                    "message_id": int(reply_to_message_id),
-                    "allow_sending_without_reply": True,
+        # Draft rich activo → actualizar el draft con thinking + contenido.
+        if buf.using_draft and buf.draft_id is not None:
+            if now > buf.draft_expires_at:
+                # Draft expirado (~30 s sin deltas): se autolimpia; switch a
+                # legacy con el contenido acumulado (nunca se pierde texto).
+                buf.using_draft = False
+                buf.draft_id = None
+                await self._send_legacy_preview(int_chat_id, buf, meta, thread_kwargs)
+                return
+            if (now - buf.last_edit) >= self.config.stream_edit_interval:
+                markdown = f"<tg-thinking>{buf.reasoning}</tg-thinking>\n\n{buf.text}"
+                payload: dict[str, Any] = {
+                    "chat_id": int_chat_id,
+                    "draft_id": buf.draft_id,
+                    "rich_message": {"markdown": markdown},
                 }
-            try:
-                sent = await self._call_with_retry(
-                    self._app.bot.send_message,
-                    **preview_kwargs,
-                )
-                buf.message_id = sent.message_id
-                buf.last_edit = now
-            except Exception as e:
-                self.logger.warning("Stream initial send failed: {}", e)
-                raise  # Let ChannelManager handle retry
+                try:
+                    await self._call_with_retry(
+                        self._app.bot.do_api_request,
+                        "sendRichMessageDraft",
+                        api_kwargs=payload,
+                    )
+                    buf.last_edit = now
+                except BadRequest as exc:
+                    if self._is_rich_capability_error(exc):
+                        self.logger.debug("sendRichMessageDraft not available, disabling")
+                        self._rich_send_disabled = True
+                    buf.using_draft = False
+                    buf.draft_id = None
+                    await self._send_legacy_preview(int_chat_id, buf, meta, thread_kwargs)
+                except Exception as exc:
+                    self.logger.debug("sendRichMessageDraft failed: {}", exc)
+            return
+
+        if buf.message_id is None:
+            await self._send_legacy_preview(int_chat_id, buf, meta, thread_kwargs)
         elif (now - buf.last_edit) >= self.config.stream_edit_interval:
             if len(buf.text) > TELEGRAM_MAX_MESSAGE_LEN:
                 await self._flush_stream_overflow(int_chat_id, buf, thread_kwargs)

@@ -2672,3 +2672,250 @@ async def test_send_ephemeral_falls_back_when_unsupported() -> None:
     assert calls[0].kwargs.get("receiver_user_id") == 12345
     assert "is_ephemeral" not in calls[1].kwargs
     assert calls[1].kwargs["text"] == "respuesta privada"
+
+
+# T1: Telegram Thinking Blocks — reasoning visible con <tg-thinking> en draft
+# y <details> en el mensaje final (spec-telegram-thinking-blocks.md)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reasoning_delta_opens_draft_with_thinking_block() -> None:
+    """T1.1: send_reasoning_delta con rich + chat privado abre un draft
+    sendRichMessageDraft con draft_id estable y <tg-thinking>; los deltas
+    siguientes reusan el mismo draft_id; send_reasoning_end no envía nada."""
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True, token="123:abc", allow_from=["*"],
+            rich_messages=True, stream_edit_interval=0.1,
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock()
+
+    await channel.send_reasoning_delta(
+        "123", "El usuario pide ", metadata={"is_group": False}, stream_id="s:0"
+    )
+    await asyncio.sleep(0.15)
+    await channel.send_reasoning_delta(
+        "123", "una spec", metadata={"is_group": False}, stream_id="s:0"
+    )
+    await channel.send_reasoning_end("123", metadata={"is_group": False}, stream_id="s:0")
+
+    draft_calls = [
+        c for c in channel._app.bot.do_api_request.call_args_list
+        if c.args[0] == "sendRichMessageDraft"
+    ]
+    assert len(draft_calls) == 2
+    first = draft_calls[0].kwargs["api_kwargs"]
+    second = draft_calls[1].kwargs["api_kwargs"]
+    assert first["draft_id"] is not None
+    assert first["draft_id"] == second["draft_id"]
+    assert "<tg-thinking>" in first["rich_message"]["markdown"]
+    assert "El usuario pide " in first["rich_message"]["markdown"]
+    assert "una spec" in second["rich_message"]["markdown"]
+    # send_reasoning_end no envía nada nuevo (siguen siendo 2 drafts).
+    assert len(draft_calls) == 2
+    assert channel._stream_bufs["123"].reasoning == "El usuario pide una spec"
+    assert channel._stream_bufs["123"].using_draft is True
+
+
+@pytest.mark.asyncio
+async def test_reasoning_legacy_uses_expandable_blockquote() -> None:
+    """T1.2: sin rich (o en grupos), el reasoning usa preview legacy con
+    <blockquote expandable>; send_reasoning_end es no-op."""
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True, token="123:abc", allow_from=["*"],
+            stream_edit_interval=0.1,
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock()
+
+    await channel.send_reasoning_delta(
+        "123", "pensando...", metadata={"is_group": True}, stream_id="s:0"
+    )
+    await channel.send_reasoning_end("123", metadata={"is_group": True}, stream_id="s:0")
+
+    # Sin drafts rich.
+    draft_calls = [
+        c for c in channel._app.bot.do_api_request.call_args_list
+        if c.args[0] == "sendRichMessageDraft"
+    ]
+    assert draft_calls == []
+    # Preview legacy con blockquote expandible.
+    assert len(channel._app.bot.sent_messages) == 1
+    text = channel._app.bot.sent_messages[0]["text"]
+    assert "<blockquote expandable>" in text
+    assert "pensando..." in text
+    assert channel._stream_bufs["123"].using_draft is False
+
+
+@pytest.mark.asyncio
+async def test_reasoning_finalizes_draft_with_details() -> None:
+    """T1.3: stream_end con draft activo fija con sendRichMessage(draft_id=...)
+    y el markdown final incluye <details> con el reasoning; reply_parameters
+    conservado; buffer limpiado."""
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True, token="123:abc", allow_from=["*"],
+            rich_messages=True, stream_edit_interval=0.1,
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock()
+
+    await channel.send_reasoning_delta(
+        "123", "analizo", metadata={"is_group": False, "message_id": 42}, stream_id="s:0"
+    )
+    await channel.send_reasoning_end("123", metadata={"is_group": False}, stream_id="s:0")
+    await channel.send_delta(
+        "123", "Respuesta final", metadata={"is_group": False, "message_id": 42}, stream_id="s:0"
+    )
+    await channel.send_delta(
+        "123", "", metadata={"is_group": False, "message_id": 42},
+        stream_id="s:0", stream_end=True,
+    )
+
+    final_calls = [
+        c for c in channel._app.bot.do_api_request.call_args_list
+        if c.args[0] == "sendRichMessage"
+    ]
+    assert len(final_calls) == 1
+    payload = final_calls[0].kwargs["api_kwargs"]
+    assert payload["draft_id"] is not None
+    md = payload["rich_message"]["markdown"]
+    assert "Respuesta final" in md
+    assert "<details>" in md
+    assert "🧠 Razonamiento" in md
+    assert "analizo" in md
+    assert payload["reply_parameters"]["message_id"] == 42
+    assert "123" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
+async def test_reasoning_draft_expired_falls_back_to_legacy() -> None:
+    """T1.4: draft expirado en stream_end → path legacy con el contenido
+    acumulado (send_message + edit_message_text), sin sendRichMessage."""
+    import time as _time
+
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True, token="123:abc", allow_from=["*"],
+            rich_messages=True, stream_edit_interval=0.1,
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock()
+
+    await channel.send_reasoning_delta(
+        "123", "analizo", metadata={"is_group": False}, stream_id="s:0"
+    )
+    buf = channel._stream_bufs["123"]
+    assert buf.using_draft is True
+    # Simular expiración del draft (más de 30 s sin deltas).
+    buf.draft_expires_at = _time.monotonic() - 1.0
+
+    await channel.send_delta("123", "Respuesta", metadata={"is_group": False}, stream_id="s:0")
+    await channel.send_delta(
+        "123", "", metadata={"is_group": False}, stream_id="s:0", stream_end=True
+    )
+
+    final_calls = [
+        c for c in channel._app.bot.do_api_request.call_args_list
+        if c.args[0] == "sendRichMessage"
+    ]
+    assert final_calls == []
+    # El contenido se envió por legacy.
+    assert len(channel._app.bot.sent_messages) >= 1
+    assert "123" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
+async def test_reasoning_finalize_failure_falls_back_to_legacy() -> None:
+    """T1.5: sendRichMessage falla al fijar → fallback legacy con el contenido
+    acumulado; error de capacidad → latch-off _rich_send_disabled."""
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True, token="123:abc", allow_from=["*"],
+            rich_messages=True, stream_edit_interval=0.1,
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    # Draft OK (1 llamada), fijación falla con error de capacidad.
+    channel._app.bot.do_api_request = AsyncMock(
+        side_effect=[None, BadRequest("Method not found")]
+    )
+
+    await channel.send_reasoning_delta(
+        "123", "analizo", metadata={"is_group": False}, stream_id="s:0"
+    )
+    await channel.send_delta("123", "Respuesta", metadata={"is_group": False}, stream_id="s:0")
+    await channel.send_delta(
+        "123", "", metadata={"is_group": False}, stream_id="s:0", stream_end=True
+    )
+
+    assert channel._rich_send_disabled is True
+    # Fallback legacy: el contenido se envió por send_message.
+    assert len(channel._app.bot.sent_messages) >= 1
+    assert "123" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
+async def test_reasoning_disabled_is_noop() -> None:
+    """T1.6: show_reasoning=False → send_reasoning_delta/end no-op (sin draft,
+    sin acumulación, sin mensajes)."""
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True, token="123:abc", allow_from=["*"], rich_messages=True
+        ),
+        MessageBus(),
+    )
+    channel.show_reasoning = False
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock()
+
+    await channel.send_reasoning_delta(
+        "123", "analizo", metadata={"is_group": False}, stream_id="s:0"
+    )
+    await channel.send_reasoning_end("123", metadata={"is_group": False}, stream_id="s:0")
+
+    channel._app.bot.do_api_request.assert_not_called()
+    assert channel._app.bot.sent_messages == []
+    assert "123" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
+async def test_stream_without_reasoning_has_no_details() -> None:
+    """T1.7: send_delta sin reasoning previo → path actual intacto; el mensaje
+    final rich no incluye <details> de razonamiento."""
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True, token="123:abc", allow_from=["*"],
+            rich_messages=True, stream_edit_interval=0.1,
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock()
+
+    await channel.send_delta("123", "hola", stream_id="s:0")
+    await channel.send_delta("123", "", stream_id="s:0", stream_end=True)
+
+    # Sin draft: la fijación es editMessageText rich in-place (path actual).
+    edit_calls = [
+        c for c in channel._app.bot.do_api_request.call_args_list
+        if c.args[0] == "editMessageText"
+    ]
+    assert len(edit_calls) == 1
+    md = edit_calls[0].kwargs["api_kwargs"]["rich_message"]["markdown"]
+    assert "<details>" not in md
+    assert "hola" in md
