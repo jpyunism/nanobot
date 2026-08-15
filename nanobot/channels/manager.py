@@ -821,8 +821,16 @@ class ChannelManager:
             except asyncio.CancelledError:
                 break
             except Exception:
-                logger.exception("Failed to dispatch outbound message to {}:{}", msg.channel, msg.chat_id)
-                await self.bus.nack_outbound(msg)
+                # Do not reference `msg` here: the exception may originate in
+                # consume_outbound() before `msg` is ever assigned (e.g. a
+                # malformed durable message), which would raise a secondary
+                # UnboundLocalError and kill the dispatcher permanently.
+                logger.exception("Failed to dispatch outbound message")
+                if "msg" in locals():
+                    try:
+                        await self.bus.nack_outbound(msg)
+                    except Exception:
+                        logger.exception("Failed to nack outbound message")
 
     @staticmethod
     async def _send_reasoning_delta(
