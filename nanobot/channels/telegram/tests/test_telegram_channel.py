@@ -3160,10 +3160,15 @@ async def test_send_effect_applies_message_effect_id_legacy() -> None:
 
 @pytest.mark.asyncio
 async def test_send_effect_config_default_applies_when_no_override() -> None:
-    """T2.5: config message_effect_id (default confeti) se aplica si el
-    mensaje no trae override."""
+    """REQ-003: config message_effect_id seteado en el canal se aplica si el
+    mensaje no trae override (opt-in por canal)."""
     channel = TelegramChannel(
-        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["*"],
+            message_effect_id="confeti",
+        ),
         MessageBus(),
     )
     channel._app = _FakeApp(lambda: None)
@@ -3174,6 +3179,45 @@ async def test_send_effect_config_default_applies_when_no_override() -> None:
 
     assert len(channel._app.bot.sent_messages) == 1
     assert channel._app.bot.sent_messages[0]["message_effect_id"] == "5046509860389126442"
+
+
+@pytest.mark.asyncio
+async def test_send_without_effect_omits_message_effect_id() -> None:
+    """REQ-001/REQ-005: sin override y sin config.message_effect_id, ningún
+    envío lleva message_effect_id (el confeti deja de ser el default)."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(channel="telegram", chat_id="123", content="Respuesta normal")
+    )
+
+    assert len(channel._app.bot.sent_messages) == 1
+    assert "message_effect_id" not in channel._app.bot.sent_messages[0]
+
+
+@pytest.mark.asyncio
+async def test_send_without_effect_omits_message_effect_id_rich() -> None:
+    """REQ-001/REQ-005: igual que el anterior pero por el path rich
+    (sendRichMessage): el payload no incluye message_effect_id."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock()
+
+    await channel.send(
+        OutboundMessage(channel="telegram", chat_id="123", content="Respuesta normal")
+    )
+
+    call = channel._app.bot.do_api_request.call_args
+    assert call.args[0] == "sendRichMessage"
+    payload = call.kwargs["api_kwargs"]
+    assert "message_effect_id" not in payload
 
 
 @pytest.mark.asyncio

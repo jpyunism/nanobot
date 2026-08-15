@@ -71,8 +71,9 @@ Que el agente pueda, desde el tool `message` (o un tool dedicado):
   progreso (ej. "✅ 3/5 tareas completadas").
 - Enviar un **poll de aprobación** (APROBAR/CAMBIOS/RECHAZAR) con resultado
   visible; el `poll_answer` llega al agente como contexto del turno.
-- Aplicar un **efecto de mensaje** (confeti por defecto) a mensajes de
-  celebración (aprobación de spec, tarea completada).
+- Aplicar un **efecto de mensaje** (confeti, opt-in) a mensajes de celebración
+  (aprobación de spec, tarea completada) cuando el agente lo pide explícitamente
+  (`effect="confeti"`) o el canal configura `message_effect_id`.
 
 **Usuario**: operador del gateway (Telegram). **Éxito**: el flujo SDD en el chat
 usa task lists rich administradas por el agente (progreso visible en vivo),
@@ -88,7 +89,7 @@ polls para decisiones, y efectos para celebrar — todo sin salir de Telegram.
 | REQ-004 | El tool `message` acepta `poll` (question + options) y envía `sendPoll` nativo |
 | REQ-005 | El canal recibe `poll_answer` y lo publica al agente como contexto del turno |
 | REQ-006 | El tool `message` acepta `effect` (id de efecto) y lo aplica al mensaje (sendMessage y sendRichMessage) |
-| REQ-007 | Config `message_effect_id` por canal (default confeti) para celebración automática de aprobaciones |
+| REQ-007 | Config `message_effect_id` por canal (opt-in, sin default) para celebración automática de aprobaciones |
 | REQ-008 | Fallbacks best-effort: task list/poll/effect no soportados → error claro sin romper el envío |
 | REQ-009 | Tests de regresión: envío de task list rich, edición de progreso, poll, effect, handlers de updates entrantes |
 
@@ -115,10 +116,12 @@ polls para decisiones, y efectos para celebrar — todo sin salir de Telegram.
 - El agente decide qué hacer (confirmar la decisión, avanzar el flujo SDD).
 - No se responde automáticamente (evita spam); el agente responde si corresponde.
 
-### D3: Efectos — config + param
+### D3: Efectos — config + param (opt-in)
 
-- `message_effect_id` en `TelegramConfig` (default: confeti).
+- `message_effect_id` en `TelegramConfig` (sin default: `None` → sin efecto).
 - El tool `message` acepta `effect: str | None` (override por mensaje).
+- Sin override ni config → el mensaje **no** lleva efecto (los efectos son
+  opt-in; antes el default era confeti — spec `telegram-message-effects-opt-in`).
 - Se aplica en `send_message` y `sendRichMessage` (payload `message_effect_id`).
 - Best-effort: BadRequest → reintento sin efecto (sin latch).
 
@@ -149,7 +152,8 @@ polls para decisiones, y efectos para celebrar — todo sin salir de Telegram.
 ## Notas
 
 - PTB 22.8 no tiene tipos para task lists rich → payloads dict (patrón existente).
-- Los IDs de efectos están documentados en core.telegram.org; el default (confeti)
-  se verifica contra la API real antes del release.
+- Los IDs de efectos están documentados en core.telegram.org; sin config no hay
+  efecto (opt-in) y los efectos explícitos se verifican contra la API real antes
+  del release.
 - Límite de tasks por task list: 30 tareas máx (límite de checklists nativas,
   aplicado también a task lists rich para consistencia).

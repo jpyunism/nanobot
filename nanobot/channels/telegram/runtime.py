@@ -698,7 +698,9 @@ class TelegramChannel(BaseChannel):
     def _is_remote_media_url(path: str) -> bool:
         return path.startswith(("http://", "https://"))
 
-    # Efecto de mensaje (Bot API 10.2): confeti por defecto.
+    # Efecto de mensaje (Bot API 10.2): opt-in. Solo se aplica cuando el
+    # agente pide un efecto explícito (effect=...) o el canal configura
+    # message_effect_id. Sin override ni config → sin efecto.
     _MESSAGE_EFFECT_CONFETI = "5046509860389126442"
     _MESSAGE_EFFECTS: dict[str, str] = {
         "confeti": _MESSAGE_EFFECT_CONFETI,
@@ -709,10 +711,10 @@ class TelegramChannel(BaseChannel):
     def _resolve_message_effect(cls, effect: str | None) -> str | None:
         """Resolve a named effect to its message_effect_id (or pass through an id).
 
-        None (sin override ni config) → confeti por defecto (D3 de la spec).
+        None (sin override ni config) → sin efecto (opt-in, REQ-001).
         """
         if not effect:
-            return cls._MESSAGE_EFFECT_CONFETI
+            return None
         return cls._MESSAGE_EFFECTS.get(effect.lower(), effect)
 
     @staticmethod
