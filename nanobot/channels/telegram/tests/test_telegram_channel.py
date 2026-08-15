@@ -3212,3 +3212,27 @@ async def test_send_effect_bad_request_retries_without_effect() -> None:
     assert calls[0].get("message_effect_id") == "5046509860389126442"
     assert "message_effect_id" not in calls[1]
     assert len(channel._app.bot.sent_messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_stop_cancels_typing_indicator_and_shuts_down_app() -> None:
+    """stop() must not crash on the refactored TypingIndicator (regression: _typing_tasks)."""
+    app = _FakeApp(lambda: None)
+    app.updater.stop = AsyncMock()
+    channel._app = app
+
+    # Start a live typing indicator for a chat
+    channel._start_typing("123")
+    assert "123" in channel._typing._tasks
+    task = channel._typing._tasks["123"]
+    assert not task.done()
+
+    await channel.stop()
+
+    # Typing task cancelled and removed, and the app shutdown path was reached
+    assert "123" not in channel._typing._tasks
+    assert task.cancelling() > 0 or task.cancelled()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    app.updater.stop.assert_awaited_once()
+    assert channel._app is None
