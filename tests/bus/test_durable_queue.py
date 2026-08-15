@@ -202,14 +202,15 @@ async def test_durable_outbound_tolerates_unknown_fields(bus: MessageBus, tmp_pa
                 "channel": "telegram",
                 "chat_id": "15710279",
                 "content": "stale durable message",
-                "rich": None,
-                "reply_keyboard": None,
+                "totally_unknown_field": "x",
+                "another_unknown": None,
             }
         )
     )
     msg = await asyncio.wait_for(bus.consume_outbound(), timeout=2)
     assert msg.content == "stale durable message"
-    assert not hasattr(msg, "rich")
+    assert not hasattr(msg, "totally_unknown_field")
+    assert not hasattr(msg, "another_unknown")
     await bus.ack_outbound(msg)
 
 
