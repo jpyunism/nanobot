@@ -762,6 +762,7 @@ class ChannelManager:
                     channel = self.channels.get(msg.channel)
                     if channel is not None and channel.show_reasoning:
                         await self._send_with_retry(channel, msg)
+                        channel._touch_activity()  # outbound counts as liveness
                     await self.bus.ack_outbound(msg)
                     continue
 
@@ -809,6 +810,7 @@ class ChannelManager:
                             await self.bus.ack_outbound(msg)
                             continue
                     await self._send_with_retry(channel, msg)
+                    channel._touch_activity()  # outbound counts as liveness
                 else:
                     logger.warning("Unknown channel: {}", msg.channel)
 
