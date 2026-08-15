@@ -16,6 +16,7 @@ jobs:
         with:
           release-type: python
           package-name: nanobot-ai
+          target-branch: main
           extra-files: |
             webui/package.json
           include-component-in-release: false

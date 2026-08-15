@@ -1296,6 +1296,12 @@ class TelegramChannel(BaseChannel):
             self._stream_bufs[chat_id] = buf
         elif buf.stream_id is None:
             buf.stream_id = stream_id
+        # Protect the accumulator against non-string deltas (e.g. a provider
+        # emitting a datetime/object token) — concatenating those would crash
+        # the whole reasoning stream with a TypeError.
+        if not isinstance(delta, str):
+            self.logger.warning("Ignoring non-string reasoning delta: {!r}", delta)
+            return
         buf.reasoning = (buf.reasoning + delta)[:TELEGRAM_REASONING_MAX_LEN]
         buf.reasoning_open = True
 
@@ -2252,19 +2258,6 @@ class TelegramChannel(BaseChannel):
             )
         except Exception as e:
             self.logger.debug("reaction removal failed: {}", e)
-
-    async def _add_reaction(self, chat_id: str, message_id: int, emoji: str) -> None:
-        """Add emoji reaction to a message (best-effort, non-blocking)."""
-        if not self._app or not emoji:
-            return
-        try:
-            await self._app.bot.set_message_reaction(
-                chat_id=int(chat_id),
-                message_id=message_id,
-                reaction=[ReactionTypeEmoji(emoji=emoji)],
-            )
-        except Exception as e:
-            self.logger.debug("reaction failed: {}", e)
 
     def _start_typing(self, chat_id: str) -> None:
         """Start sending 'typing...' indicator for a chat."""

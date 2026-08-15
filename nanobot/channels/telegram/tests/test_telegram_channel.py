@@ -3284,3 +3284,39 @@ async def test_stop_cancels_typing_indicator_and_shuts_down_app() -> None:
         await task
     app.updater.stop.assert_awaited_once()
     assert channel._app is None
+
+@pytest.mark.asyncio
+async def test_reasoning_delta_non_string_is_ignored() -> None:
+    """Regression: a non-string reasoning delta (e.g. datetime from the
+    provider) must not crash the stream with a TypeError; it is ignored
+    and the accumulated reasoning is preserved."""
+    from datetime import datetime
+
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True, token="123:abc", allow_from=["*"],
+            stream_edit_interval=0.1,
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock()
+
+    await channel.send_reasoning_delta(
+        "123", "pensando ", metadata={"is_group": True}, stream_id="s:0"
+    )
+    await asyncio.sleep(0.15)  # permite el edit del preview inicial
+    # Delta no-string: debe ignorarse sin crashear (TypeError antes del fix).
+    await channel.send_reasoning_delta(
+        "123", datetime.now(), metadata={"is_group": True}, stream_id="s:0"
+    )
+    await asyncio.sleep(0.15)
+    await channel.send_reasoning_delta(
+        "123", "más", metadata={"is_group": True}, stream_id="s:0"
+    )
+
+    assert channel._stream_bufs["123"].reasoning == "pensando más"
+    # El preview legacy se envió una sola vez (primer delta); el delta
+    # no-string se ignoró y el siguiente delta siguió acumulando sin crash.
+    assert len(channel._app.bot.sent_messages) == 1
+    assert "<blockquote expandable>" in channel._app.bot.sent_messages[0]["text"]
