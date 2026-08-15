@@ -887,7 +887,7 @@ class ChannelManager:
             await ChannelManager._send_stream_event(channel, msg, event)
         elif isinstance(event, StreamEndEvent):
             await ChannelManager._send_stream_event(channel, msg, event)
-        else:
+        elif not isinstance(event, StreamedResponseEvent):
             await channel.send(msg)
 
     def _coalesce_stream_deltas(
