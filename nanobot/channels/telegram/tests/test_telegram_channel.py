@@ -3217,6 +3217,10 @@ async def test_send_effect_bad_request_retries_without_effect() -> None:
 @pytest.mark.asyncio
 async def test_stop_cancels_typing_indicator_and_shuts_down_app() -> None:
     """stop() must not crash on the refactored TypingIndicator (regression: _typing_tasks)."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
     app = _FakeApp(lambda: None)
     app.updater.stop = AsyncMock()
     channel._app = app
