@@ -24,7 +24,7 @@ def _loop(tmp_path: Path) -> AgentLoop:
         provider=provider,
         workspace=tmp_path,
         model="test-model",
-        owner_id="operator-1",
+        owner_id="15551234567",
     )
 
 
@@ -51,7 +51,7 @@ async def test_non_owner_sender_gets_untrusted_block(_loop: AgentLoop) -> None:
     assert RUNTIME_CONTEXT_TAG in content
     assert RUNTIME_CONTEXT_END in content
     assert "stranger-1" in content
-    assert "operator-1" in content
+    assert "15551234567" in content
     assert "untrusted data" in content
 
 
@@ -60,7 +60,21 @@ async def test_owner_sender_gets_no_untrusted_block(_loop: AgentLoop) -> None:
     request = RequestContext(
         channel="whatsapp",
         chat_id="group-1",
-        sender_id="operator-1",
+        sender_id="15551234567",
+        metadata={"message_id": "m2"},
+    )
+    blocks = await _loop._resolve_runtime_context_for_request(request, _loop.tools)
+
+    trust_blocks = [b for b in blocks if b.source == "sender_trust"]
+    assert len(trust_blocks) == 0
+
+
+@pytest.mark.asyncio
+async def test_owner_whatsapp_jid_gets_no_untrusted_block(_loop: AgentLoop) -> None:
+    request = RequestContext(
+        channel="whatsapp",
+        chat_id="group-1",
+        sender_id="15551234567@s.whatsapp.net",
         metadata={"message_id": "m2"},
     )
     blocks = await _loop._resolve_runtime_context_for_request(request, _loop.tools)
@@ -122,7 +136,7 @@ async def test_owner_sees_all_tools(_loop: AgentLoop) -> None:
     await _loop._run_agent_loop(
         [],
         runtime=_loop.llm_runtime(),
-        sender_id="operator-1",
+        sender_id="15551234567",
     )
 
     tools = captured["tools"]
