@@ -18,7 +18,7 @@ from loguru import logger
 from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import current_request_session_key
+from nanobot.agent.tools.context import current_request_context, current_request_session_key
 from nanobot.agent.tools.exec_session import (
     DEFAULT_EXEC_SESSION_MANAGER,
     DEFAULT_MAX_OUTPUT_CHARS,
@@ -37,10 +37,15 @@ from nanobot.agent.tools.schema import (
 )
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
-from nanobot.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
+from nanobot.security.workspace_access import (
+    current_scope_allows_loopback,
+    current_tool_workspace,
+    current_workspace_scope,
+)
 from nanobot.security.workspace_policy import is_path_within
 
 _IS_WINDOWS = sys.platform == "win32"
+_IS_LINUX = sys.platform.startswith("linux")
 
 
 def _reap_pid(pid: int) -> None:
@@ -165,6 +170,7 @@ class ExecTool(Tool):
             allow_patterns=cfg.allow_patterns,
             deny_patterns=cfg.deny_patterns,
             session_manager=getattr(ctx, "exec_session_manager", None),
+            owner_id=getattr(ctx, "owner_id", None),
         )
 
     def __init__(
@@ -181,10 +187,12 @@ class ExecTool(Tool):
         path_append: str = "",
         allowed_env_keys: list[str] | None = None,
         session_manager: Any | None = None,
+        owner_id: str | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
         self.sandbox = sandbox
+        self.owner_id = owner_id
         self.deny_patterns = (deny_patterns or []) + [
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
             r"\bdel\s+/[fq]\b",              # del /f, del /q
@@ -385,10 +393,23 @@ class ExecTool(Tool):
         shell: str | None = None,
         login: bool | None = None,
     ) -> _PreparedCommand | str:
+        scope = current_workspace_scope()
+        effective_sandbox = self.sandbox
+        if effective_sandbox and _IS_WINDOWS:
+            logger.warning(
+                "Sandbox '{}' is not supported on Windows; running unsandboxed",
+                effective_sandbox,
+            )
+            effective_sandbox = ""
+        elif effective_sandbox and not _IS_LINUX:
+            # bwrap is Linux-only; silently skip on macOS and other Unixes.
+            effective_sandbox = ""
+        if effective_sandbox and scope is not None and not scope.restrict_to_workspace:
+            effective_sandbox = ""
         access = current_tool_workspace(
             self.working_dir,
             restrict_to_workspace=self.restrict_to_workspace,
-            sandbox_restricts_workspace=bool(self.sandbox),
+            sandbox_restricts_workspace=bool(effective_sandbox),
         )
         workspace_root = str(access.project_path) if access.project_path is not None else self.working_dir
         cwd = working_dir or workspace_root or os.getcwd()
@@ -423,16 +444,10 @@ class ExecTool(Tool):
         if guard_error:
             return guard_error
 
-        if self.sandbox:
-            if _IS_WINDOWS:
-                logger.warning(
-                    "Sandbox '{}' is not supported on Windows; running unsandboxed",
-                    self.sandbox,
-                )
-            else:
-                workspace = workspace_root or cwd
-                command = wrap_command(self.sandbox, command, workspace, cwd)
-                cwd = str(Path(workspace).resolve())
+        if effective_sandbox:
+            workspace = workspace_root or cwd
+            command = wrap_command(effective_sandbox, command, workspace, cwd)
+            cwd = str(Path(workspace).resolve())
 
         effective_timeout = self._resolve_timeout(timeout)
         env = self._build_env()
@@ -731,8 +746,17 @@ class ExecTool(Tool):
             for segment in segments
         )
         if not explicitly_allowed:
+            request_ctx = current_request_context()
+            is_owner = (
+                self.owner_id
+                and request_ctx is not None
+                and request_ctx.sender_id == self.owner_id
+            )
             for pattern in self.deny_patterns:
                 if re.search(pattern, lower):
+                    if is_owner and pattern == r"\brm\s+-[rf]{1,2}\b":
+                        # Owner is exempt from the rm -r/f deny pattern.
+                        continue
                     return ToolResult.error("Error: Command blocked by deny pattern filter")
 
             if self.allow_patterns:
