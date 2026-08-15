@@ -1,97 +1,62 @@
-# Plan: Telegram UX — Task lists rich administradas por el agente, polls y efectos
+# Plan: Telegram — Message effects opt-in (sin confeti por defecto)
 
-Spec: `docs/spec-telegram-ux-checklists-polls-effects.md`
+Spec: `docs/spec-telegram-message-effects-opt-in.md`
 
 ## Componentes y dependencias
 
 ```
 TelegramChannel (runtime.py)
-   ├── _send_task_list()        → nuevo: sendRichMessage con task list rich (- [ ] / - [x])
-   ├── _update_task_list()      → nuevo: editMessageText(rich_message=...) marcando tareas + progreso
-   ├── _on_poll_answer()        → nuevo: handler PollAnswer → InboundMessage al agente
-   ├── _polls_cache             → nuevo: poll_id → (chat_id, options) para resolver poll_answer
-   ├── send()                  → + checklist, checklist_update, poll, effect
-   └── _try_send_rich()         → + message_effect_id en payload
+   └── _resolve_message_effect()   → único cambio funcional: falsy → None (sin default confeti)
 
-OutboundMessage (bus/events.py) → + checklist, checklist_update, poll, effect
-MessageTool (agent/tools/message.py) → + checklist, checklist_update, poll, effect (validación)
-TelegramConfig (runtime.py) → + message_effect_id: str | None (default confeti)
+Tests (nanobot/channels/telegram/tests/test_telegram_channel.py)
+   ├── test_send_effect_applies_message_effect_id_rich          → intacto (override explícito)
+   ├── test_send_effect_applies_message_effect_id_legacy        → intacto (override explícito)
+   ├── test_send_effect_config_default_applies_when_no_override → ACTUALIZAR: config explícita
+   ├── test_send_effect_bad_request_retries_without_effect      → intacto (retry best-effort)
+   └── test_send_without_effect_omits_message_effect_id         → NUEVO (regresión, RED primero)
+
+Docs
+   ├── docs/spec-telegram-message-effects-opt-in.md             → spec (aprobada)
+   └── docs/spec-telegram-ux-checklists-polls-effects.md        → actualizar D3/REQ-007 (default ya no es confeti)
 ```
 
 ## Orden de implementación
 
-### T1: Tests primero (TDD) — `nanobot/channels/telegram/tests/test_telegram_channel.py`
+### T1: TDD (RED) — test de regresión nuevo
+- `TelegramChannel.send()` con `OutboundMessage` sin `effect` y `TelegramConfig`
+  sin `message_effect_id` → ningún payload (rich ni legacy) lleva
+  `message_effect_id`.
+- Estado RED: falla porque hoy el default es confeti.
 
-1. **T1.1 Task list rich**
-   - `send()` con `checklist={title, tasks}` → `sendRichMessage` con markdown
-     `# title\n\n- [ ] tarea1\n- [ ] tarea2` (checkboxes nativos)
-   - `message_id` de la task list guardado en el registro del canal
-2. **T1.2 Actualización de progreso**
-   - `send()` con `checklist_update={message_id, done:[0,2]}` →
-     `editMessageText(rich_message=...)` con `- [x]` en las tareas marcadas y
-     resumen "✅ 2/3 tareas completadas"
-   - Tareas no marcadas siguen `- [ ]`
-3. **T1.3 Poll de aprobación**
-   - `send()` con `poll={question, options}` → `send_poll` con
-     `is_anonymous=False`, `allows_multiple_answers=False`
-   - Poll cacheado (poll_id → chat_id + options)
-4. **T1.4 PollAnswer → contexto**
-   - `_on_poll_answer` con update → `InboundMessage` publicado al bus con
-     prefijo "🗳️ El usuario votó: APROBAR"
-   - Opción resuelta vía cache; sin cache → poll_id crudo
-5. **T1.5 Efectos de mensaje**
-   - `send()` con `effect="confeti"` → `message_effect_id` en payload de
-     `sendRichMessage` y `send_message`
-   - Config `message_effect_id` default aplicado si no hay override
-   - BadRequest por efecto no soportado → reintento sin efecto (best-effort)
-6. **T1.6 Validación del tool message**
-   - `checklist` debe ser {title: str, tasks: [str]} (1-30 tasks)
-   - `poll` debe ser {question: str, options: [str]} (2-10 options)
-   - `checklist_update` debe ser {message_id: int, done: [int]}
-   - Errores de validación → ToolResult.error
+### T2: Implementación (GREEN)
+- `_resolve_message_effect`: `if not effect: return None` (en vez de confeti).
+- Overrides por nombre (`confeti`) e id crudo passthrough intactos.
+- BadRequest → retry sin efecto intacto.
 
-### T2: Implementación en `nanobot/channels/telegram/runtime.py`
+### T3: Tests existentes + docs
+- `test_send_effect_config_default_applies_when_no_override` pasa a setear
+  `message_effect_id="confeti"` explícito en el config (mismo nombre, otro caso).
+- Actualizar D3/REQ-007 en `spec-telegram-ux-checklists-polls-effects.md`.
 
-1. `_send_task_list(chat_id, title, tasks, ...)`: construye markdown rich con
-   `# title` + `- [ ] task` por tarea; `sendRichMessage`; guarda message_id en
-   `self._task_lists[chat_id] = message_id`
-2. `_update_task_list(chat_id, message_id, done, ...)`: `editMessageText` con
-   `rich_message.markdown` = título + tareas con `- [x]`/`- [ ]` + resumen
-   "✅ N/M tareas completadas"
-3. `_on_poll_answer(update, context)`: resuelve opción vía `_polls_cache`,
-   publica `InboundMessage` con prefijo, encola como turno normal
-4. `_polls_cache: dict[str, dict]` (poll_id → {chat_id, options}); limpieza
-   básica (TTL o tamaño máx)
-5. `send()`: orquesta `checklist` / `checklist_update` / `poll` / `effect`
-6. `_try_send_rich` + `_send_text`: `message_effect_id` en payload (config
-   default o override por mensaje); BadRequest → reintento sin efecto
-7. `TelegramConfig` + `message_effect_id: str | None = None` (default confeti
-   resuelto en runtime si None)
-
-### T3: Bus + tool
-
-1. `nanobot/bus/events.py`: `OutboundMessage` + `checklist: dict | None`,
-   `checklist_update: dict | None`, `poll: dict | None`, `effect: str | None`
-2. `nanobot/agent/tools/message.py`: parámetros `checklist`, `checklist_update`,
-   `poll`, `effect` con validación (1-30 tasks, 2-10 options, done indices)
-
-### T4: Verificación final + PR
-
-1. `pytest nanobot/channels/telegram/tests/test_telegram_channel.py -v` verde
-2. `ruff check nanobot/channels/telegram/ nanobot/agent/tools/message.py nanobot/bus/events.py`
-3. Smoke: `pytest tests/ -q` (suite completa)
-4. Sync a los 3 site-packages del gateway
-5. Commit conventional (`feat(telegram): task lists rich, polls y efectos`),
-   push al fork, PR a madkoding/nanobot con tests (requisito del PR Guardian)
+### T4: Verificación y release
+- `uv run pytest nanobot/channels/telegram/tests/test_telegram_channel.py -q`
+- `uv run pytest -q` (suite completa; 16 failed WhatsApp preexistentes OK)
+- `uv run ruff check`
+- Commit conventional + push al fork + PR a `madkoding/nanobot` (test de regresión obligatorio para el PR Guardian).
+- Sync a site-packages (pyenv 3.13.3 + uv tool) con md5; avisar reinicio manual del gateway.
 
 ## Riesgos y mitigaciones
 
-- **Task lists rich vs checklists nativas**: las rich no envían updates al bot
-  cuando el usuario tilda (solo el agente las edita). Aceptado: el agente es el
-  administrador del progreso (requisito del usuario).
-- **Efecto no soportado (grupos/servidor viejo)**: BadRequest → reintento sin
-  efecto (best-effort, sin latch).
-- **Poll sin cache**: si el poll_answer llega sin cache (gateway reiniciado),
-  se publica con poll_id crudo — el agente puede pedir contexto.
-- **Flood control**: `_call_with_retry` con backoff (ya existe).
-- **Límite 30 tasks**: validación en el tool (error claro al agente).
+- **Riesgo**: tocar el default rompe la celebración de aprobaciones de specs
+  (flujo SDD). **Mitigación**: el override `effect="confeti"` del tool `message`
+  queda intacto (REQ-002); si el usuario quiere confeti para aprobaciones, se
+  setea `message_effect_id` en config (REQ-003).
+- **Riesgo**: el PR Guardian exige test → cubierto con el test de regresión T1.
+- **Riesgo**: site-packages stale → sync con md5 antes de avisar reinicio.
+
+## Verification checkpoints
+
+1. T1 en RED (el test nuevo falla solo por el default).
+2. T2 en GREEN (test nuevo pasa; los 4 de effect existentes pasan).
+3. T4: suite completa verde (sin regresiones nuevas) + ruff limpio.
+4. PR mergeable en madkoding; md5 de los 3 archivos factory/runtime idénticos.
