@@ -2,7 +2,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 
-import nanobot.agent.memory as memory_module
+import nanobot.agent.memory_consolidator as memory_module
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse
