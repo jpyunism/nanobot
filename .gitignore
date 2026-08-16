@@ -238,4 +238,6 @@ public/dist/
 public/build/
 webui/__pycache__/
 webui/*.pyc
-```
+
+# Agent tooling
+.opencode/
