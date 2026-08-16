@@ -1,8 +1,9 @@
 name: Release
 
 # develop is the single source of truth for version numbers. A release is a
-# propagation: merge develop -> main, then this workflow reads the version that
-# develop already bumped (never recomputes it) and publishes that exact tag.
+# propagation: merge develop -> main, then this workflow reads the version
+# that develop already bumped (never recomputes it) and publishes that exact
+# tag as a GitHub Release.
 #
 # To bump: on develop, run `python scripts/bump_version.py patch|minor|major`.
 # To release: merge develop into main. CI guards both directions.
@@ -13,55 +14,48 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.read-version.outputs.version }}
-      released: ${{ steps.read-version.outputs.released }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Read version from pyproject.toml
-        id: read-version
+        id: version
         shell: bash
         run: |
           version="$(python -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          # Only publish if this version has not been tagged yet. If a push to
-          # main did not bump the version (e.g. a docs-only merge), do nothing.
-          if git rev-parse "v$version" >/dev/null 2>&1; then
-            echo "released=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "released=false" >> "$GITHUB_OUTPUT"
+          echo "version=$version"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION already tagged; nothing to release."
+            exit 0
           fi
 
-      - name: Release Please (respect develop's version)
-        if: steps.read-version.outputs.released == 'false'
-        uses: googleapis/release-please-action@v4
-        with:
-          release-type: python
-          package-name: nanobot-ai
-          target-branch: main
-          extra-files: |
-            webui/package.json
-          include-component-in-release: false
-          changelog-types: |
-            [
-              {"type":"feat","section":"Features","hidden":false},
-              {"type":"fix","section":"Bug Fixes","hidden":false},
-              {"type":"perf","section":"Performance Improvements","hidden":false},
-              {"type":"refactor","section":"Code Refactoring","hidden":false},
-              {"type":"docs","section":"Documentation","hidden":false},
-              {"type":"chore","section":"Miscellaneous","hidden":true},
-              {"type":"ci","section":"Continuous Integration","hidden":true},
-              {"type":"test","section":"Tests","hidden":true}
-            ]
-          # Lock the version to the one already present in pyproject.toml
-          # (bumped on develop), so the release never recomputes it from
-          # conventional commits.
-          release-as: ${{ steps.read-version.outputs.version }}
+          # Changelog body from the commits since the last tag.
+          last_tag="$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || true)"
+          if [ -n "$last_tag" ]; then
+            body="$(git log "$last_tag..HEAD" --pretty='format:- %s' --no-merges)"
+          else
+            body=""
+          fi
+
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+
+          gh release create "v$VERSION" \
+            --title "v$VERSION" \
+            --notes "## $VERSION${body:+$'\n\n'$body}" \
+            --target main
