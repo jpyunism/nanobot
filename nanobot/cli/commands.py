@@ -61,7 +61,6 @@ from rich.table import Table  # noqa: E402
 from rich.text import Text  # noqa: E402
 
 from nanobot import __logo__, __version__  # noqa: E402
-from nanobot import optional_features as feature_support  # noqa: E402
 from nanobot.agent.hooks import create_file_edit_activity_hook  # noqa: E402
 from nanobot.agent.loop import AgentLoop  # noqa: E402
 from nanobot.agent.subagent import SubagentManager  # noqa: E402
@@ -77,6 +76,7 @@ from nanobot.cli.gateway import create_gateway_app  # noqa: E402
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
 from nanobot.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
 from nanobot.config.schema import AgentDefaults, Config  # noqa: E402
+from nanobot.runtime import features as feature_support  # noqa: E402
 from nanobot.security.network import is_loopback_host  # noqa: E402
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt  # noqa: E402
 from nanobot.utils.helpers import (  # noqa: E402
