@@ -1,4 +1,11 @@
-name: Release Please
+name: Release
+
+# develop is the single source of truth for version numbers. A release is a
+# propagation: merge develop -> main, then this workflow reads the version that
+# develop already bumped (never recomputes it) and publishes that exact tag.
+#
+# To bump: on develop, run `python scripts/bump_version.py patch|minor|major`.
+# To release: merge develop into main. CI guards both directions.
 
 on:
   push:
@@ -9,10 +16,33 @@ permissions:
   pull-requests: write
 
 jobs:
-  release-please:
+  release:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read-version.outputs.version }}
+      released: ${{ steps.read-version.outputs.released }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version from pyproject.toml
+        id: read-version
+        shell: bash
+        run: |
+          version="$(python -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # Only publish if this version has not been tagged yet. If a push to
+          # main did not bump the version (e.g. a docs-only merge), do nothing.
+          if git rev-parse "v$version" >/dev/null 2>&1; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Release Please (respect develop's version)
+        if: steps.read-version.outputs.released == 'false'
+        uses: googleapis/release-please-action@v4
         with:
           release-type: python
           package-name: nanobot-ai
@@ -31,4 +61,7 @@ jobs:
               {"type":"ci","section":"Continuous Integration","hidden":true},
               {"type":"test","section":"Tests","hidden":true}
             ]
-          release-as: ""
+          # Lock the version to the one already present in pyproject.toml
+          # (bumped on develop), so the release never recomputes it from
+          # conventional commits.
+          release-as: ${{ steps.read-version.outputs.version }}

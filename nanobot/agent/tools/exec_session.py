@@ -158,7 +158,7 @@ class _ExecSession:
                     timeout=2.0,
                 )
             # Safety-net reap after normal exit.
-            from nanobot.agent.tools.shell import _reap_pid
+            from nanobot.utils.process import _reap_pid
             _reap_pid(self.process.pid)
         elif yield_time_ms > 0:
             await self._wait_for_buffered_output()
