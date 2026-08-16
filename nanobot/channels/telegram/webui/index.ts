@@ -16,6 +16,7 @@ export default {
         { key: "channels.telegram.allowFrom" },
         { key: "channels.telegram.groupPolicy" },
         { key: "channels.telegram.richMessages" },
+        { key: "channels.telegram.streaming" },
       ],
     },
   },
