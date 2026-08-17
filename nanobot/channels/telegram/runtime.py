@@ -488,6 +488,7 @@ class TelegramChannel(BaseChannel):
         self._bot_user_id: int | None = None
         self._bot_username: str | None = None
         self._stream_bufs: dict[str, _StreamBuf] = {}  # chat_id -> streaming state
+        self._reply_anchored: set[int] = set()  # chat_id -> ya se ancló la conversación
         self._inbound_buffers: dict[str, list[_QueuedTelegramUpdate]] = {}
         self._inbound_workers: dict[str, asyncio.Task] = {}
         self._rich_send_disabled: bool = False  # Latch off if Bot API < 10.1
@@ -520,6 +521,28 @@ class TelegramChannel(BaseChannel):
             return False
 
         return sid in allow_list or username in allow_list
+
+    def _reply_params_for(self, chat_id: int, reply_to_message_id) -> ReplyParameters | None:
+        """Decide si un mensaje de salida lleva quote (reply_parameters).
+
+        - reply_to_message_id ausente → None (sin quote, sin tocar el ancla).
+        - config.reply_to_message=True → siempre quote (opt-in explícito).
+        - default → quote solo en el primer mensaje de la conversación (ancla).
+        """
+        if not reply_to_message_id:
+            return None
+        if self.config.reply_to_message:
+            return ReplyParameters(
+                message_id=int(reply_to_message_id),
+                allow_sending_without_reply=True,
+            )
+        if chat_id in self._reply_anchored:
+            return None
+        self._reply_anchored.add(chat_id)
+        return ReplyParameters(
+            message_id=int(reply_to_message_id),
+            allow_sending_without_reply=True,
+        )
 
     @staticmethod
     def _normalize_telegram_command(content: str) -> str:
@@ -848,13 +871,7 @@ class TelegramChannel(BaseChannel):
         if message_thread_id is not None:
             thread_kwargs["message_thread_id"] = message_thread_id
 
-        reply_params = None
-        if self.config.reply_to_message:
-            if reply_to_message_id:
-                reply_params = ReplyParameters(
-                    message_id=reply_to_message_id,
-                    allow_sending_without_reply=True
-                )
+        reply_params = self._reply_params_for(chat_id, reply_to_message_id)
 
         # Task list rich (checkboxes nativos) — el agente la administra.
         checklist = getattr(msg, "checklist", None)
@@ -1411,9 +1428,10 @@ class TelegramChannel(BaseChannel):
                 "text": preview,
                 **thread_kwargs,
             }
-            if reply_to_message_id := meta.get("message_id"):
+            rp = self._reply_params_for(int_chat_id, meta.get("message_id"))
+            if rp is not None:
                 preview_kwargs["reply_parameters"] = {
-                    "message_id": int(reply_to_message_id),
+                    "message_id": rp.message_id,
                     "allow_sending_without_reply": True,
                 }
             try:
@@ -1474,9 +1492,10 @@ class TelegramChannel(BaseChannel):
                 "rich_message": {"markdown": final_markdown},
                 **thread_kwargs,
             }
-            if reply_to_message_id := meta.get("message_id"):
+            rp = self._reply_params_for(int_chat_id, meta.get("message_id"))
+            if rp is not None:
                 payload["reply_parameters"] = {
-                    "message_id": int(reply_to_message_id),
+                    "message_id": rp.message_id,
                     "allow_sending_without_reply": True,
                 }
             if reply_keyboard_markup is not None:
@@ -1544,13 +1563,23 @@ class TelegramChannel(BaseChannel):
         if buf.message_id is None:
             # No hay preview legacy (el stream vivía en el draft): enviar el
             # contenido final como mensaje nuevo (nunca se pierde texto).
+            rp = self._reply_params_for(int_chat_id, meta.get("message_id"))
+            send_kwargs: dict[str, Any] = {
+                "chat_id": int_chat_id,
+                "text": primary_html,
+                "parse_mode": "HTML",
+                "reply_markup": reply_keyboard_markup,
+                **thread_kwargs,
+            }
+            if rp is not None:
+                send_kwargs["reply_parameters"] = {
+                    "message_id": rp.message_id,
+                    "allow_sending_without_reply": True,
+                }
             try:
                 await self._call_with_retry(
                     self._app.bot.send_message,
-                    chat_id=int_chat_id, text=primary_html,
-                    parse_mode="HTML",
-                    reply_markup=reply_keyboard_markup,
-                    **thread_kwargs,
+                    **send_kwargs,
                 )
             except Exception:
                 # Fall back to _send_text which handles HTML→plain gracefully.
@@ -1799,6 +1828,9 @@ class TelegramChannel(BaseChannel):
         if not self.is_allowed(sender_id):
             await self._send_pairing_code_if_private(sender_id, update.message, user)
             return
+        # /start reinicia la conversación: se re-ancla el chat para que el
+        # siguiente mensaje de salida vuelva a llevar quote (reply_parameters).
+        self._reply_anchored.discard(update.message.chat_id)
         await update.message.reply_text(
             f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
             "Send me a message and I'll respond!\n"
@@ -2102,6 +2134,11 @@ class TelegramChannel(BaseChannel):
             cmd_part = cmd_part.split("@")[0]
             content = f"{cmd_part} {rest[0]}" if rest else cmd_part
         content = self._normalize_telegram_command(content)
+
+        # /new reinicia la conversación: se re-ancla el chat para que el
+        # siguiente mensaje de salida vuelva a llevar quote (reply_parameters).
+        if content == "/new":
+            self._reply_anchored.discard(message.chat_id)
 
         await self._handle_message(
             sender_id=sender_id,
