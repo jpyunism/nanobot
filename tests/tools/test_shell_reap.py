@@ -15,14 +15,14 @@ from nanobot.agent.tools.shell import ExecTool, _reap_pid
 
 def test_reap_pid_noops_without_waitpid():
     """On platforms (or test stubs) without waitpid, reaping is a no-op."""
-    with patch("nanobot.agent.tools.shell.os") as mock_os:
+    with patch("nanobot.utils.process.os") as mock_os:
         mock_os.waitpid = None
         mock_os.WNOHANG = None
         _reap_pid(12345)
 
 
 def test_reap_pid_calls_waitpid_wnohang():
-    with patch("nanobot.agent.tools.shell.os") as mock_os:
+    with patch("nanobot.utils.process.os") as mock_os:
         mock_os.waitpid = MagicMock(return_value=(12345, 0))
         mock_os.WNOHANG = 1
         _reap_pid(12345)
@@ -30,7 +30,7 @@ def test_reap_pid_calls_waitpid_wnohang():
 
 
 def test_reap_pid_swallows_already_reaped_errors():
-    with patch("nanobot.agent.tools.shell.os") as mock_os:
+    with patch("nanobot.utils.process.os") as mock_os:
         mock_os.WNOHANG = 1
         mock_os.waitpid = MagicMock(side_effect=ChildProcessError("no child"))
         _reap_pid(99)
@@ -311,7 +311,7 @@ async def test_exec_session_poll_reaps_after_exit():
         owner_session_key=None,
     )
     try:
-        with patch("nanobot.agent.tools.shell._reap_pid") as reap:
+        with patch("nanobot.utils.process._reap_pid") as reap:
             poll = await session.poll(yield_time_ms=0, max_output_chars=1000)
         assert poll.done is True
         assert poll.exit_code == 0

@@ -303,6 +303,81 @@ async def test_goal_conflict_nudge_only_with_tools_available():
 
 
 @pytest.mark.asyncio
+async def test_cross_turn_repeat_seeded_from_history():
+    """A final response repeated from the previous turn is caught on the first
+    iteration instead of giving the model 3 free repeats per turn.
+
+    The detector is seeded with the last assistant final response in history, so
+    the first identical response this turn counts as repeat #2 (nudge) and the
+    second as #3 (hard-stop) — two LLM calls instead of three.
+    """
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="https://github.com/SlimeVR/SlimeVR-Tracker-NRF", tool_calls=[]),
+        LLMResponse(content="https://github.com/SlimeVR/SlimeVR-Tracker-NRF", tool_calls=[]),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="ok")
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "do task"},
+            # Previous turn's final response — the seed for cross-turn detection.
+            {"role": "assistant", "content": "https://github.com/SlimeVR/SlimeVR-Tracker-NRF"},
+        ],
+        tools=tools,
+        model="test-model",
+        max_iterations=8,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=_injection_callback(["continue"]),
+    ))
+
+    # Seeded count=1 -> first repeat is #2 (nudge), second is #3 (hard-stop).
+    assert provider.chat_with_retry.await_count == 2
+    assert result.stop_reason == "repeated_content_loop"
+    assert len(_content_nudges(result.messages)) == 1
+
+
+@pytest.mark.asyncio
+async def test_cross_turn_seed_ignores_tool_calls_and_blank():
+    """Seeding only uses the last assistant *final* response: tool-call turns and
+    blank assistant messages are skipped, so a fresh approach is not falsely
+    flagged as a repeat."""
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="I understand now.", tool_calls=[]),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="ok")
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "do task"},
+            # Tool-call turn (no final content) must not seed the detector.
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}
+            ]},
+            {"role": "tool", "tool_call_id": "c1", "name": "read_file", "content": "x"},
+        ],
+        tools=tools,
+        model="test-model",
+        max_iterations=8,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    # No seed -> the single "I understand now." is a fresh response, no nudge.
+    assert result.stop_reason != "repeated_content_loop"
+    assert len(_content_nudges(result.messages)) == 0
+    assert result.final_content == "I understand now."
+
+
+@pytest.mark.asyncio
 async def test_repeated_content_reasoning_counts():
     """Repeated reasoning with similar visible content is detected too."""
     provider = MagicMock()

@@ -5,7 +5,7 @@ import socket
 import httpx
 import pytest
 
-from nanobot.providers import image_generation
+from nanobot.providers.image_gen import base as image_generation_base
 from nanobot.providers.image_generation import ImageGenerationError, _download_image_data_url
 
 PNG_BYTES = (
@@ -101,7 +101,7 @@ async def test_generated_image_download_enforces_streaming_size_limit(monkeypatc
         "nanobot.security.network.socket.getaddrinfo",
         _resolve_public,
     )
-    monkeypatch.setattr(image_generation, "_IMAGE_DOWNLOAD_MAX_BYTES", 8)
+    monkeypatch.setattr(image_generation_base, "_IMAGE_DOWNLOAD_MAX_BYTES", 8)
 
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, stream=_OversizedStream())
