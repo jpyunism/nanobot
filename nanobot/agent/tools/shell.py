@@ -45,7 +45,7 @@ from nanobot.security.workspace_access import (
     current_workspace_scope,
 )
 from nanobot.security.workspace_policy import is_path_within
-from nanobot.utils.helpers import normalize_owner_match
+from nanobot.utils.helpers import is_owner_match
 
 _IS_WINDOWS = sys.platform == "win32"
 _IS_LINUX = sys.platform.startswith("linux")
@@ -170,7 +170,7 @@ class ExecTool(Tool):
         path_append: str = "",
         allowed_env_keys: list[str] | None = None,
         session_manager: Any | None = None,
-        owner_id: str | None = None,
+        owner_id: str | list[str] | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -734,7 +734,7 @@ class ExecTool(Tool):
             is_owner = (
                 self.owner_id
                 and request_ctx is not None
-                and normalize_owner_match(request_ctx.sender_id) == normalize_owner_match(self.owner_id)
+                and is_owner_match(request_ctx.sender_id, self.owner_id)
             )
             for pattern in self.deny_patterns:
                 if re.search(pattern, lower):

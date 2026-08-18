@@ -37,7 +37,7 @@ class GatewayServices:
     cron_pending_job_ids: Callable[[str], set[str]] | None
     local_trigger_pending_ids: Callable[[str], set[str]] | None
     subagent_manager: Any | None
-    owner_id: str | None = None
+    owner_id: str | list[str] | None = None
 
 
 def build_gateway_services(
@@ -62,7 +62,7 @@ def build_gateway_services(
     agent_loop: Any | None = None,
     subagent_manager: Any | None = None,
     runtime_resolver: Callable[[str | None], Any] | None = None,
-    owner_id: str | None = None,
+    owner_id: str | list[str] | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
     tokens = GatewayTokenStore()

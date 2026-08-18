@@ -79,7 +79,7 @@ from nanobot.session.model_selection import (
 )
 from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
 from nanobot.utils.cancellation import task_is_cancelling
-from nanobot.utils.helpers import normalize_owner_match
+from nanobot.utils.helpers import is_owner_match
 from nanobot.utils.llm_runtime import LLMRuntime
 
 if TYPE_CHECKING:
@@ -207,7 +207,7 @@ class AgentLoop(CheckpointMixin, TurnStateMixin, RunLoopMixin):
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
         restart_mode: str = "auto",
         local_trigger_store: Any | None = None,
-        owner_id: str | None = None,
+        owner_id: str | list[str] | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -781,7 +781,7 @@ class AgentLoop(CheckpointMixin, TurnStateMixin, RunLoopMixin):
         if (
             self._owner_id
             and request.sender_id
-            and normalize_owner_match(request.sender_id) != normalize_owner_match(self._owner_id)
+            and not is_owner_match(request.sender_id, self._owner_id)
         ):
             blocks.append(
                 RuntimeContextBlock(

@@ -580,7 +580,7 @@ class MemoryStore:
         self,
         *,
         max_entries: int = 20,
-        owner_id: str | None = None,
+        owner_id: str | list[str] | None = None,
     ) -> tuple[str, int] | None:
         """Build the Dream prompt with unprocessed history context.
 
@@ -599,7 +599,8 @@ class MemoryStore:
         last_cursor = self.get_last_dream_cursor()
         entries = self.read_unprocessed_history(since_cursor=last_cursor)
         if owner_id:
-            entries = [e for e in entries if e.get("sender_id") == owner_id]
+            owners = owner_id if isinstance(owner_id, (list, tuple, set)) else [owner_id]
+            entries = [e for e in entries if e.get("sender_id") in owners]
         if not entries:
             return None
 
