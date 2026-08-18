@@ -95,6 +95,7 @@ class SubagentManager:
         max_concurrent_subagents: int | None = None,
         fail_on_tool_error: bool | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
+        owner_id: str | list[str] | None = None,
     ):
         if workspace is None:
             raise TypeError("SubagentManager.__init__() missing required argument: 'workspace'")
@@ -142,6 +143,7 @@ class SubagentManager:
             if fail_on_tool_error is not None
             else defaults.fail_on_tool_error
         )
+        self.owner_id = owner_id
         self.runner = AgentRunner()
         self._exec_session_manager = ExecSessionManager()
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
@@ -344,9 +346,24 @@ class SubagentManager:
                 restrict_to_workspace=cfg.restrict_to_workspace,
                 workspace=root,
             ),
+            owner_id=self.owner_id,
         )
         ToolLoader().load(ctx, registry, scope=scope)
         return registry
+
+    def _default_sender_id(self) -> str | None:
+        """Return a representative owner identity when no origin sender is known.
+
+        WebUI-triggered subagents have no inbound sender, so we fall back to
+        the configured operator identity so owner-only tools still behave as
+        expected inside a subagent.
+        """
+        if not self.owner_id:
+            return None
+        if isinstance(self.owner_id, (list, tuple, set)):
+            first = next(iter(self.owner_id), None)
+            return str(first) if first else None
+        return str(self.owner_id)
 
     async def spawn(
         self,
@@ -356,6 +373,7 @@ class SubagentManager:
         origin_chat_id: str = "direct",
         session_key: str | None = None,
         origin_message_id: str | None = None,
+        origin_sender_id: str | None = None,
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
         *,
@@ -376,7 +394,7 @@ class SubagentManager:
             runtime = runtime.with_generation_overrides(temperature=temperature)
         task_id = task_id or str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
-        origin = {"channel": origin_channel, "chat_id": origin_chat_id, "session_key": session_key}
+        origin = {"channel": origin_channel, "chat_id": origin_chat_id, "session_key": session_key, "sender_id": origin_sender_id}
 
         status = SubagentStatus(
             task_id=task_id,
@@ -407,14 +425,15 @@ class SubagentManager:
                 display_label,
                 origin,
                 status,
-                runtime,
-                origin_message_id,
-                workspace_scope,
-                initial_messages=initial_messages,
-                tool_scope=tool_scope,
-                extra_metadata=extra_metadata,
-                on_announce=on_announce,
-            )
+            runtime,
+            origin_message_id,
+            workspace_scope,
+            initial_messages=initial_messages,
+            tool_scope=tool_scope,
+            extra_metadata=extra_metadata,
+            on_announce=on_announce,
+            origin_sender_id=origin_sender_id,
+        )
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -448,6 +467,7 @@ class SubagentManager:
         origin_chat_id: str = "direct",
         session_key: str | None = None,
         origin_message_id: str | None = None,
+        origin_sender_id: str | None = None,
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
         *,
@@ -468,6 +488,7 @@ class SubagentManager:
             "channel": origin_channel,
             "chat_id": origin_chat_id,
             "session_key": session_key,
+            "sender_id": origin_sender_id,
         }
         status = SubagentStatus(
             task_id=task_id,
@@ -490,6 +511,7 @@ class SubagentManager:
                 workspace_scope,
                 announce=False,
                 tool_scope=tool_scope,
+                origin_sender_id=origin_sender_id,
             )
         )
         self._running_tasks[task_id] = inline_task
@@ -527,6 +549,7 @@ class SubagentManager:
         tool_scope: str = "subagent",
         extra_metadata: dict[str, Any] | None = None,
         on_announce: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
+        origin_sender_id: str | None = None,
     ) -> str:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -596,12 +619,14 @@ class SubagentManager:
                 if self._llm_wall_timeout_for_session
                 else None
             )
+            sender_id = origin_sender_id or origin.get("sender_id") or self._default_sender_id()
             request_token = bind_request_context(RequestContext(
                 channel=origin["channel"],
                 chat_id=origin["chat_id"],
                 message_id=origin_message_id,
                 session_key=sess_key,
                 runtime=runtime,
+                sender_id=sender_id,
             ))
             token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
             try:
