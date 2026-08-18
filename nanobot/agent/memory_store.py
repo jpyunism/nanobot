@@ -17,7 +17,7 @@ from nanobot.runtime_context import public_history_messages
 from nanobot.session.manager import SessionManager
 from nanobot.utils.atomic_write import atomic_write_text
 from nanobot.utils.gitstore import GitStore
-from nanobot.utils.helpers import ensure_dir, strip_think, truncate_text
+from nanobot.utils.helpers import ensure_dir, is_owner_match, strip_think, truncate_text
 from nanobot.utils.prompt_templates import render_template
 from nanobot.utils.workspace_prompts import (
     WORKSPACE_PROMPT_MAX_CHARS,
@@ -580,7 +580,7 @@ class MemoryStore:
         self,
         *,
         max_entries: int = 20,
-        owner_id: str | None = None,
+        owner_id: str | list[str] | None = None,
     ) -> tuple[str, int] | None:
         """Build the Dream prompt with unprocessed history context.
 
@@ -599,7 +599,7 @@ class MemoryStore:
         last_cursor = self.get_last_dream_cursor()
         entries = self.read_unprocessed_history(since_cursor=last_cursor)
         if owner_id:
-            entries = [e for e in entries if e.get("sender_id") == owner_id]
+            entries = [e for e in entries if is_owner_match(e.get("sender_id"), owner_id)]
         if not entries:
             return None
 

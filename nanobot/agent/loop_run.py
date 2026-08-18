@@ -29,7 +29,7 @@ from nanobot.session.goal_state import (
 )
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.manager import Session
-from nanobot.utils.helpers import normalize_owner_match
+from nanobot.utils.helpers import is_owner_match
 from nanobot.utils.llm_runtime import LLMRuntime
 
 
@@ -178,11 +178,7 @@ class RunLoopMixin:
             message_metadata=metadata,
             session_metadata=session.metadata if session is not None else None,
         )
-        is_owner = bool(
-            self._owner_id
-            and sender_id
-            and normalize_owner_match(sender_id) == normalize_owner_match(self._owner_id)
-        )
+        is_owner = is_owner_match(sender_id, self._owner_id)
         if is_owner:
             # Owner gets full filesystem access regardless of channel defaults.
             effective_scope = build_workspace_scope(
