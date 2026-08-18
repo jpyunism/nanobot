@@ -842,6 +842,21 @@ class WhatsAppChannel(BaseChannel):
         server = match.group("server")
         return api.build_jid(user, server)
 
+    def owner_chat_id(self) -> str | None:
+        # ponytail: route error notifications to the operator's WhatsApp DM
+        # (phone + "@s.whatsapp.net") instead of spamming the originating
+        # group when a send fails. The global owner_id may hold multiple
+        # identities (Discord, Telegram, ...); pick the phone-shaped one.
+        # Phones are 8-15 digits; Discord snowflakes are 17+ so they're
+        # excluded by the length cap.
+        owner_ids = self._owner_id if isinstance(self._owner_id, (list, tuple, set)) else [self._owner_id]
+        for ident in owner_ids:
+            digits = "".join(ch for ch in str(ident) if ch.isdigit())
+            if 8 <= len(digits) <= 15:
+                return self._build_jid(f"{digits}@s.whatsapp.net")
+        return None
+
+
     def _resolve_send_target(self, chat_id: str) -> Any:
         """Pick a routable JID for sending.
 

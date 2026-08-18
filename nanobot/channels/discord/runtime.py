@@ -355,6 +355,16 @@ class DiscordChannel(BaseChannel):
     display_name = "Discord"
     _STREAM_EDIT_INTERVAL = 0.8
 
+    def owner_chat_id(self) -> str | None:
+        # ponytail: route error notifications to the operator's Discord DM
+        # (user id == DM chat id) instead of spamming the originating group.
+        owner_ids = self._owner_id if isinstance(self._owner_id, (list, tuple, set)) else [self._owner_id]
+        for ident in owner_ids:
+            text = str(ident).strip()
+            if text.isdigit() and len(text) >= 17:
+                return text
+        return None
+
     @classmethod
     def default_config(cls) -> dict[str, Any]:
         return DiscordConfig().model_dump(by_alias=True)

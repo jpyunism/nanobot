@@ -36,18 +36,38 @@ class BaseChannel(ABC):
     send_tool_hints: bool = True
     show_reasoning: bool = True
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(
+        self,
+        config: Any,
+        bus: MessageBus,
+        *,
+        owner_id: str | list[str] | None = None,
+    ):
         """
         Initialize the channel.
 
         Args:
             config: Channel-specific configuration.
             bus: The message bus for communication.
+            owner_id: Operator identity (or list) used to resolve the
+                owner DM chat for error notifications. Subclasses decide
+                which identity maps to their DM format.
         """
         self.config = config
         self.logger = logger.bind(channel=self.name)
         self.bus = bus
+        self._owner_id = owner_id
         self._running = False
+
+    def owner_chat_id(self) -> str | None:
+        """Return the operator's DM chat id for this channel, or None.
+
+        Used to route error notifications to the operator's private DM
+        instead of spamming the originating group. Subclasses override
+        this to translate the global ``owner_id`` into their channel's
+        DM chat format (e.g. WhatsApp ``<phone>@s.whatsapp.net``).
+        """
+        return None
         # ponytail: last_activity_at lets the manager watchdog detect a "live
         # but silent" channel (idle() blocked on a dead socket, group queue
         # task died, etc.) and force a restart. Subclasses should bump this
@@ -342,9 +362,9 @@ class BaseChannel(ABC):
 
         Override this in channel subclasses that need runtime wiring from the
         manager (e.g. the WebSocket channel needs gateway services). The default
-        is empty so ordinary channels require no special construction args.
+        passes the global ``owner_id`` so channels can resolve their owner DM.
         """
-        return {}
+        return {"owner_id": getattr(getattr(manager, "config", None), "owner_id", None)}
 
     def accepts_outbound(self, msg: OutboundMessage) -> bool:
         """Return True when this channel should consume an outbound message.
