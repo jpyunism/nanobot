@@ -362,9 +362,9 @@ class BaseChannel(ABC):
 
         Override this in channel subclasses that need runtime wiring from the
         manager (e.g. the WebSocket channel needs gateway services). The default
-        passes the global ``owner_id`` so channels can resolve their owner DM.
+        is empty so ordinary channels require no special construction args.
         """
-        return {"owner_id": getattr(getattr(manager, "config", None), "owner_id", None)}
+        return {}
 
     def accepts_outbound(self, msg: OutboundMessage) -> bool:
         """Return True when this channel should consume an outbound message.

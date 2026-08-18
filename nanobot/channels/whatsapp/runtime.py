@@ -205,11 +205,17 @@ class WhatsAppChannel(BaseChannel):
     def default_config(cls) -> dict[str, Any]:
         return WhatsAppConfig().model_dump(by_alias=True)
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(
+        self,
+        config: Any,
+        bus: MessageBus,
+        *,
+        owner_id: str | list[str] | None = None,
+    ):
         legacy_bridge_fields = _legacy_bridge_config_fields(config) if isinstance(config, dict) else []
         if isinstance(config, dict):
             config = WhatsAppConfig.model_validate(config)
-        super().__init__(config, bus)
+        super().__init__(config, bus, owner_id=owner_id)
         if legacy_bridge_fields:
             self.logger.warning(
                 "Ignoring deprecated WhatsApp bridge config fields: {}. "

@@ -394,10 +394,16 @@ class DiscordChannel(BaseChannel):
             return cls._channel_key(parent)
         return None
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(
+        self,
+        config: Any,
+        bus: MessageBus,
+        *,
+        owner_id: str | list[str] | None = None,
+    ):
         if isinstance(config, dict):
             config = DiscordConfig.model_validate(config)
-        super().__init__(config, bus)
+        super().__init__(config, bus, owner_id=owner_id)
         self.config: DiscordConfig = config
         self._client: DiscordBotClient | None = None
         self._typing = TypingIndicator(interval=TYPING_INTERVAL_S)
