@@ -186,6 +186,7 @@ class ChannelManager:
     ) -> BaseChannel:
         kwargs = cls.build_kwargs(self)
         channel = cls(section, self.bus, **kwargs)
+        channel._owner_id = getattr(self.config, "owner_id", None)
         if cls.accepts_outbound and self._subagent_manager is not None:
             if hasattr(channel, "send_subagent_update"):
                 self._wire_subagent_broadcast(channel)
