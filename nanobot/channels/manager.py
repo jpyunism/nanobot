@@ -1008,6 +1008,7 @@ class ChannelManager:
                         "Send to {} failed with non-retriable {}: {}; not retrying.",
                         msg.channel, type(e).__name__, e,
                     )
+                    await self._notify_owner_of_send_failure(channel, msg, e)
                     return
 
                 loop = asyncio.get_running_loop()
@@ -1021,6 +1022,7 @@ class ChannelManager:
                         "Failed to send to {} after {} attempts",
                         msg.channel, attempt,
                     )
+                    await self._notify_owner_of_send_failure(channel, msg, e)
                     return
                 delay = _SEND_RETRY_DELAYS[min(attempt - 1, len(_SEND_RETRY_DELAYS) - 1)]
                 if deadline is not None:
@@ -1036,6 +1038,37 @@ class ChannelManager:
                     await asyncio.sleep(delay)
                 except asyncio.CancelledError:
                     raise  # Propagate cancellation during sleep
+
+    async def _notify_owner_of_send_failure(
+        self,
+        channel: BaseChannel,
+        msg: OutboundMessage,
+        error: BaseException,
+    ) -> None:
+        # ponytail: when a send fails permanently (group removed us, 463,
+        # socket down, ...) the message would otherwise stay stuck in a
+        # retry loop or be silently dropped. Instead, tell the operator
+        # over their private DM with the reason — never spam the group
+        # that caused the failure.
+        owner_chat = channel.owner_chat_id()
+        if not owner_chat or owner_chat == msg.chat_id:
+            return
+        reason = str(error).strip() or type(error).__name__
+        content = (
+            f"⚠️ Send to {msg.channel}:{msg.chat_id} failed: "
+            f"{type(error).__name__}: {reason}"
+        )
+        try:
+            await self.bus.publish_outbound(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=owner_chat,
+                    content=content,
+                    metadata={"origin_channel": msg.channel, "origin_chat_id": msg.chat_id},
+                )
+            )
+        except Exception:
+            logger.exception("Failed to notify owner of send failure")
 
     def get_channel(self, name: str) -> BaseChannel | None:
         """Get a channel by name."""
