@@ -31,6 +31,8 @@ def normalize_owner_match(value: str | None) -> str:
     """
     if not value:
         return ""
+    if not isinstance(value, str):
+        return str(value)
     normalized = value.strip().lstrip("+")
     if "@" in normalized:
         normalized = normalized.split("@", 1)[0]
