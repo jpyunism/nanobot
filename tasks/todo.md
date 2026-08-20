@@ -44,6 +44,6 @@ Spec: `docs/spec-fix-watchdog-canales.md` · Plan: `tasks/plan.md`
   - Acceptance: `uv run pytest` desde el dir del repo verde (sin regresiones nuevas) y `ruff check` limpio en los archivos tocados
   - Verify: salida de pytest y ruff
 
-- [ ] **T3.2 Commit + PR al fork**
+- [x] **T3.2 Commit + PR al fork**
   - Acceptance: commit conventional (`fix(channels): ...`), push a `jpyunism:fix/telegram-watchdog-restart`, PR a `madkoding/nanobot` con tests de regresión (requisito PR Guardian)
   - Verify: PR abierto en GitHub con CI verde
