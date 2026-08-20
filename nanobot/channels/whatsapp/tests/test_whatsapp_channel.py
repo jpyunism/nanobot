@@ -1221,6 +1221,118 @@ async def test_dm_message_uses_chat_session_key(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_screen_unknown_dm_sends_greeting_and_buffers(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    ch = _make_channel({"unknownDmPolicy": "screen"})
+    ch._owner_id = "56900000000"
+    sent_messages: list[tuple[Any, str]] = []
+
+    class _Client:
+        async def send_message(self, to: Any, text: str) -> None:
+            sent_messages.append((to, text))
+
+        async def download_any(self, *args, **kwargs) -> None:
+            pass
+
+    client = _Client()
+    ch._handle_message = AsyncMock()
+
+    event = _event(
+        message=_Proto(conversation="hola, necesito ayuda"),
+        chat=_jid("56911111111", "s.whatsapp.net"),
+        sender=_jid("56911111111", "s.whatsapp.net"),
+        is_group=False,
+    )
+    await ch._handle_neonize_message(client, event)
+
+    ch._handle_message.assert_not_called()
+    assert len(sent_messages) == 1
+    assert "56911111111" in str(sent_messages[0][0])
+    assert "No reconozco tu número" in sent_messages[0][1]
+    assert "56911111111" in ch._unknown_dm_buffers
+    assert len(ch._unknown_dm_buffers["56911111111"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_screen_unknown_dm_sends_summary_to_owner(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    ch = _make_channel({"unknownDmPolicy": "screen", "unknownDmSummaryAfter": 3})
+    ch._owner_id = "56900000000"
+    sent_messages: list[tuple[Any, str]] = []
+
+    class _Client:
+        async def send_message(self, to: Any, text: str) -> None:
+            sent_messages.append((to, text))
+
+        async def download_any(self, *args, **kwargs) -> None:
+            pass
+
+    client = _Client()
+    ch._handle_message = AsyncMock()
+
+    for i, content in enumerate(["msg1", "msg2", "msg3"]):
+        event = _event(
+            message=_Proto(conversation=content),
+            message_id=f"m{i}",
+            chat=_jid("56911111111", "s.whatsapp.net"),
+            sender=_jid("56911111111", "s.whatsapp.net"),
+            is_group=False,
+        )
+        await ch._handle_neonize_message(client, event)
+
+    ch._handle_message.assert_not_called()
+    # Greeting + summary to owner.
+    assert len(sent_messages) == 2
+    owner_message = sent_messages[1][1]
+    assert "Resumen de mensajes de un número desconocido" in owner_message
+    assert "msg1" in owner_message
+    assert "msg2" in owner_message
+    assert "msg3" in owner_message
+
+
+@pytest.mark.asyncio
+async def test_known_contact_bypasses_screen(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    ch = _make_channel({"unknownDmPolicy": "screen", "knownContacts": ["56911111111"]})
+    ch._owner_id = "56900000000"
+    ch._handle_message = AsyncMock()
+
+    event = _event(
+        message=_Proto(conversation="hola, soy conocido"),
+        chat=_jid("56911111111", "s.whatsapp.net"),
+        sender=_jid("56911111111", "s.whatsapp.net"),
+        is_group=False,
+    )
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        event,
+    )
+
+    assert ch._handle_message.awaited
+
+
+@pytest.mark.asyncio
+async def test_owner_bypasses_screen(monkeypatch) -> None:
+    _patch_neonize_api(monkeypatch)
+    ch = _make_channel({"unknownDmPolicy": "screen"})
+    ch._owner_id = ["56900000000", "940323605223444601"]
+    ch._handle_message = AsyncMock()
+
+    event = _event(
+        message=_Proto(conversation="hola owner"),
+        chat=_jid("56900000000", "s.whatsapp.net"),
+        sender=_jid("56900000000", "s.whatsapp.net"),
+        is_group=False,
+    )
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        event,
+    )
+
+    assert ch._handle_message.awaited
+
+
+@pytest.mark.asyncio
 async def test_send_stops_typing(monkeypatch) -> None:
     _patch_neonize_api(monkeypatch)
     paused: list[tuple[Any, Any, Any]] = []
@@ -1343,6 +1455,99 @@ async def test_group_policy_mention_accepts_reply_to_bot() -> None:
 
     kwargs = ch._handle_message.await_args.kwargs
     assert kwargs["metadata"]["is_reply_to_bot"] is True
+
+
+@pytest.mark.asyncio
+async def test_group_context_buffer_captures_unmentioned_messages() -> None:
+    # Unmentioned group messages should be buffered so they can be used as
+    # context when the bot is later addressed in the same group.
+    ch = _make_channel({"groupPolicy": "mention", "groupContextBufferSize": 3})
+    ch._self_jids = {"bot@s.whatsapp.net", "bot"}
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        _event(
+            message=_Proto(conversation="first message"),
+            chat=_jid("120363000", "g.us"),
+            sender=_jid("111", "lid"),
+            is_group=True,
+        ),
+    )
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        _event(
+            message=_Proto(conversation="second message"),
+            message_id="m2",
+            chat=_jid("120363000", "g.us"),
+            sender=_jid("222", "lid"),
+            is_group=True,
+        ),
+    )
+
+    ch._handle_message.assert_not_called()
+    assert "120363000@g.us" in ch._group_context_buffers
+    assert len(ch._group_context_buffers["120363000@g.us"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_group_context_is_injected_when_addressed() -> None:
+    # When the bot is mentioned in a group, the prompt should include the
+    # previous buffered messages from that group as runtime context.
+    ch = _make_channel({"groupPolicy": "mention", "groupContextBufferSize": 3})
+    ch._self_jids = {"bot@s.whatsapp.net", "bot"}
+    ch._handle_message = AsyncMock()
+
+    ch._add_group_context("120363000@g.us", "111", "Alice", "first message")
+    ch._add_group_context("120363000@g.us", "222", "Bob", "second message")
+
+    context = _Proto(mentionedJID=["bot@s.whatsapp.net"])
+    message = _Proto(extendedTextMessage=_Proto(text="@bot summary?", contextInfo=context))
+
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        _event(
+            message=message,
+            chat=_jid("120363000", "g.us"),
+            sender=_jid("333", "lid"),
+            sender_alt=_jid("15559998888", "s.whatsapp.net"),
+            is_group=True,
+        ),
+    )
+    await ch._drain_group_queue("120363000@g.us")
+
+    kwargs = ch._handle_message.await_args.kwargs
+    blocks = kwargs["metadata"]["_runtime_context_blocks"]
+    context_block = next(b for b in blocks if b.source == "whatsapp_recent_context")
+    assert "first message" in context_block.content
+    assert "second message" in context_block.content
+    assert "Alice" in context_block.content
+    assert "Bob" in context_block.content
+    # Current message must not appear in its own context.
+    assert "summary?" not in context_block.content
+
+
+@pytest.mark.asyncio
+async def test_group_context_buffer_ignores_dms() -> None:
+    # DM messages should not populate the group context buffer.
+    ch = _make_channel({"groupContextBufferSize": 3})
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        _event(
+            message=_Proto(conversation="dm message"),
+            chat=_jid("15551234567", "s.whatsapp.net"),
+            sender=_jid("15551234567", "s.whatsapp.net"),
+            is_group=False,
+        ),
+    )
+
+    kwargs = ch._handle_message.await_args.kwargs
+    assert not any(
+        b.source == "whatsapp_recent_context" for b in kwargs["metadata"]["_runtime_context_blocks"]
+    )
+    assert not ch._group_context_buffers
 
 
 @pytest.mark.asyncio

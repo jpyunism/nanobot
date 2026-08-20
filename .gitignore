@@ -240,4 +240,10 @@ webui/__pycache__/
 webui/*.pyc
 
 # Agent tooling
+.opencode/MagicMock/
+
+# Test artifact
+MagicMock/
+
+# Opencode tooling (node_modules)
 .opencode/

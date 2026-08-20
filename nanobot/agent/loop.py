@@ -291,6 +291,18 @@ class AgentLoop(CheckpointMixin, TurnStateMixin, RunLoopMixin):
 
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
+        # ponytail: kick off a background incremental index of the workspace so
+        # grep/find_files can hit SQLite instead of walking the whole tree.
+        # Only schedule when an event loop is already running; tests construct
+        # AgentLoop synchronously and would otherwise leave a coroutine unawaited.
+        try:
+            from nanobot.agent.indexer import index_workspace_async
+
+            loop = asyncio.get_running_loop()
+            task = loop.create_task(index_workspace_async(workspace))
+            self._background_tasks.append(task)
+        except Exception:
+            pass
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
         self._file_state_store = FileStateStore(max_sessions=SESSION_CACHE_MAX_SIZE)

@@ -10,6 +10,7 @@ import os
 import re
 import secrets
 import time
+from collections import deque
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path
@@ -69,6 +70,20 @@ class WhatsAppConfig(Base):
     # Per-sender DM workspace override. The key can be a bare phone number,
     # a WhatsApp "lid", or a full "56912345678@s.whatsapp.net" JID.
     dm_workspaces: dict[str, str] = Field(default_factory=dict)
+    # Number of recent messages to keep per group as conversation context.
+    group_context_buffer_size: int = 20
+    # DM policy for messages from numbers not in known_contacts.
+    # "open": process immediately (legacy behavior).
+    # "screen": ask the sender to identify themselves, accumulate messages,
+    #           and send the owner a summary after ``unknown_dm_summary_after``
+    #           messages so the owner can decide whether to authorize the chat.
+    unknown_dm_policy: Literal["open", "screen"] = "open"
+    # Number of buffered messages from an unknown DM sender before the owner
+    # receives a summary request. 0 disables automatic summary.
+    unknown_dm_summary_after: int = 3
+    # Known contacts (bare phone numbers or full JIDs) that bypass the screen.
+    # The owner is always considered known. Empty list = only owner is known.
+    known_contacts: list[str] = Field(default_factory=list)
 
 
 class _NeonizeAPI(NamedTuple):
@@ -255,6 +270,12 @@ class WhatsAppChannel(BaseChannel):
             dm_workspaces=self.config.dm_workspaces,
             log=self.logger,
         )
+        # Rolling buffer of recent messages per WhatsApp group (chat_jid -> deque).
+        # Each entry is (sender_id, display_name, text, timestamp).
+        self._group_context_buffers: dict[str, deque[tuple[str, str | None, str, float]]] = {}
+        # Buffered messages from unknown DM senders while they are being screened.
+        # Key is sender_id, value is a list of (display_name, text, timestamp).
+        self._unknown_dm_buffers: dict[str, list[tuple[str | None, str, float]]] = {}
 
     def _database_path(self) -> Path:
         configured = self.config.database_path.strip()
@@ -629,6 +650,8 @@ class WhatsAppChannel(BaseChannel):
             if not self._connected:
                 continue
             try:
+                # ponytail: bump activity every healthy poll so the manager
+                # watchdog (WATCHDOG_IDLE_S=600s) doesn't kill idle sessions.
                 if not client.is_connected():
                     self._reconnect_triggered = True
                     self.logger.warning(
@@ -636,6 +659,7 @@ class WhatsAppChannel(BaseChannel):
                     )
                     await client.stop()
                     return
+                self._touch_activity()
             except Exception:
                 return
 
@@ -645,6 +669,7 @@ class WhatsAppChannel(BaseChannel):
         self._connected = False
         client = self._client
         self._client = None
+        self._group_context_buffers.clear()
         if client is not None:
             await client.stop()
 
@@ -880,6 +905,112 @@ class WhatsAppChannel(BaseChannel):
                 return self._build_jid(f"{phone}@s.whatsapp.net")
         return self._build_jid(chat_id)
 
+    def _is_known_sender(self, sender_id: str) -> bool:
+        """Return True when the sender is the owner or in the known contacts list."""
+        if not sender_id:
+            return False
+        normalized = _normalize_jid(sender_id)
+        bare = _bare_jid(sender_id)
+        owner_ids = self._owner_id if isinstance(self._owner_id, (list, tuple, set)) else [self._owner_id]
+        for owner in owner_ids:
+            owner_text = str(owner or "")
+            if not owner_text:
+                continue
+            if owner_text == sender_id or owner_text == normalized or owner_text == bare:
+                return True
+            # Owner may be configured as bare phone; match either phone form.
+            owner_bare = _bare_jid(owner_text)
+            if owner_bare and (owner_bare == bare or owner_bare == normalized):
+                return True
+        for contact in self.config.known_contacts:
+            contact_text = str(contact or "").strip()
+            if not contact_text:
+                continue
+            if contact_text == sender_id or contact_text == normalized or contact_text == bare:
+                return True
+            contact_bare = _bare_jid(contact_text)
+            if contact_bare and (contact_bare == bare or contact_bare == normalized):
+                return True
+        return False
+
+    def _unknown_dm_summary(self, sender_id: str) -> tuple[str, str] | None:
+        """Return (summary_text, sender_label) for buffered unknown DM messages."""
+        buffer = self._unknown_dm_buffers.get(sender_id)
+        if not buffer:
+            return None
+        lines = []
+        label = sender_id
+        for display_name, text, _timestamp in buffer:
+            if display_name:
+                label = display_name
+            lines.append(f"- [{label}]: {text[:200]}")
+        summary = "\n".join(lines)
+        return summary, label
+
+    async def _screen_unknown_dm(
+        self,
+        client: Any,
+        sender_id: str,
+        chat_jid: str,
+        display_name: str | None,
+        text: str,
+        *,
+        timestamp: float | None = None,
+    ) -> None:
+        """Buffer an unknown DM and ask the sender to identify themselves.
+
+        Once ``unknown_dm_summary_after`` messages have been buffered, send the
+        owner a summary so they can decide whether to authorize the chat.
+        """
+        buffer = self._unknown_dm_buffers.setdefault(sender_id, [])
+        buffer.append((display_name, text, timestamp or time.monotonic()))
+        self.logger.info(
+            "Screening unknown WhatsApp DM from {} ({} messages buffered)",
+            sender_id, len(buffer),
+        )
+
+        # Reply once, politely, asking the sender to identify themselves.
+        if len(buffer) == 1:
+            greeting = display_name or "Hola"
+            reply = (
+                f"Hola {greeting}, soy el asistente de {self._owner_name()}. "
+                "No reconozco tu número. Por favor cuéntame quién eres "
+                "y cómo puedo ayudarte. Tu mensaje será revisado."
+            )
+            await self._send_whatsapp_text(client, chat_jid, reply)
+
+        summary_after = self.config.unknown_dm_summary_after
+        if summary_after > 0 and len(buffer) >= summary_after:
+            summary, label = self._unknown_dm_summary(sender_id) or ("", sender_id)
+            owner_chat = self.owner_chat_id()
+            if owner_chat and summary:
+                header = (
+                    f"Resumen de mensajes de un número desconocido ({sender_id} / {label}):\n\n"
+                )
+                footer = (
+                    "\n\nEste remitente no está en mis contactos conocidos. "
+                    "Responde en este chat si quieres que autorice la conversación."
+                )
+                await self._send_whatsapp_text(client, owner_chat, header + summary + footer)
+            # Keep buffering; the owner can reply to authorize later.
+
+    def _owner_name(self) -> str:
+        """Return a display name for the owner in the greeting message."""
+        owner_ids = self._owner_id if isinstance(self._owner_id, (list, tuple, set)) else [self._owner_id]
+        for ident in owner_ids:
+            text = str(ident or "").strip()
+            if text:
+                return text
+        return "mi operador"
+
+    async def _send_whatsapp_text(self, client: Any, to: Any, text: str) -> None:
+        """Send a plain text WhatsApp message, translating LID JIDs when possible."""
+        if not hasattr(client, "send_message"):
+            self.logger.debug("client has no send_message; dropping text to {}", to)
+            return
+        target = self._resolve_send_target(to) if isinstance(to, str) else to
+        await client.send_message(target, text)
+
     def _whatsapp_session_key(self, chat_id: str, sender_id: str, is_group: bool) -> str:
         """Return an isolated session key per sender inside group chats.
 
@@ -1103,10 +1234,6 @@ class WhatsAppChannel(BaseChannel):
             return
 
         is_group = bool(_safe_attr(source, "IsGroup", False))
-        if is_group and self.config.group_policy == "mention":
-            if not self._is_addressed_to_bot(message):
-                return
-
         message_id = str(_safe_attr(info, "ID", "") or "")
         if message_id:
             if message_id in self._processed_message_ids:
@@ -1137,6 +1264,31 @@ class WhatsAppChannel(BaseChannel):
         push_name = str(_safe_attr(info, "Pushname", "") or "").strip()
         self._remember_display_name(chat_jid, sender_id, push_name)
         display_name = push_name or self._display_name_for(chat_jid, sender_id)
+
+        is_addressed = self._is_addressed_to_bot(message)
+        if is_group and self.config.group_policy == "mention" and not is_addressed:
+            # Still buffer the message for later context, but do not respond now.
+            text_for_buffer = _message_text(message)
+            self._add_group_context(
+                chat_jid,
+                sender_id,
+                display_name,
+                text_for_buffer,
+                timestamp=timestamp,
+            )
+            return
+
+        # Always buffer group messages for context when the bot is addressed too.
+        text_for_buffer = _message_text(message)
+        if is_group:
+            self._add_group_context(
+                chat_jid,
+                sender_id,
+                display_name,
+                text_for_buffer,
+                timestamp=timestamp,
+            )
+
         mention = self._resolve_mention(sender_id, display_name) if is_group else None
         identity_block = self._sender_identity_block(
             sender_id, display_name, self._is_reply_to_bot(message), phone_id
@@ -1145,6 +1297,12 @@ class WhatsAppChannel(BaseChannel):
         runtime_blocks: list[RuntimeContextBlock] = [identity_block]
         if contact_block is not None:
             runtime_blocks.append(contact_block)
+        if is_group and self.config.group_context_buffer_size > 0:
+            recent_context = self._get_group_context(chat_jid)
+            if recent_context:
+                runtime_blocks.append(
+                    RuntimeContextBlock(source="whatsapp_recent_context", content=recent_context)
+                )
         metadata = {
             "message_id": message_id or None,
             "timestamp": int(timestamp) if timestamp else None,
@@ -1167,6 +1325,20 @@ class WhatsAppChannel(BaseChannel):
         # still use `_resolve_send_target` so LID-based DMs reach a phone JID.
         typing_jid = self._build_typing_jid(chat_jid)
         session_key = self._whatsapp_session_key(chat_jid, sender_id, is_group)
+
+        # Screen DMs from unknown senders before handing them to the agent.
+        if not is_group and self.config.unknown_dm_policy == "screen":
+            if not self._is_known_sender(sender_id):
+                text_for_buffer = _message_text(message)
+                await self._screen_unknown_dm(
+                    client,
+                    sender_id,
+                    chat_jid,
+                    display_name,
+                    text_for_buffer,
+                    timestamp=timestamp,
+                )
+                return
 
         async def _process(mention_tag: str | None) -> None:
             if authorization_id is None:
@@ -1313,6 +1485,47 @@ class WhatsAppChannel(BaseChannel):
                 + "\n".join(entries)
                 + "\n\nUse these names when referring to other people in the group."
             ),
+        )
+
+    def _get_group_context(self, chat_jid: str) -> str:
+        """Format the recent buffered group messages as prompt context."""
+        buffer = self._group_context_buffers.get(chat_jid)
+        if not buffer or len(buffer) == 0:
+            return ""
+        # The last entry is the current message; exclude it from the context.
+        context_entries = list(buffer)[:-1]
+        if not context_entries:
+            return ""
+        lines: list[str] = []
+        for sender_id, display_name, content, _timestamp in context_entries:
+            label = display_name or sender_id
+            snippet = content[:200]
+            lines.append(f"[{label}]: {snippet}")
+        return "\n".join(
+            [
+                f"Recent messages in this WhatsApp group (last {len(context_entries)}):",
+                *lines,
+            ]
+        )
+
+    def _add_group_context(
+        self,
+        chat_jid: str,
+        sender_id: str,
+        display_name: str | None,
+        content: str,
+        *,
+        timestamp: float | None = None,
+    ) -> None:
+        """Add one message to the rolling per-group context buffer."""
+        if self.config.group_context_buffer_size <= 0:
+            return
+        if chat_jid not in self._group_context_buffers:
+            self._group_context_buffers[chat_jid] = deque(
+                maxlen=self.config.group_context_buffer_size
+            )
+        self._group_context_buffers[chat_jid].append(
+            (sender_id, display_name, content, timestamp or time.monotonic())
         )
 
     def _is_group_chat(self, chat_id: str) -> bool:

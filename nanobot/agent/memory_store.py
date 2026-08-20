@@ -6,6 +6,7 @@ import json
 import os
 import re
 import threading
+import time
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
@@ -89,10 +90,25 @@ class MemoryStore:
         self._oversize_logged = False  # rate-limit oversized-entry warning
         self._dream_prompt_oversize_logged = False
         self._append_lock = threading.Lock()  # serialize cursor allocation + append
+        self._bm25_lock = threading.Lock()
         self._git = GitStore(workspace, tracked_files=[
             "SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor",
         ])
+        # ponytail: cache parsed history entries keyed by (mtime_ns, size, since_cursor).
+        # Invalidated automatically when the file changes on disk.
+        self._history_entries_cache: tuple[tuple[int, int, int], list[dict[str, Any]]] | None = None
+        # ponytail: BM25 memory store for retrieval instead of dumping full history.
+        self._bm25: Any | None = None
         self._maybe_migrate_legacy_history()
+
+    @property
+    def bm25(self) -> Any:
+        """Lazy-load the BM25 memory store."""
+        if self._bm25 is None:
+            from nanobot.agent.memory_bm25 import BM25MemoryStore
+
+            self._bm25 = BM25MemoryStore(self.workspace)
+        return self._bm25
 
     @property
     def git(self) -> GitStore:
@@ -258,6 +274,26 @@ class MemoryStore:
         long_term = self.read_memory()
         return f"## Long-term Memory\n{long_term}" if long_term else ""
 
+    def search_memory(
+        self,
+        query: str,
+        *,
+        session_key: str | None = None,
+        source: str | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Retrieve the most relevant memory chunks for *query* using BM25."""
+        try:
+            return self.bm25.search(
+                query,
+                session_key=session_key,
+                source=source,
+                limit=limit,
+            )
+        except Exception as exc:
+            logger.debug("BM25 memory search failed: {}", exc)
+            return []
+
     # -- history.jsonl — append-only, JSONL format ---------------------------
 
     def append_history(
@@ -312,13 +348,27 @@ class MemoryStore:
             if sender_id:
                 record["sender_id"] = sender_id
             with open(self.history_file, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
                 f.flush()
                 os.fsync(f.fileno())
             with open(self._cursor_file, "w", encoding="utf-8") as f:
                 f.write(str(cursor))
                 f.flush()
                 os.fsync(f.fileno())
+            # ponytail: also index the content in BM25 so future turns can
+            # retrieve it by relevance instead of re-reading the whole file.
+            if content.strip():
+                try:
+                    self.bm25.add_chunk(
+                        content,
+                        source="history",
+                        session_key=session_key,
+                        timestamp=time.mktime(
+                            datetime.strptime(ts, "%Y-%m-%d %H:%M").timetuple()
+                        ),
+                    )
+                except Exception as exc:
+                    logger.debug("BM25 index append failed: {}", exc)
         return cursor
 
     @staticmethod
@@ -397,8 +447,26 @@ class MemoryStore:
         return max((c for _, c in self._iter_valid_entries()), default=0) + 1
 
     def read_unprocessed_history(self, since_cursor: int) -> list[dict[str, Any]]:
-        """Return history entries with a valid cursor > *since_cursor*."""
-        return [e for e, c in self._iter_valid_entries() if c > since_cursor]
+        """Return history entries with a valid cursor > *since_cursor*.
+
+        ponytail: cache parsed entries against the file's (mtime_ns, size).
+        The history file grows monotonically between Dream cycles; on busy
+        sessions this avoids re-parsing the entire file every turn.
+        """
+        try:
+            stat = self.history_file.stat()
+            key = (int(stat.st_mtime_ns), int(stat.st_size), int(since_cursor))
+        except OSError:
+            key = (0, 0, since_cursor)
+
+        if self._history_entries_cache is not None:
+            cache_key, entries = self._history_entries_cache
+            if cache_key == key:
+                return entries
+
+        entries = [e for e, c in self._iter_valid_entries() if c > since_cursor]
+        self._history_entries_cache = (key, entries)
+        return entries
 
     @classmethod
     def _is_internal_history_session(cls, session_key: str | None) -> bool:

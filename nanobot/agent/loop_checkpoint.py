@@ -189,7 +189,7 @@ class CheckpointMixin:
         try:
             return InboundMessage(
                 channel=payload.get("channel", "cli"),
-                sender_id=payload.get("sender_id", "user"),
+                sender_id=str(payload.get("sender_id", "user")),
                 chat_id=payload.get("chat_id", "direct"),
                 content=payload.get("content", ""),
                 media=list(payload.get("media") or []),
