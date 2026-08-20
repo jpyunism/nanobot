@@ -1,48 +1,49 @@
-# Tasks: Telegram — Message effects opt-in (sin confeti por defecto)
+# Tasks: Fix watchdog de canales — reinicio en loop y canales muertos sin reintento
 
-Spec: `docs/spec-telegram-message-effects-opt-in.md` · Plan: `tasks/plan.md`
+Spec: `docs/spec-fix-watchdog-canales.md` · Plan: `tasks/plan.md`
 
 ## Tareas
 
-### T1: TDD (RED) — test de regresión nuevo
+### T1: TDD (RED) — tests de regresión
 
-- [x] **T1.1 Test de regresión: sin effect y sin config → sin message_effect_id**
-  - Acceptance: `send()` con `OutboundMessage` sin `effect` y `TelegramConfig` sin `message_effect_id` no incluye `message_effect_id` en ningún payload (rich y legacy); el test falla (RED) por el default actual
-  - Verify: `uv run pytest nanobot/channels/telegram/tests/test_telegram_channel.py -q -k "without_effect"` falla (RED)
+- [x] **T1.1 Test manager: restart del watchdog resetea last_activity_at**
+  - Acceptance: canal sano con `last_activity_at` viejo (>600s) → el watchdog lo reinicia una vez y el timer queda en 0 (sin loop); el test falla (RED) porque hoy no se resetea
+  - Verify: `uv run pytest tests/channels/test_channel_watchdog.py -q` falla (RED)
+  - Files: `tests/channels/test_channel_watchdog.py`
+
+- [x] **T1.2 Test manager: canal con start fallido se reintenta**
+  - Acceptance: canal cuyo task de start terminó (falló) → el watchdog crea un task nuevo (reintento) en vez de saltearlo; el test falla (RED) porque hoy hace `continue`
+  - Verify: `uv run pytest tests/channels/test_channel_watchdog.py -q` falla (RED)
+  - Files: `tests/channels/test_channel_watchdog.py`
+
+- [x] **T1.3 Test telegram: stop seguro tras start fallido**
+  - Acceptance: `start()` que falla en `initialize()` → `is_running == False` y `stop()` posterior no lanza `RuntimeError`; el test falla (RED) porque hoy `_running` queda `True` y `stop()` lanza
+  - Verify: `uv run pytest nanobot/channels/telegram/tests/test_telegram_channel.py -q -k "start_failure"` falla (RED)
   - Files: `nanobot/channels/telegram/tests/test_telegram_channel.py`
 
 ### T2: Implementación (GREEN)
 
-- [x] **T2.1 `_resolve_message_effect` sin default confeti**
-  - Acceptance: falsy/`None` → `None`; `confeti`/`confetti` → id; id crudo → passthrough; REQ-001..005 cumplidos
-  - Verify: T1.1 pasa (GREEN) + los 4 tests de effect existentes pasan
+- [x] **T2.1 `_start_channel` resetea last_activity_at**
+  - Acceptance: `channel.last_activity_at = 0.0` antes de `await channel.start()` (D1)
+  - Verify: T1.1 pasa (GREEN)
+  - Files: `nanobot/channels/manager.py`
+
+- [x] **T2.2 Watchdog reintenta canales fallidos**
+  - Acceptance: task done o canal en `_channel_errors` → `_start_channel_task` con throttle `WATCHDOG_RETRY_INTERVAL_S` (60s) por canal (D2)
+  - Verify: T1.2 pasa (GREEN)
+  - Files: `nanobot/channels/manager.py`
+
+- [x] **T2.3 Telegram start/stop seguros**
+  - Acceptance: `start()` limpia `_running=False`/`_app=None` en el except; `stop()` es no-op si `_app` es None o el updater no arrancó (D3)
+  - Verify: T1.3 pasa (GREEN)
   - Files: `nanobot/channels/telegram/runtime.py`
 
-- [x] **T2.2 Actualizar test de default por config**
-  - Acceptance: `test_send_effect_config_default_applies_when_no_override` setea `message_effect_id="confeti"` explícito en `TelegramConfig` (caso REQ-003) y sigue pasando
-  - Verify: `uv run pytest nanobot/channels/telegram/tests/test_telegram_channel.py -q -k "effect"` verde
-  - Files: `nanobot/channels/telegram/tests/test_telegram_channel.py`
+### T3: Verificación y PR
 
-### T3: Docs
+- [x] **T3.1 Suite completa + lint**
+  - Acceptance: `uv run pytest` desde el dir del repo verde (sin regresiones nuevas) y `ruff check` limpio en los archivos tocados
+  - Verify: salida de pytest y ruff
 
-- [x] **T3.1 Actualizar spec UX existente (D3/REQ-007)**
-  - Acceptance: `docs/spec-telegram-ux-checklists-polls-effects.md` ya no dice "default confeti"; REQ-007 refleja opt-in con config
-  - Verify: `grep -rn "default.*confeti" docs/ nanobot/ | grep -v "sin confeti\|no-default\|opt-in"` sin hits
-  - Files: `docs/spec-telegram-ux-checklists-polls-effects.md`
-
-### T4: Verificación y release
-
-- [x] **T4.1 Suite completa + ruff**
-  - Acceptance: suite completa sin regresiones nuevas (5759+ passed / 16 failed WhatsApp preexistentes); `ruff check` limpio
-  - Verify: `uv run pytest -q` y `uv run ruff check`
-  - Files: —
-
-- [x] **T4.2 Commit, fork y PR a madkoding**
-  - Acceptance: commit conventional en `feature/telegram-no-default-confetti`, push al fork `jpyunism/nanobot`, PR a `madkoding/nanobot` con test de regresión
-  - Verify: PR abierto y mergeable
-  - Files: —
-
-- [x] **T4.3 Sync site-packages + aviso reinicio**
-  - Acceptance: `runtime.py` copiado a site-packages pyenv 3.13.3 y uv tool con md5 idénticos; aviso al usuario de reinicio manual
-  - Verify: `md5sum` de los 3 archivos iguales
-  - Files: `/home/jyunis/.pyenv/versions/3.13.3/lib/python3.13/site-packages/nanobot/channels/telegram/runtime.py`, `/home/jyunis/.local/share/uv/tools/nanobot-ai/lib/python3.13/site-packages/nanobot/channels/telegram/runtime.py`
+- [ ] **T3.2 Commit + PR al fork**
+  - Acceptance: commit conventional (`fix(channels): ...`), push a `jpyunism:fix/telegram-watchdog-restart`, PR a `madkoding/nanobot` con tests de regresión (requisito PR Guardian)
+  - Verify: PR abierto en GitHub con CI verde
