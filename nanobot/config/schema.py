@@ -179,6 +179,26 @@ class AgentDefaults(Base):
         validation_alias=AliasChoices("contentRepeatHardStopAfter"),
         serialization_alias="contentRepeatHardStopAfter",
     )
+    # Memory retrieval settings.
+    enable_bm25_memory: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("enableBm25Memory", "enable_bm25_memory"),
+        serialization_alias="enableBm25Memory",
+    )  # Retrieve relevant memory chunks via BM25 instead of dumping full history.
+    bm25_max_chunks_per_turn: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        validation_alias=AliasChoices("bm25MaxChunksPerTurn"),
+        serialization_alias="bm25MaxChunksPerTurn",
+    )
+    bm25_history_cap: int = Field(
+        default=2_000,
+        ge=100,
+        le=50_000,
+        validation_alias=AliasChoices("bm25HistoryCap"),
+        serialization_alias="bm25HistoryCap",
+    )  # Cap each history.jsonl entry before BM25 chunking.
     alternating_pattern_nudge_after: int = Field(
         default=6,
         ge=1,
@@ -439,9 +459,9 @@ class Config(BaseSettings):
         validation_alias=AliasChoices("modelPresets", "model_presets"),
         serialization_alias="modelPresets",
     )
-    owner_id: str | None = Field(
+    owner_id: str | list[str] | None = Field(
         default=None,
-        description="Operator identity. Non-matching senders are treated as untrusted context.",
+        description="Operator identity (or list of identities, one per channel). Non-matching senders are treated as untrusted context.",
         validation_alias=AliasChoices("ownerId", "owner_id"),
         serialization_alias="ownerId",
     )

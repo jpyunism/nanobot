@@ -55,6 +55,10 @@ _RESTART_NOTICE_START_POLL_S = 0.25
 WATCHDOG_INTERVAL_S = 60.0
 WATCHDOG_IDLE_S = 600.0
 WATCHDOG_GRACE_S = 120.0  # never trip before this many seconds since channel start
+# Reintento de canales cuyo start() falló (p.ej. timeout de red en getMe):
+# el watchdog los vuelve a intentar cada WATCHDOG_RETRY_INTERVAL_S hasta que
+# conectan, en vez de dejarlos muertos hasta un restart manual.
+WATCHDOG_RETRY_INTERVAL_S = 60.0
 
 
 def _is_non_retriable_send_error(exc: BaseException) -> bool:
@@ -140,6 +144,9 @@ class ChannelManager:
         self._channel_runtime_specs: dict[str, tuple[str, str]] = {}
         self._channel_errors: dict[str, str] = {}
         self._channel_tasks: dict[str, asyncio.Task] = {}
+        # Próximo instante (monotonic) en que el watchdog puede reintentar un
+        # canal cuyo start() falló (throttle de WATCHDOG_RETRY_INTERVAL_S).
+        self._channel_retry_at: dict[str, float] = {}
         self._dispatch_task: asyncio.Task | None = None
         self._watchdog_task: asyncio.Task | None = None
         self._started = False
@@ -186,6 +193,7 @@ class ChannelManager:
     ) -> BaseChannel:
         kwargs = cls.build_kwargs(self)
         channel = cls(section, self.bus, **kwargs)
+        channel._owner_id = getattr(self.config, "owner_id", None)
         if cls.accepts_outbound and self._subagent_manager is not None:
             if hasattr(channel, "send_subagent_update"):
                 self._wire_subagent_broadcast(channel)
@@ -379,6 +387,10 @@ class ChannelManager:
         if errors is None:
             errors = self._channel_errors = {}
         errors.pop(name, None)
+        # Reset del timer de liveness: un canal sano pero inactivo no debe
+        # quedar "silent" para siempre tras un restart del watchdog (loop de
+        # reinicios cada 60s). El canal arranca con 600s de gracia completos.
+        channel.last_activity_at = 0.0
         try:
             await channel.start()
         except asyncio.CancelledError:
@@ -626,6 +638,18 @@ class ChannelManager:
             for name, channel in list(self.channels.items()):
                 task = self._channel_tasks.get(name)
                 if task is None or task.done():
+                    # El start() anterior terminó (p.ej. falló con timeout de
+                    # red). Reintentar automáticamente en vez de dejar el
+                    # canal muerto hasta un restart manual del gateway.
+                    last_retry = self._channel_retry_at.get(name, 0.0)
+                    if now < last_retry:
+                        continue
+                    self._channel_retry_at[name] = now + WATCHDOG_RETRY_INTERVAL_S
+                    logger.warning(
+                        "Channel {} start task ended; retrying in {:.0f}s.",
+                        name, WATCHDOG_RETRY_INTERVAL_S,
+                    )
+                    self._start_channel_task(name, channel)
                     continue
                 if not channel.is_running:
                     continue
@@ -1008,6 +1032,7 @@ class ChannelManager:
                         "Send to {} failed with non-retriable {}: {}; not retrying.",
                         msg.channel, type(e).__name__, e,
                     )
+                    await self._notify_owner_of_send_failure(channel, msg, e)
                     return
 
                 loop = asyncio.get_running_loop()
@@ -1021,6 +1046,7 @@ class ChannelManager:
                         "Failed to send to {} after {} attempts",
                         msg.channel, attempt,
                     )
+                    await self._notify_owner_of_send_failure(channel, msg, e)
                     return
                 delay = _SEND_RETRY_DELAYS[min(attempt - 1, len(_SEND_RETRY_DELAYS) - 1)]
                 if deadline is not None:
@@ -1036,6 +1062,37 @@ class ChannelManager:
                     await asyncio.sleep(delay)
                 except asyncio.CancelledError:
                     raise  # Propagate cancellation during sleep
+
+    async def _notify_owner_of_send_failure(
+        self,
+        channel: BaseChannel,
+        msg: OutboundMessage,
+        error: BaseException,
+    ) -> None:
+        # ponytail: when a send fails permanently (group removed us, 463,
+        # socket down, ...) the message would otherwise stay stuck in a
+        # retry loop or be silently dropped. Instead, tell the operator
+        # over their private DM with the reason — never spam the group
+        # that caused the failure.
+        owner_chat = channel.owner_chat_id()
+        if not owner_chat or owner_chat == msg.chat_id:
+            return
+        reason = str(error).strip() or type(error).__name__
+        content = (
+            f"⚠️ Send to {msg.channel}:{msg.chat_id} failed: "
+            f"{type(error).__name__}: {reason}"
+        )
+        try:
+            await self.bus.publish_outbound(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=owner_chat,
+                    content=content,
+                    metadata={"origin_channel": msg.channel, "origin_chat_id": msg.chat_id},
+                )
+            )
+        except Exception:
+            logger.exception("Failed to notify owner of send failure")
 
     def get_channel(self, name: str) -> BaseChannel | None:
         """Get a channel by name."""

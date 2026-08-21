@@ -111,10 +111,14 @@ def generated_image_downloads(monkeypatch) -> list[str]:
         urls.append(url)
         return PNG_DATA_URL
 
-    monkeypatch.setattr(
-        "nanobot.providers.image_generation._download_image_data_url",
-        download,
-    )
+    for mod in (
+        "nanobot.providers.image_generation",
+        "nanobot.providers.image_gen.aihubmix",
+        "nanobot.providers.image_gen.modelscope",
+        "nanobot.providers.image_gen.zhipu",
+        "nanobot.providers.image_gen.openai_shared",
+    ):
+        monkeypatch.setattr(f"{mod}._download_image_data_url", download)
     return urls
 
 
@@ -1243,7 +1247,7 @@ async def test_codex_proxy_applies_to_oauth_and_http(monkeypatch) -> None:
             )
 
     monkeypatch.setattr(
-        "nanobot.providers.image_generation.httpx.AsyncClient",
+        "nanobot.providers.image_gen.codex.httpx.AsyncClient",
         FakeAsyncClient,
     )
     client = CodexImageGenerationClient(api_key=None, proxy=proxy)
@@ -1591,7 +1595,7 @@ class ModelScopeFakeClient:
 def _modelscope_fast_poll(monkeypatch) -> None:
     """Skip the real asyncio.sleep between ModelScope poll attempts."""
     monkeypatch.setattr(
-        "nanobot.providers.image_generation._MODELSCOPE_POLL_INTERVAL_S", 0.0
+        "nanobot.providers.image_gen.modelscope._MODELSCOPE_POLL_INTERVAL_S", 0.0
     )
 
 
@@ -1771,7 +1775,7 @@ async def test_modelscope_image_generation_extra_body_passthrough() -> None:
 async def test_modelscope_image_generation_poll_timeout(monkeypatch) -> None:
     """Polling that never reaches SUCCEED/FAILED raises a timeout error."""
     monkeypatch.setattr(
-        "nanobot.providers.image_generation._MODELSCOPE_POLL_MAX_ATTEMPTS", 3
+        "nanobot.providers.image_gen.modelscope._MODELSCOPE_POLL_MAX_ATTEMPTS", 3
     )
     submit = FakeResponse({"task_id": "t1"})
     # Always PENDING — never resolves.

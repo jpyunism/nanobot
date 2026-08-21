@@ -336,7 +336,11 @@ class WebSocketChannel(BaseChannel):
     def _sender_id_for(self, connection: Any, client_id: str) -> str:
         """Return the configured owner_id for WebUI-authenticated connections."""
         if connection in self._webui_connections and self.gateway.owner_id:
-            return self.gateway.owner_id
+            owner = self.gateway.owner_id
+            if isinstance(owner, (list, tuple, set)):
+                owner = owner[0] if owner else None
+            if owner:
+                return owner
         return client_id
 
     def _attach(self, connection: Any, chat_id: str) -> None:

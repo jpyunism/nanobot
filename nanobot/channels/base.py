@@ -36,17 +36,27 @@ class BaseChannel(ABC):
     send_tool_hints: bool = True
     show_reasoning: bool = True
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(
+        self,
+        config: Any,
+        bus: MessageBus,
+        *,
+        owner_id: str | list[str] | None = None,
+    ):
         """
         Initialize the channel.
 
         Args:
             config: Channel-specific configuration.
             bus: The message bus for communication.
+            owner_id: Operator identity (or list) used to resolve the
+                owner DM chat for error notifications. Subclasses decide
+                which identity maps to their DM format.
         """
         self.config = config
         self.logger = logger.bind(channel=self.name)
         self.bus = bus
+        self._owner_id = owner_id
         self._running = False
         # ponytail: last_activity_at lets the manager watchdog detect a "live
         # but silent" channel (idle() blocked on a dead socket, group queue
@@ -56,6 +66,16 @@ class BaseChannel(ABC):
         # means "never had activity" so the watchdog never fires during the
         # login grace window.
         self.last_activity_at: float = 0.0
+
+    def owner_chat_id(self) -> str | None:
+        """Return the operator's DM chat id for this channel, or None.
+
+        Used to route error notifications to the operator's private DM
+        instead of spamming the originating group. Subclasses override
+        this to translate the global ``owner_id`` into their channel's
+        DM chat format (e.g. WhatsApp ``<phone>@s.whatsapp.net``).
+        """
+        return None
 
     def _touch_activity(self) -> None:
         """Record that this channel just did work, for the manager watchdog."""

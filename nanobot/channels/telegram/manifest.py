@@ -12,6 +12,7 @@ SETUP_SPEC = ChannelSetupSpec(
         "allowFrom": field("list"),
         "groupPolicy": field("enum", choices=GROUP_POLICIES, default="mention"),
         "richMessages": field("bool", default=False),
+        "streaming": field("bool", default=True),
     },
     required=(required("token"),),
     official_url="https://t.me/BotFather",

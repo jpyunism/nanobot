@@ -45,35 +45,15 @@ from nanobot.security.workspace_access import (
     current_workspace_scope,
 )
 from nanobot.security.workspace_policy import is_path_within
-from nanobot.utils.helpers import normalize_owner_match
+from nanobot.utils.helpers import is_owner_match
 
 _IS_WINDOWS = sys.platform == "win32"
 _IS_LINUX = sys.platform.startswith("linux")
 
 
-def _reap_pid(pid: int) -> None:
-    """Best-effort ``waitpid`` to reap a child and prevent zombies.
-
-    Call this after killing or after normal completion of any subprocess
-    as a safety net — asyncio's child-watcher *should* have reaped it,
-    but in containers / edge-cases it sometimes doesn't.
-
-    Uses ``os`` capability checks rather than ``_IS_WINDOWS`` so this is
-    safe when tests patch the platform flag while still running on Windows
-    (``os.waitpid`` / ``os.WNOHANG`` do not exist there).
-    """
-    waitpid = getattr(os, "waitpid", None)
-    wnohang = getattr(os, "WNOHANG", None)
-    if waitpid is None or wnohang is None:
-        return
-    try:
-        waitpid(pid, wnohang)
-    except (ProcessLookupError, ChildProcessError):
-        # Already reaped, or not our child — both are fine.
-        pass
-    except OSError as exc:
-        logger.debug("_reap_pid({}): {}", pid, exc)
-
+# _reap_pid lives in utils/process.py; re-export so existing import sites and
+# test patches (nanobot.agent.tools.shell._reap_pid) keep working unchanged.
+from nanobot.utils.process import _reap_pid  # noqa: E402
 
 # Policy note appended to recoverable workspace-boundary guard errors.
 _WORKSPACE_BOUNDARY_NOTE = (
@@ -190,7 +170,7 @@ class ExecTool(Tool):
         path_append: str = "",
         allowed_env_keys: list[str] | None = None,
         session_manager: Any | None = None,
-        owner_id: str | None = None,
+        owner_id: str | list[str] | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -754,7 +734,7 @@ class ExecTool(Tool):
             is_owner = (
                 self.owner_id
                 and request_ctx is not None
-                and normalize_owner_match(request_ctx.sender_id) == normalize_owner_match(self.owner_id)
+                and is_owner_match(request_ctx.sender_id, self.owner_id)
             )
             for pattern in self.deny_patterns:
                 if re.search(pattern, lower):

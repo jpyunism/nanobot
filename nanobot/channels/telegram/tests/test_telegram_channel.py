@@ -15,7 +15,9 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.telegram.runtime import (
+    TELEGRAM_HTML_MAX_LEN,
     TELEGRAM_MAX_MESSAGE_LEN,
+    TELEGRAM_REASONING_MAX_LEN,
     TELEGRAM_REPLY_CONTEXT_MAX_LEN,
     TelegramChannel,
     TelegramConfig,
@@ -1155,6 +1157,175 @@ async def test_send_reply_infers_topic_from_message_id_cache() -> None:
 
     assert channel._app.bot.sent_messages[0]["message_thread_id"] == 42
     assert channel._app.bot.sent_messages[0]["reply_parameters"].message_id == 10
+
+
+@pytest.mark.asyncio
+async def test_reply_anchor_first_send_quotes_second_does_not() -> None:
+    """T-002: el primer send de un chat quotea; los siguientes no (default reply_to_message=false)."""
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="first",
+            metadata={"message_id": 1},
+        )
+    )
+    assert channel._app.bot.sent_messages[0]["reply_parameters"].message_id == 1
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="second",
+            metadata={"message_id": 2},
+        )
+    )
+    assert channel._app.bot.sent_messages[1].get("reply_parameters") is None
+
+
+@pytest.mark.asyncio
+async def test_reply_opt_in_always_quotes() -> None:
+    """T-002: reply_to_message=True conserva el comportamiento legacy (siempre quote)."""
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], reply_to_message=True)
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="456",
+            content="first",
+            metadata={"message_id": 1},
+        )
+    )
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="456",
+            content="second",
+            metadata={"message_id": 2},
+        )
+    )
+
+    assert channel._app.bot.sent_messages[0]["reply_parameters"].message_id == 1
+    assert channel._app.bot.sent_messages[1]["reply_parameters"].message_id == 2
+
+
+@pytest.mark.asyncio
+async def test_reply_no_message_id_no_quote() -> None:
+    """T-002: sin message_id no hay quote y el ancla no se consume."""
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="789",
+            content="no message_id",
+        )
+    )
+    assert channel._app.bot.sent_messages[0].get("reply_parameters") is None
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="789",
+            content="with message_id",
+            metadata={"message_id": 3},
+        )
+    )
+    assert channel._app.bot.sent_messages[1]["reply_parameters"].message_id == 3
+
+
+@pytest.mark.asyncio
+async def test_reply_reset_on_new_command() -> None:
+    """T-006: /new reinicia el ancla; el siguiente mensaje vuelve a quotea."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+
+    # Primer mensaje quotea (ancla consumida); el segundo no.
+    await channel.send(
+        OutboundMessage(
+            channel="telegram", chat_id="-100123",
+            content="first", metadata={"message_id": 1},
+        )
+    )
+    await channel.send(
+        OutboundMessage(
+            channel="telegram", chat_id="-100123",
+            content="second", metadata={"message_id": 2},
+        )
+    )
+    assert channel._app.bot.sent_messages[0]["reply_parameters"].message_id == 1
+    assert channel._app.bot.sent_messages[1].get("reply_parameters") is None
+
+    # /new resetea el ancla del chat.
+    await channel._process_forward_command(_make_telegram_update(text="/new"), None)
+    assert handled[0]["content"] == "/new"
+
+    # El siguiente mensaje vuelve a quotea.
+    await channel.send(
+        OutboundMessage(
+            channel="telegram", chat_id="-100123",
+            content="third", metadata={"message_id": 3},
+        )
+    )
+    assert channel._app.bot.sent_messages[2]["reply_parameters"].message_id == 3
+
+
+@pytest.mark.asyncio
+async def test_reply_reset_on_start_command() -> None:
+    """T-006: /start reinicia el ancla; el siguiente mensaje vuelve a quotea."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    # Primer mensaje quotea (ancla consumida); el segundo no.
+    await channel.send(
+        OutboundMessage(
+            channel="telegram", chat_id="-100123",
+            content="first", metadata={"message_id": 1},
+        )
+    )
+    await channel.send(
+        OutboundMessage(
+            channel="telegram", chat_id="-100123",
+            content="second", metadata={"message_id": 2},
+        )
+    )
+    assert channel._app.bot.sent_messages[0]["reply_parameters"].message_id == 1
+    assert channel._app.bot.sent_messages[1].get("reply_parameters") is None
+
+    # /start resetea el ancla del chat.
+    update = _make_telegram_update(text="/start", chat_type="private")
+    update.message.reply_text = AsyncMock()
+    await channel._on_start(update, None)
+    update.message.reply_text.assert_awaited_once()
+
+    # El siguiente mensaje vuelve a quotea.
+    await channel.send(
+        OutboundMessage(
+            channel="telegram", chat_id="-100123",
+            content="third", metadata={"message_id": 3},
+        )
+    )
+    assert channel._app.bot.sent_messages[2]["reply_parameters"].message_id == 3
 
 
 @pytest.mark.asyncio
@@ -2473,6 +2644,108 @@ async def test_send_delta_rich_finalizes_with_edit_rich_in_place() -> None:
 
 
 @pytest.mark.asyncio
+async def test_stream_legacy_second_send_no_quote() -> None:
+    """T-004: en streaming legacy el primer preview quotea; el segundo stream no."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    meta = {"message_id": 10}
+    await channel.send_delta("123", "hola ", stream_id="s:0", metadata=meta)
+    await asyncio.sleep(0.05)
+    await channel.send_delta("123", "mundo", stream_id="s:0", metadata=meta)
+    await channel.send_delta("123", "", stream_id="s:0", stream_end=True, metadata=meta)
+
+    assert len(channel._app.bot.sent_messages) == 1
+    assert channel._app.bot.sent_messages[0]["reply_parameters"]["message_id"] == 10
+
+    await channel.send_delta("123", "segundo stream", stream_id="s:1", metadata=meta)
+    await asyncio.sleep(0.05)
+    await channel.send_delta("123", " fin", stream_id="s:1", metadata=meta)
+    await channel.send_delta("123", "", stream_id="s:1", stream_end=True, metadata=meta)
+
+    assert len(channel._app.bot.sent_messages) == 2
+    assert channel._app.bot.sent_messages[1].get("reply_parameters") is None
+
+
+@pytest.mark.asyncio
+async def test_stream_rich_draft_second_send_no_quote() -> None:
+    """T-004: en streaming rich el primer draft quotea; el segundo stream no."""
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True, token="123:abc", allow_from=["*"],
+            rich_messages=True, stream_edit_interval=0.1,
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock()
+
+    meta = {"is_group": False, "message_id": 20}
+
+    # Primer stream: el reasoning abre el draft; el final fija con sendRichMessage.
+    await channel.send_reasoning_delta("123", "analizo", metadata=meta, stream_id="s:0")
+    await channel.send_reasoning_end("123", metadata=meta, stream_id="s:0")
+    await channel.send_delta("123", "hola ", stream_id="s:0", metadata=meta)
+    await channel.send_delta("123", "", stream_id="s:0", stream_end=True, metadata=meta)
+
+    rich_calls = [
+        c for c in channel._app.bot.do_api_request.call_args_list
+        if c.args[0] == "sendRichMessage"
+    ]
+    assert len(rich_calls) == 1
+    assert rich_calls[0].kwargs["api_kwargs"]["reply_parameters"]["message_id"] == 20
+
+    channel._app.bot.do_api_request.reset_mock()
+
+    # Segundo stream: mismo flujo, el chat ya está anclado → sin quote.
+    await channel.send_reasoning_delta("123", "otra vez", metadata=meta, stream_id="s:1")
+    await channel.send_reasoning_end("123", metadata=meta, stream_id="s:1")
+    await channel.send_delta("123", "segundo ", stream_id="s:1", metadata=meta)
+    await channel.send_delta("123", "", stream_id="s:1", stream_end=True, metadata=meta)
+
+    rich_calls = [
+        c for c in channel._app.bot.do_api_request.call_args_list
+        if c.args[0] == "sendRichMessage"
+    ]
+    assert len(rich_calls) == 1
+    assert rich_calls[0].kwargs["api_kwargs"].get("reply_parameters") is None
+
+
+@pytest.mark.asyncio
+async def test_stream_rich_no_preview_legacy_sends_new_message_with_quote_only_first() -> None:
+    """T-004: si no hay preview legacy ni draft, el envío final es un mensaje nuevo
+    y respeta el ancla: el primero quotea, los siguientes no."""
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True, token="123:abc", allow_from=["*"],
+            rich_messages=True, stream_edit_interval=0.1,
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    # Forzar fallback total: rich y edit rich fallan, no hay preview legacy.
+    channel._app.bot.do_api_request = AsyncMock(side_effect=BadRequest("Method not found"))
+
+    meta = {"message_id": 30}
+    await channel.send_delta("123", "primera respuesta", stream_id="s:0", metadata=meta)
+    await channel.send_delta("123", "", stream_id="s:0", stream_end=True, metadata=meta)
+
+    assert len(channel._app.bot.sent_messages) == 1
+    assert channel._app.bot.sent_messages[0]["reply_parameters"]["message_id"] == 30
+
+    await channel.send_delta("123", "segunda respuesta", stream_id="s:1", metadata=meta)
+    await channel.send_delta("123", "", stream_id="s:1", stream_end=True, metadata=meta)
+
+    assert len(channel._app.bot.sent_messages) == 2
+    assert channel._app.bot.sent_messages[1].get("reply_parameters") is None
+
+
+@pytest.mark.asyncio
 async def test_send_delta_rich_reply_parameters_propagate_to_preview_and_final() -> None:
     """T1.2: cuando el stream responde a un mensaje (metadata.message_id),
     el preview legacy y el edit rich final llevan reply_parameters."""
@@ -3285,6 +3558,38 @@ async def test_stop_cancels_typing_indicator_and_shuts_down_app() -> None:
     app.updater.stop.assert_awaited_once()
     assert channel._app is None
 
+
+@pytest.mark.asyncio
+async def test_start_failure_cleans_state_and_stop_is_safe(monkeypatch) -> None:
+    """Regression (2026-08-19 incident): when start() fails during initialize()
+    (e.g. telegram.error.TimedOut in getMe), the channel must not stay
+    'running' and a later stop() must not raise
+    RuntimeError('This Updater is not running!')."""
+    _FakeHTTPXRequest.clear()
+    config = TelegramConfig(
+        enabled=True,
+        token="123:abc",
+        allow_from=["*"],
+    )
+    channel = TelegramChannel(config, MessageBus())
+    app = _FakeApp(lambda: None)
+    app.initialize = AsyncMock(side_effect=RuntimeError("simulated getMe timeout"))
+    builder = _FakeBuilder(app)
+
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.runtime.Application",
+        SimpleNamespace(builder=lambda: builder),
+    )
+
+    with pytest.raises(RuntimeError, match="simulated getMe timeout"):
+        await channel.start()
+
+    # is_running must reflect reality and stop() must be a safe no-op.
+    assert channel.is_running is False
+    assert channel._app is None
+    await channel.stop()
+
 @pytest.mark.asyncio
 async def test_reasoning_delta_non_string_is_ignored() -> None:
     """Regression: a non-string reasoning delta (e.g. datetime from the
@@ -3320,3 +3625,72 @@ async def test_reasoning_delta_non_string_is_ignored() -> None:
     # no-string se ignoró y el siguiente delta siguió acumulando sin crash.
     assert len(channel._app.bot.sent_messages) == 1
     assert "<blockquote expandable>" in channel._app.bot.sent_messages[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_reasoning_edit_too_long_truncates_and_retries() -> None:
+    """Regression: un edit del reasoning que excede el límite de Telegram
+    (Message_too_long) debe truncar el acumulado a TELEGRAM_REASONING_MAX_LEN
+    y reintentar una vez — no loguear warnings en loop infinito."""
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True, token="123:abc", allow_from=["*"],
+            stream_edit_interval=0.1,
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock()
+
+    # Reasoning que excede el límite de Telegram (4096) y el de acumulación.
+    huge = "x" * (TELEGRAM_REASONING_MAX_LEN + 2000)
+    channel._stream_bufs["123"] = _StreamBuf(
+        reasoning=huge, message_id=7, last_edit=0.0, stream_id="s:0"
+    )
+    # Primer edit → Message_too_long; segundo edit (truncado) → OK.
+    channel._app.bot.edit_message_text = AsyncMock(
+        side_effect=[BadRequest("Message is too long"), None]
+    )
+
+    await channel.send_reasoning_delta("123", "y", metadata={"is_group": True}, stream_id="s:0")
+
+    # El acumulado se truncó al máximo seguro.
+    assert len(channel._stream_bufs["123"].reasoning) == TELEGRAM_REASONING_MAX_LEN
+    # Se reintentó el edit con el texto truncado (2 llamadas, no un loop).
+    assert channel._app.bot.edit_message_text.await_count == 2
+    retry_text = channel._app.bot.edit_message_text.call_args_list[1].kwargs["text"]
+    assert "<blockquote expandable>" in retry_text
+    assert len(retry_text) <= TELEGRAM_HTML_MAX_LEN
+
+
+@pytest.mark.asyncio
+async def test_reasoning_edit_too_long_truncation_fails_quietly() -> None:
+    """Regression: si el edit truncado también falla, se loguea y se abandona
+    (sin reintentos infinitos ni excepción propagada)."""
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True, token="123:abc", allow_from=["*"],
+            stream_edit_interval=0.1,
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock()
+
+    huge = "x" * (TELEGRAM_REASONING_MAX_LEN + 2000)
+    channel._stream_bufs["123"] = _StreamBuf(
+        reasoning=huge, message_id=7, last_edit=0.0, stream_id="s:0"
+    )
+    channel._app.bot.edit_message_text = AsyncMock(
+        side_effect=BadRequest("Message is too long")
+    )
+
+    # No debe lanzar excepción: el fallo tras truncar se absorbe.
+    await channel.send_reasoning_delta("123", "y", metadata={"is_group": True}, stream_id="s:0")
+
+    assert channel._app.bot.edit_message_text.await_count == 2
+    assert len(channel._stream_bufs["123"].reasoning) == TELEGRAM_REASONING_MAX_LEN
