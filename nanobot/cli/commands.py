@@ -2688,6 +2688,89 @@ def agent(
 
 
 # ============================================================================
+# Index Command
+# ============================================================================
+
+
+index_app = typer.Typer(help="Manage the workspace file index")
+app.add_typer(index_app, name="index")
+
+memory_app = typer.Typer(help="Manage the agent memory index")
+app.add_typer(memory_app, name="memory")
+
+
+@index_app.command("rebuild")
+def index_rebuild(
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Rebuild the SQLite inverted index for fast grep/find_files."""
+    from nanobot.agent.indexer import WorkspaceIndexer
+
+    cfg = _load_runtime_config(config, workspace)
+    ws_path = cfg.workspace_path
+    console.print(f"Indexing workspace: {ws_path}")
+    indexer = WorkspaceIndexer(ws_path)
+    indexed, removed = indexer.index_workspace()
+    stats = indexer.stats()
+    console.print(
+        f"[green]Done:[/green] indexed {indexed} files, removed {removed} stale entries. "
+        f"Index now covers {stats['files']} files with {stats['tokens']} distinct tokens."
+    )
+
+
+@memory_app.command("rebuild")
+def memory_rebuild(
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Rebuild the BM25 memory index from history.jsonl and MEMORY.md."""
+    from nanobot.agent.memory_store import MemoryStore
+
+    cfg = _load_runtime_config(config, workspace)
+    ws_path = cfg.workspace_path
+    console.print(f"Rebuilding memory index for: {ws_path}")
+    store = MemoryStore(ws_path)
+    # Reset BM25 DB.
+    bm25_db = ws_path / "memory" / "memory_bm25.db"
+    for name in (bm25_db.name, bm25_db.name + "-wal", bm25_db.name + "-shm"):
+        try:
+            (bm25_db.parent / name).unlink()
+        except FileNotFoundError:
+            pass
+    store._bm25 = None
+    bm25 = store.bm25
+
+    indexed = 0
+    entries = store.read_unprocessed_history(since_cursor=0)
+    for entry in entries:
+        content = entry.get("content", "")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        try:
+            bm25.add_chunk(
+                content,
+                source="history",
+                session_key=entry.get("session_key"),
+            )
+            indexed += 1
+        except Exception:
+            pass
+
+    memory_text = store.read_memory()
+    if memory_text.strip():
+        chunk_size = cfg.agents.defaults.bm25_history_cap
+        ids = bm25.add_text(memory_text, source="memory", chunk_size=chunk_size)
+        indexed += len(ids)
+
+    stats = bm25.stats()
+    console.print(
+        f"[green]Done:[/green] indexed {indexed} chunks. "
+        f"Store now has {stats['chunks']} chunks with {stats['tokens']} distinct tokens."
+    )
+
+
+# ============================================================================
 # Channel Commands
 # ============================================================================
 

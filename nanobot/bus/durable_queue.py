@@ -123,6 +123,7 @@ def _dict_to_inbound(data: dict[str, Any]) -> InboundMessage:
     data.pop("_delivery_kind", None)
     data.pop("_delivery_id", None)
     data = _deep_decode_datetimes(data)
+    data["sender_id"] = str(data.get("sender_id", ""))
     return InboundMessage(**data)
 
 
