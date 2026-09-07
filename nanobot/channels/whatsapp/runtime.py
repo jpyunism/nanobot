@@ -592,18 +592,21 @@ class WhatsAppChannel(BaseChannel):
         # = {lid: phone}`` now redirects into the canonical config dict.
         self.config.lid_mappings = dict(value)
 
-    async def _persist_lid_mapping(self, lid: str, phone: str) -> bool:
+    async def _persist_lid_mapping(self, lid: str, phone: str, *, force: bool = False) -> bool:
         """Add ``lid -> phone`` to the canonical config and flush to disk.
 
         Returns True if a new mapping was actually persisted (caller can
         skip logging when False). The runtime is the only writer here so
         concurrent channels don't race; the manager's
         ``persist_config_change`` re-serializes the whole config object.
+        ``force`` skips the idempotence check: callers that already
+        mutated the in-memory dict synchronously (``_learned_lid_phone_pair``)
+        still need the disk flush.
         """
         if not lid or not phone:
             return False
         existing = self.config.lid_mappings.get(lid, "")
-        if existing == phone:
+        if existing == phone and not force:
             return False
         self.config.lid_mappings[lid] = phone
         if self._mgr is not None and hasattr(self._mgr, "persist_config_change"):
@@ -617,36 +620,36 @@ class WhatsAppChannel(BaseChannel):
     def _learned_lid_phone_pair(self, lid: str, phone: str) -> None:
         """Schedule atomic in-memory + on-disk persistence for a new LID pair.
 
-        Used from the sync inbound handler. Schedules the async persist
-        helper so the caller doesn't block on I/O. The helper mutates the
-        config dict and flushes to disk atomically: mutating the dict
-        here first would make the helper's idempotence check observe the
-        pair as already-known and silently skip the disk flush (that
-        race is why learned pairs vanished on every restart). If a loop
-        is not running, falls back to a sync persist (best-effort).
+        Used from the sync inbound handler. The in-memory dict is mutated
+        **synchronously** so the very next inbound from the same LID (which
+        may arrive before the background persist task runs) already resolves
+        to the phone number. The async helper then flushes to disk; ``force``
+        skips its idempotence check because the dict was already updated
+        here. If a loop is not running, falls back to a sync persist
+        (best-effort).
         """
         if not lid or not phone:
             return
         if self.config.lid_mappings.get(lid) == phone:
             return
+        # Mutate in-memory first: the persist task may not run before the
+        # next inbound arrives, and sender resolution reads this dict.
+        self.config.lid_mappings[lid] = phone
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             loop = None
         if loop is None:
-            # No event loop (tests, sync callers). Mutate + persist
-            # synchronously through the atomic helper.
+            # No event loop (tests, sync callers). Persist synchronously
+            # through the atomic helper.
             if self._mgr is not None and hasattr(self._mgr, "persist_config_change"):
                 try:
                     import asyncio as _asyncio
-                    _asyncio.run(self._persist_lid_mapping(lid, phone))
+                    _asyncio.run(self._persist_lid_mapping(lid, phone, force=True))
                 except Exception:
                     self.logger.exception("Sync LID->phone persist failed for {} -> {}", lid, phone)
-            else:
-                # No manager wired: keep the pair in memory only.
-                self.config.lid_mappings[lid] = phone
             return
-        loop.create_task(self._persist_lid_mapping(lid, phone))
+        loop.create_task(self._persist_lid_mapping(lid, phone, force=True))
 
     def _migrate_legacy_lid_cache(self) -> bool:
         """One-shot migration of legacy ``message_state.json::lid_to_phone``.
@@ -1195,16 +1198,24 @@ class WhatsAppChannel(BaseChannel):
         target = self._resolve_send_target(to) if isinstance(to, str) else to
         await client.send_message(target, text)
 
-    def _whatsapp_session_key(self, chat_id: str, sender_id: str, is_group: bool) -> str:
+    def _whatsapp_session_key(
+        self, chat_id: str, sender_id: str, is_group: bool, *, lid_id: str | None = None
+    ) -> str:
         """Return an isolated session key per sender inside group chats.
 
         In DMs the default ``whatsapp:<chat_id>`` is fine. In groups, every
-        sender gets ``whatsapp:<chat_id>:<sender_id>`` so that parallel
+        sender gets ``whatsapp:<chat_id>:<stable_id>`` so that parallel
         conversations about unrelated topics do not contaminate each other.
+
+        The suffix prefers the LID when known: it is WhatsApp's stable
+        per-user identifier, so the key does not change when a LID is later
+        resolved to a phone number (which would otherwise orphan the old
+        history and make the bot appear to "forget" the conversation).
         """
         base = f"{self.name}:{chat_id}"
         if is_group and sender_id:
-            return f"{base}:{sender_id}"
+            stable = lid_id or sender_id
+            return f"{base}:{stable}"
         return base
 
     async def _send_media(self, client: Any, to: Any, media_path: str, *, ptt: bool = False) -> None:
@@ -1563,7 +1574,7 @@ class WhatsAppChannel(BaseChannel):
         # (this is what the sender's WhatsApp client watches). For delivery we
         # still use `_resolve_send_target` so LID-based DMs reach a phone JID.
         typing_jid = self._build_typing_jid(chat_jid)
-        session_key = self._whatsapp_session_key(chat_jid, sender_id, is_group)
+        session_key = self._whatsapp_session_key(chat_jid, sender_id, is_group, lid_id=lid_id)
 
         # Screen DMs from unknown senders before handing them to the agent.
         if not is_group and self.config.unknown_dm_policy == "screen":

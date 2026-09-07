@@ -160,6 +160,9 @@ async def test_tts_tool_supertonic_default_engine(monkeypatch, tmp_path) -> None
 
     engine = _FakeEngine()
     _install_fake_supertonic(monkeypatch, engine)
+    # Sin ffmpeg el WAV se queda como está; con ffmpeg real en el runner el
+    # reencode a MP3 haría el assert ".wav" in result no determinista.
+    monkeypatch.setattr("nanobot.agent.tools.tts._find_ffmpeg", lambda: None)
 
     tool = TtsTool()
     result = await tool.execute(text="hola")
@@ -215,13 +218,13 @@ async def test_tts_tool_supertonic_mp3_reencode(monkeypatch, tmp_path) -> None:
     fake_media = tmp_path / "media"
     monkeypatch.setattr("nanobot.agent.tools.tts.get_media_dir", lambda *_: fake_media)
 
-    fake_ffmpeg = tmp_path / "ffmpeg"
-    fake_ffmpeg.write_text(
-        "#!/bin/sh\nlast_mp3=\"\"\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    *.mp3) last_mp3=\"$arg\" ;;\n  esac\ndone\nprintf 'MP3MP3MP3' > \"$last_mp3\"\nexit 0\n",
-        encoding="utf-8",
+    async def _fake_ffmpeg_to_mp3(src: Path, dst: Path) -> tuple[bool, str]:
+        dst.write_bytes(b"MP3MP3MP3")
+        return True, ""
+
+    monkeypatch.setattr(
+        "nanobot.agent.tools.tts._ffmpeg_to_mp3", _fake_ffmpeg_to_mp3
     )
-    fake_ffmpeg.chmod(0o755)
-    monkeypatch.setattr("nanobot.agent.tools.tts._find_ffmpeg", lambda: str(fake_ffmpeg))
 
     engine = _FakeEngine()
     _install_fake_supertonic(monkeypatch, engine)
@@ -289,6 +292,9 @@ async def test_tts_tool_kokoro_default_engine(monkeypatch, tmp_path) -> None:
 
     pipelines: dict[str, _FakeKokoroPipeline] = {}
     _install_fake_kokoro(monkeypatch, pipelines)
+    # Sin ffmpeg el WAV se queda como está; con ffmpeg real en el runner el
+    # reencode a MP3 haría el assert ".wav" in result no determinista.
+    monkeypatch.setattr("nanobot.agent.tools.tts._find_ffmpeg", lambda: None)
 
     tool = TtsTool()
     result = await tool.execute(text="hola", engine="kokoro")
@@ -340,13 +346,13 @@ async def test_tts_tool_kokoro_mp3_reencode(monkeypatch, tmp_path) -> None:
     fake_media = tmp_path / "media"
     monkeypatch.setattr("nanobot.agent.tools.tts.get_media_dir", lambda *_: fake_media)
 
-    fake_ffmpeg = tmp_path / "ffmpeg"
-    fake_ffmpeg.write_text(
-        "#!/bin/sh\nlast_mp3=\"\"\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    *.mp3) last_mp3=\"$arg\" ;;\n  esac\ndone\nprintf 'MP3MP3MP3' > \"$last_mp3\"\nexit 0\n",
-        encoding="utf-8",
+    async def _fake_ffmpeg_to_mp3(src: Path, dst: Path) -> tuple[bool, str]:
+        dst.write_bytes(b"MP3MP3MP3")
+        return True, ""
+
+    monkeypatch.setattr(
+        "nanobot.agent.tools.tts._ffmpeg_to_mp3", _fake_ffmpeg_to_mp3
     )
-    fake_ffmpeg.chmod(0o755)
-    monkeypatch.setattr("nanobot.agent.tools.tts._find_ffmpeg", lambda: str(fake_ffmpeg))
 
     pipelines: dict[str, _FakeKokoroPipeline] = {}
     _install_fake_kokoro(monkeypatch, pipelines)
