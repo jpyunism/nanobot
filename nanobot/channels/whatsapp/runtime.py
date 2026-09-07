@@ -139,6 +139,11 @@ _NEONIZE_API: _NeonizeAPI | None = None
 _LEGACY_BRIDGE_CONFIG_FIELDS = ("bridgeUrl", "bridgeToken", "bridge_url", "bridge_token")
 # Names that look like generated WhatsApp IDs rather than human push names.
 _NAME_LIKE_ID_RE = re.compile(r"^[0-9a-f]{16,}$", re.IGNORECASE)
+# ponytail: canonical JID attributes that should all be populated after a
+# successful _remember_self_jids call. Partial captures trigger a lazy
+# retry on the next inbound message instead of being masked by a
+# non-empty _self_jids set.
+_EXPECTED_SELF_JID_ATTRS = frozenset({"JID", "LID", "PN"})
 
 
 def _default_database_path() -> Path:
@@ -310,6 +315,7 @@ class WhatsAppChannel(BaseChannel):
         self._state_dirty_count: int = 0
         self._state_last_save_at: float = 0.0
         self._self_jids: set[str] = set()
+        self._self_jids_attrs: set[str] = set()
         # ponytail: display names / usernames the bot exposes on its profile
         # (PushName, VerifiedName, Notify). Used by ``_mentioned_by_text`` so
         # plain-text ``@<username>`` mentions match even when the bot's
@@ -342,6 +348,7 @@ class WhatsAppChannel(BaseChannel):
             group_workspace_presets=self.config.group_workspace_presets,
             dm_workspace_presets=self.config.dm_workspace_presets,
             log=self.logger,
+            config_getter=lambda: self.config,
         )
         # Rolling buffer of recent messages per WhatsApp group (chat_jid -> deque).
         # Each entry is (sender_id, display_name, text, timestamp).
@@ -585,18 +592,21 @@ class WhatsAppChannel(BaseChannel):
         # = {lid: phone}`` now redirects into the canonical config dict.
         self.config.lid_mappings = dict(value)
 
-    async def _persist_lid_mapping(self, lid: str, phone: str) -> bool:
+    async def _persist_lid_mapping(self, lid: str, phone: str, *, force: bool = False) -> bool:
         """Add ``lid -> phone`` to the canonical config and flush to disk.
 
         Returns True if a new mapping was actually persisted (caller can
         skip logging when False). The runtime is the only writer here so
         concurrent channels don't race; the manager's
         ``persist_config_change`` re-serializes the whole config object.
+        ``force`` skips the idempotence check: callers that already
+        mutated the in-memory dict synchronously (``_learned_lid_phone_pair``)
+        still need the disk flush.
         """
         if not lid or not phone:
             return False
         existing = self.config.lid_mappings.get(lid, "")
-        if existing == phone:
+        if existing == phone and not force:
             return False
         self.config.lid_mappings[lid] = phone
         if self._mgr is not None and hasattr(self._mgr, "persist_config_change"):
@@ -608,32 +618,38 @@ class WhatsAppChannel(BaseChannel):
         return True
 
     def _learned_lid_phone_pair(self, lid: str, phone: str) -> None:
-        """In-memory + scheduled-on-event-loop persistence for a new LID pair.
+        """Schedule atomic in-memory + on-disk persistence for a new LID pair.
 
-        Used from the sync inbound handler. Updates the config dict
-        immediately so subsequent resolution sees it, and schedules the
-        async disk flush so the caller doesn't block on I/O. If a loop
-        is not running, falls back to a sync persist (best-effort).
+        Used from the sync inbound handler. The in-memory dict is mutated
+        **synchronously** so the very next inbound from the same LID (which
+        may arrive before the background persist task runs) already resolves
+        to the phone number. The async helper then flushes to disk; ``force``
+        skips its idempotence check because the dict was already updated
+        here. If a loop is not running, falls back to a sync persist
+        (best-effort).
         """
         if not lid or not phone:
             return
         if self.config.lid_mappings.get(lid) == phone:
             return
+        # Mutate in-memory first: the persist task may not run before the
+        # next inbound arrives, and sender resolution reads this dict.
         self.config.lid_mappings[lid] = phone
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             loop = None
         if loop is None:
-            # No event loop (tests, sync callers). Persist synchronously.
+            # No event loop (tests, sync callers). Persist synchronously
+            # through the atomic helper.
             if self._mgr is not None and hasattr(self._mgr, "persist_config_change"):
                 try:
                     import asyncio as _asyncio
-                    _asyncio.run(self._mgr.persist_config_change())
+                    _asyncio.run(self._persist_lid_mapping(lid, phone, force=True))
                 except Exception:
                     self.logger.exception("Sync LID->phone persist failed for {} -> {}", lid, phone)
             return
-        loop.create_task(self._persist_lid_mapping(lid, phone))
+        loop.create_task(self._persist_lid_mapping(lid, phone, force=True))
 
     def _migrate_legacy_lid_cache(self) -> bool:
         """One-shot migration of legacy ``message_state.json::lid_to_phone``.
@@ -832,7 +848,7 @@ class WhatsAppChannel(BaseChannel):
             try:
                 # ponytail: bump activity every healthy poll so the manager
                 # watchdog (WATCHDOG_IDLE_S=600s) doesn't kill idle sessions.
-                if not client.is_connected():
+                if not await client.is_connected():
                     self._reconnect_triggered = True
                     self.logger.warning(
                         "WhatsApp websocket lost; stopping client to reconnect"
@@ -1343,6 +1359,7 @@ class WhatsAppChannel(BaseChannel):
             if jid:
                 self._self_jids.add(jid)
                 self._self_jids.add(_bare_jid(jid))
+                self._self_jids_attrs.add(attr)
         # ponytail: capture profile names so plain-text @username mentions
         # match even when bot_name in config differs from the WhatsApp
         # profile (e.g. bot_name="motoko" but the user types @Motoko_Bot).
@@ -1352,6 +1369,11 @@ class WhatsAppChannel(BaseChannel):
                 stripped = name.strip()
                 if stripped and self._looks_like_name(stripped):
                     self._bot_display_names.add(stripped.lower())
+        self.logger.info(
+            "WhatsApp self-capture: jids={} display_names={}",
+            sorted(self._self_jids),
+            sorted(self._bot_display_names),
+        )
 
     async def _send_read_receipt(self, client: Any, source: Any, message_id: str) -> None:
         """Send a read receipt (blue double-check) for an incoming message.
@@ -1458,11 +1480,27 @@ class WhatsAppChannel(BaseChannel):
         display_name = push_name or self._display_name_for(chat_jid, sender_id)
 
         # Retry self-JID discovery if the first attempt (on connect) ran
-        # before me/JID was populated; otherwise mention detection fails.
-        if not self._self_jids:
+        # before me/JID was fully populated; otherwise mention detection
+        # silently misses mentions that only carry the missing JID form.
+        # _self_jids_attrs tracks which canonical JID types we have, so a
+        # partial capture (e.g. only LID, no phone JID) still triggers the
+        # retry instead of being masked by a non-empty _self_jids.
+        if not _EXPECTED_SELF_JID_ATTRS.issubset(self._self_jids_attrs):
             await self._refresh_self_jids()
 
         is_addressed = self._is_addressed_to_bot(message)
+        preview = (_message_text(message) or "")[:80].replace("\n", " ")
+        self.logger.info(
+            "WhatsApp inbound: chat={} sender={} is_addressed={} preview={}",
+            chat_jid,
+            sender_id,
+            is_addressed,
+            preview,
+        )
+        # ponytail: removed owner bypass. Motoko only responds in groups when
+        # explicitly addressed (@mention, reply, or matching the bot's display
+        # name). The owner has to @motoko or reply to it just like anyone
+        # else — that's the contract: bot speaks only when spoken to.
         if is_group and self.config.group_policy == "mention" and not is_addressed:
             # Still buffer the message for later context, but do not respond now.
             text_for_buffer = _message_text(message)
@@ -1821,23 +1859,27 @@ class WhatsAppChannel(BaseChannel):
         text = _message_text(message)
         if not text or "@" not in text:
             return False
-        bot_names = {self._bot_name().lower()}
-        # ponytail: also match the bot's WhatsApp profile names captured
-        # from PushName / VerifiedName / Notify on connect. Some users
-        # mention the bot by a username that differs from bot_name in
-        # config — this prevents those messages from being silently
-        # filtered.
-        bot_names.update(self._bot_display_names)
-        if self._self_jids:
-            for jid in self._self_jids:
-                bare = _bare_jid(jid)
-                if bare and bare.isdigit():
-                    bot_names.add(bare.lower())
+        bot_names = self._candidate_bot_names()
         lowered = text.lower()
         for name in bot_names:
             if name and ("@" + name) in lowered:
                 return True
         return False
+
+    def _candidate_bot_names(self) -> set[str]:
+        """All lowercased names that should trigger a plain-text mention match.
+
+        Union of: config ``bot_name``, profile names captured on connect
+        (PushName / VerifiedName / Notify), and any digit-only JID in
+        ``_self_jids`` (so users who type ``@<phone_number>`` work too).
+        """
+        bot_names = {self._bot_name().lower()}
+        bot_names.update(self._bot_display_names)
+        for jid in self._self_jids:
+            bare = _bare_jid(jid)
+            if bare and bare.isdigit():
+                bot_names.add(bare.lower())
+        return {name for name in bot_names if name}
 
     @staticmethod
     def _bot_name() -> str:
@@ -1847,6 +1889,20 @@ class WhatsAppChannel(BaseChannel):
             return load_config().agents.defaults.bot_name
         except Exception:
             return "nanobot"
+
+    def _sender_is_owner(self, sender_id: str) -> bool:
+        """True when *sender_id* matches the configured owner for this channel.
+
+        Uses the shared ``is_owner_match`` helper so LID->phone mappings
+        and JID/phone normalization rules apply consistently across the
+        codebase. Returns False when no owner is configured.
+        """
+        owner = getattr(self, "_owner_id", None)
+        if not owner or not sender_id:
+            return False
+        from nanobot.utils.helpers import is_owner_match
+
+        return is_owner_match(sender_id, owner)
 
     def _is_reply_to_bot(self, message: Any) -> bool:
         if not self._self_jids:
