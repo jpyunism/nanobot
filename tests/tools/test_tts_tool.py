@@ -157,6 +157,9 @@ async def test_tts_tool_supertonic_default_engine(monkeypatch, tmp_path) -> None
     """Default engine is Supertonic: WAV output, voice/lang/speed in result."""
     fake_media = tmp_path / "media"
     monkeypatch.setattr("nanobot.agent.tools.tts.get_media_dir", lambda *_: fake_media)
+    # Forzar la rama WAV: si hay ffmpeg en el entorno (CI lo tiene), el tool
+    # re-encodea a MP3 y el test dejaria de ser determinista.
+    monkeypatch.setattr("nanobot.agent.tools.tts._find_ffmpeg", lambda: None)
 
     engine = _FakeEngine()
     _install_fake_supertonic(monkeypatch, engine)
@@ -210,6 +213,10 @@ async def test_tts_tool_supertonic_import_error(monkeypatch, tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="fake ffmpeg is a POSIX shell script (#!/bin/sh)",
+)
 async def test_tts_tool_supertonic_mp3_reencode(monkeypatch, tmp_path) -> None:
     """With ffmpeg available, the WAV is re-encoded to MP3 and the WAV removed."""
     fake_media = tmp_path / "media"
@@ -286,6 +293,8 @@ async def test_tts_tool_kokoro_default_engine(monkeypatch, tmp_path) -> None:
     """engine='kokoro' with default voice: WAV output, voice/lang in result."""
     fake_media = tmp_path / "media"
     monkeypatch.setattr("nanobot.agent.tools.tts.get_media_dir", lambda *_: fake_media)
+    # Forzar la rama WAV: con ffmpeg disponible (CI) el tool re-encodea a MP3.
+    monkeypatch.setattr("nanobot.agent.tools.tts._find_ffmpeg", lambda: None)
 
     pipelines: dict[str, _FakeKokoroPipeline] = {}
     _install_fake_kokoro(monkeypatch, pipelines)
@@ -335,6 +344,10 @@ async def test_tts_tool_kokoro_import_error(monkeypatch, tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="fake ffmpeg is a POSIX shell script (#!/bin/sh)",
+)
 async def test_tts_tool_kokoro_mp3_reencode(monkeypatch, tmp_path) -> None:
     """With ffmpeg available, the Kokoro WAV is re-encoded to MP3 and removed."""
     fake_media = tmp_path / "media"
